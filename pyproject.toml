@@ -1,0 +1,31 @@
+[project]
+name = "jwstflow"
+version = "0.1.0"
+description = "Add your description here"
+authors = [
+    { name = "Lukas Welzel", email = "welzel@strw.leidenuniv.nl" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "astropy>=8.0.1",
+    "astroquery>=0.4.11",
+    "cmasher>=1.9.2",
+    "jwst>=3.0.0",
+    "matplotlib>=3.11.1",
+    "numpy>=2.5.2",
+    "pandas>=3.0.5",
+    "scipy>=1.18.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.1,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+link-mode = "copy"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.4",
+]
