@@ -1,0 +1,49 @@
+# yaml-language-server: $schema=jwstflow.schema.json
+# NIRSpec fixed slit: uncal -> detector1 -> spec2 (nod subtraction) -> spec3 -> plots
+version: 1
+name: nirspec_fs
+root: ./nirspec_fs_run
+
+crds: {path: "${env:CRDS_PATH,~/crds_cache}", context: null}
+parallel: {backend: process, workers: 4}
+
+download:
+  program: 1234
+  instrument: NIRSPEC
+  modes: [SLIT]
+  products: [UNCAL]
+
+stages:
+  - name: detector1
+    step: detector1
+    inputs:
+      - {stage: raw, pattern: "*_uncal.fits", filters: {EXP_TYPE: [NRS_FIXEDSLIT]}}
+
+  - name: spec2
+    step: spec2
+    inputs:
+      - {stage: detector1, pattern: "*_rate.fits"}
+    association:
+      mode: per_exposure
+      level: 2
+      members:
+        - exptype: background
+          filters: {BKGDTARG: false}
+          match_on: [OBSERVTN, VISIT, DETECTOR, GRATING, FILTER]
+          differ_on: [PATT_NUM]
+
+  - name: spec3
+    step: spec3
+    inputs:
+      - {stage: spec2, pattern: "*_cal.fits"}
+    association:
+      mode: group
+      level: 3
+      group_by: [PROGRAM, OBSERVTN, GRATING, FILTER]
+      product_name: "jw{PROGRAM}-o{OBSERVTN}_{TARGPROP}_nirspec_{OPTELEM}"
+
+  - name: qa
+    step: plot_spectrum
+    inputs:
+      - {stage: spec3, pattern: "*_x1d.fits"}
+    tags: [qa]
