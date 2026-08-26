@@ -22,7 +22,7 @@ import sys
 import time
 import traceback
 import warnings
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Iterable, Iterator
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
@@ -127,23 +127,14 @@ def _task_logging(log_file: str | None, level: str) -> Iterator[None]:
 # ---------------------------------------------------------------------------
 
 
-IdleCallback = Callable[[list[Payload]], None]
-
-
 class Executor:
-    """Runs ``execute_task`` over payloads and yields ``(payload, result)`` as they finish.
-
-    ``on_idle`` (if given) is called with the payloads currently executing whenever
-    no task finished for ``idle_seconds`` -- the hook behind the console heartbeat.
-    """
+    """Runs ``execute_task`` over payloads and yields ``(payload, result)`` as they finish."""
 
     def __init__(self, workers: int = 1, env: dict[str, str] | None = None):
         self.workers = max(1, workers)
         self.env = env or {}
 
-    def run(
-        self, payloads: Iterable[Payload], *, on_idle: IdleCallback | None = None, idle_seconds: float = 0.0
-    ) -> Iterator[tuple[Payload, Result]]:
+    def run(self, payloads: Iterable[Payload]) -> Iterator[tuple[Payload, Result]]:
         raise NotImplementedError
 
     def close(self) -> None:
@@ -151,11 +142,9 @@ class Executor:
 
 
 class SerialExecutor(Executor):
-    """In-process execution; the task's own logging already reaches the console, so no heartbeat."""
+    """In-process execution (the task's own logging reaches the console directly)."""
 
-    def run(
-        self, payloads: Iterable[Payload], *, on_idle: IdleCallback | None = None, idle_seconds: float = 0.0
-    ) -> Iterator[tuple[Payload, Result]]:
+    def run(self, payloads: Iterable[Payload]) -> Iterator[tuple[Payload, Result]]:
         init_worker(self.env)
         for p in payloads:
             yield p, execute_task(p)
@@ -168,12 +157,9 @@ class ProcessExecutor(Executor):
         super().__init__(workers, env)
         self.start_method = start_method
 
-    def run(
-        self, payloads: Iterable[Payload], *, on_idle: IdleCallback | None = None, idle_seconds: float = 0.0
-    ) -> Iterator[tuple[Payload, Result]]:
+    def run(self, payloads: Iterable[Payload]) -> Iterator[tuple[Payload, Result]]:
         payloads = list(payloads)
         ctx = mp.get_context(self.start_method)
-        timeout = idle_seconds if (on_idle and idle_seconds > 0) else None
         with ProcessPoolExecutor(
             max_workers=min(self.workers, len(payloads)) or 1,
             mp_context=ctx,
@@ -184,14 +170,11 @@ class ProcessExecutor(Executor):
             pending = set(futures)
             while pending:
                 try:
-                    done, pending = wait(pending, timeout=timeout, return_when=FIRST_COMPLETED)
+                    done, pending = wait(pending, return_when=FIRST_COMPLETED)
                 except BrokenProcessPool:  # pragma: no cover - e.g. OOM-killed worker
                     for f in pending:
                         yield futures[f], _broken(futures[f], "worker process died (out of memory?)")
                     return
-                if not done and on_idle is not None:
-                    on_idle([futures[f] for f in pending if f.running()])
-                    continue
                 for f in done:
                     payload = futures[f]
                     try:
@@ -229,30 +212,17 @@ class DaskExecutor(Executor):
         self._client.run(init_worker, self.env)
         return self._client
 
-    def run(
-        self, payloads: Iterable[Payload], *, on_idle: IdleCallback | None = None, idle_seconds: float = 0.0
-    ) -> Iterator[tuple[Payload, Result]]:
-        from dask.distributed import TimeoutError as DaskTimeout
-        from dask.distributed import wait as dask_wait
+    def run(self, payloads: Iterable[Payload]) -> Iterator[tuple[Payload, Result]]:
+        from dask.distributed import as_completed
 
         client = self._connect()
         futures = {client.submit(execute_task, p, pure=False): p for p in payloads}
-        pending = set(futures)
-        timeout = idle_seconds if (on_idle and idle_seconds > 0) else None
-        while pending:
+        for f in as_completed(list(futures)):
+            payload = futures[f]
             try:
-                done, not_done = dask_wait(list(pending), timeout=timeout, return_when="FIRST_COMPLETED")
-            except DaskTimeout:
-                if on_idle is not None:
-                    on_idle([futures[f] for f in pending if f.status != "finished"])
-                continue
-            pending = set(not_done)
-            for f in done:
-                payload = futures[f]
-                try:
-                    yield payload, f.result()
-                except Exception as exc:  # pragma: no cover
-                    yield payload, _broken(payload, f"{type(exc).__name__}: {exc}")
+                yield payload, f.result()
+            except Exception as exc:  # pragma: no cover
+                yield payload, _broken(payload, f"{type(exc).__name__}: {exc}")
 
     def close(self) -> None:
         if self._client is not None:

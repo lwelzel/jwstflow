@@ -112,13 +112,6 @@ class LoggingConfig(_Base):
         description="Write one log file per task under <root>/logs/<stage>/. "
         "The full stpipe/jwst/CRDS output of each task lands there.",
     )
-    heartbeat: float = Field(
-        default=30.0,
-        ge=0.0,
-        description="With the process/dask backends the console is quiet while tasks run in the "
-        "workers; every `heartbeat` seconds without a finished task, print the running tasks and "
-        "the last line of each one's log file (what the pipeline/CRDS is doing). 0 disables.",
-    )
 
 
 class CheckpointConfig(_Base):
@@ -317,10 +310,12 @@ class StageConfig(_Base):
         description="If set, inputs are grouped into association files and each association "
         "becomes one task. Required for the *3 pipelines and for spec2 with backgrounds/imprints.",
     )
-    batch: Literal["per_file", "all"] = Field(
-        default="per_file",
+    batch: Literal["per_file", "all"] | None = Field(
+        default=None,
         description="'per_file': one task per input (parallel). 'all': a single task receives "
-        "every input (for user steps that combine files, e.g. a summary plot).",
+        "every input (for user steps that combine files, e.g. a summary plot). Default: the "
+        "step's own `batch` attribute (jwstflow.Step subclasses / functions can declare it), "
+        "which is 'per_file' for jwst steps and pipelines.",
     )
     parameters: dict[str, Any] = Field(
         default_factory=dict,

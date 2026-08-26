@@ -36,7 +36,15 @@ from ..associations import Association, build_associations
 from ..config.loader import dump_config
 from ..config.schema import RAW_STAGE, Config, StageConfig
 from ..data.discovery import FileRecord, HeaderCache, discover, fingerprint
-from ..steps.base import ALIAS_ASN_TYPE, activate_plugins, default_thread_env, source_fingerprint
+from ..steps.base import (
+    ALIAS_ASN_TYPE,
+    BUILTIN_ALIASES,
+    activate_plugins,
+    default_thread_env,
+    is_stpipe_step,
+    resolve_target,
+    source_fingerprint,
+)
 from .executor import Executor, Payload, Result, make_executor
 from .graph import select_stages
 from .state import StateStore, TaskRecord, make_task_id, now_iso, stable_hash
@@ -115,6 +123,7 @@ class Runner:
         self.skip_download = skip_download
         self.task_filter = list(tasks or [])  # glob patterns on task labels
         self._source_hashes: dict[str, str | None] = {}
+        self._batch_modes: dict[str, str] = {}
         self.sys_path = activate_plugins(cfg.plugins)  # user step code, also handed to workers
         self.state = StateStore(cfg.state_dir / "state")
         self.headers = HeaderCache(cfg.state_dir / "headers.json")
@@ -224,7 +233,7 @@ class Runner:
                 tasks.append(self._task(stage, asn.name, [path], fps, params, extra, out_dir, log_dir))
             if records and not asns:
                 log.warning("stage %s: %d input file(s) but no association could be built", stage.name, len(records))
-        elif stage.batch == "all":
+        elif self.batch_mode(stage) == "all":
             if records:
                 paths = [r.path for r in records]
                 fps = fingerprint(paths, self.cfg.checkpoint.fingerprint)
@@ -236,6 +245,24 @@ class Runner:
         if not records:
             log.warning("stage %s: no input files found", stage.name)
         return tasks
+
+    def batch_mode(self, stage: StageConfig) -> str:
+        """'per_file' or 'all': the YAML value if given, else the step's own `batch`
+        attribute (jwst steps and pipelines are always per_file)."""
+        if stage.batch is not None:
+            return stage.batch
+        if stage.name not in self._batch_modes:
+            mode = "per_file"
+            if stage.step not in BUILTIN_ALIASES:
+                try:
+                    target = resolve_target(stage.step)
+                except Exception as exc:  # unresolvable steps fail later with a proper message
+                    log.debug("cannot resolve %s to read its batch mode: %s", stage.step, exc)
+                else:
+                    if not is_stpipe_step(target):
+                        mode = str(getattr(target, "batch", "per_file"))
+            self._batch_modes[stage.name] = mode
+        return self._batch_modes[stage.name]
 
     def _task(
         self,
@@ -308,20 +335,8 @@ class Runner:
         executor = make_executor(self.cfg.parallel.backend, workers, self._env, self.cfg.parallel.scheduler)
         t0 = time.time()
         by_id = {t.task_id: t for t in pending}
-
-        def heartbeat(running: list[Payload]) -> None:
-            if not running:
-                return
-            parts = []
-            for p in running:
-                tail = _log_tail(p.get("log_file"))
-                parts.append(f"{p['label']}: {tail}" if tail else p["label"])
-            log.info("stage %s: %d running, %.0fs elapsed | %s", stage.name, len(running), time.time() - t0, " | ".join(parts))
-
         try:
-            for payload, result in executor.run(
-                [self.payload(t) for t in pending], on_idle=heartbeat, idle_seconds=self.cfg.logging.heartbeat
-            ):
+            for payload, result in executor.run([self.payload(t) for t in pending]):
                 task = by_id[payload["task_id"]]
                 self._record(task, payload, result, summary)
                 if result["status"] != "success" and stage.on_error == "fail":
@@ -468,26 +483,6 @@ def _infer_asn_type(stage: StageConfig, records: list[FileRecord]) -> str:
     assert stage.association is not None
     imaging = any(str(r.get("EXP_TYPE", "")).upper() in _IMAGING_EXPTYPES for r in records)
     return f"{'image' if imaging else 'spec'}{stage.association.level}"
-
-
-def _log_tail(log_file: str | None, width: int = 110) -> str:
-    """Last non-empty line of a task log (what the worker is doing right now)."""
-    if not log_file:
-        return ""
-    try:
-        with open(log_file, "rb") as fh:
-            fh.seek(0, os.SEEK_END)
-            size = fh.tell()
-            fh.seek(max(0, size - 4096))
-            lines = [ln.strip() for ln in fh.read().decode("utf-8", "replace").splitlines() if ln.strip()]
-    except OSError:
-        return ""
-    if not lines:
-        return ""
-    last = lines[-1]
-    last = re.sub(r"^\d{2}:\d{2}:\d{2}\s+\w+\s+", "", last)  # drop our own timestamp/level prefix
-    last = re.sub(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+ - ", "", last)  # and CRDS's
-    return last if len(last) <= width else last[: width - 3] + "..."
 
 
 def _normalized(asn_data: dict[str, Any]) -> str:

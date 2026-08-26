@@ -311,10 +311,19 @@ def config_from_dict(data: dict[str, Any], *, base_dir: Path | None = None) -> C
     if base_dir is not None and isinstance(data.get("root"), str):
         data["root"] = _absolute(data["root"], base_dir)
     data["plugins"] = [_absolute(p, base_dir) for p in _as_list(data.get("plugins"))]
+    if isinstance(data.get("download"), dict) and data["download"].get("dest"):
+        data["download"]["dest"] = _absolute(data["download"]["dest"], base_dir)
     for stage in data.get("stages") or []:
-        if isinstance(stage, dict) and isinstance(stage.get("step"), str) and is_path_step(stage["step"]):
+        if not isinstance(stage, dict):
+            continue
+        if isinstance(stage.get("step"), str) and is_path_step(stage["step"]):
             head, _, attr = stage["step"].rpartition(":")
             stage["step"] = f"{_absolute(head, base_dir)}:{attr}"
+        if stage.get("output_dir"):
+            stage["output_dir"] = _absolute(stage["output_dir"], base_dir)
+        for spec in stage.get("inputs") or []:
+            if isinstance(spec, dict) and spec.get("path"):
+                spec["path"] = _absolute(spec["path"], base_dir)  # explicit input dirs: relative to the YAML too
     try:
         return Config.model_validate(data)
     except ValidationError as exc:
