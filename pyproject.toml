@@ -31,6 +31,25 @@ dependencies = [
     "typer>=0.27.1",
 ]
 
+# Contributed step packages: optional, resolved from this workspace.
+# Not installed by default. 
+# Install: 
+#   `uv sync --extra joys` (or `--all-extras`)
+# Alternative pip install:
+#   `pip install jwstflow[joys]`
+[project.optional-dependencies]
+joys = ["jwstflow-joys"]
+
+[project.scripts]
+jwstflow = "jwstflow.cli:app"
+
+# QA steps shipped with the core package, by name
+[project.entry-points."jwstflow.steps"]
+plot_spectrum = "jwstflow.contrib.qa:PlotSpectrum"
+quicklook_image = "jwstflow.contrib.qa:QuicklookImage"
+header_summary = "jwstflow.contrib.qa:HeaderSummary"
+fix_msa_metafile = "jwstflow.contrib.nirspec:fix_msa_metafile"
+
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]
 build-backend = "uv_build"
@@ -38,11 +57,17 @@ build-backend = "uv_build"
 [tool.uv]
 link-mode = "copy"
 
+[tool.uv.workspace]
+members = ["contrib_packages/*"]
+
+[tool.uv.sources]
+jwstflow-joys = { 
+    workspace = true,
+    # index = "joys", # cannot specify both, TODO when jwst becomes public but JOYS+ pipeline remains private
+}
+
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.4",
 ]
-
-[project.scripts]
-jwstflow = "jwstflow.cli:app"

@@ -14,7 +14,11 @@ from .base import (
     register_step,
     registered_steps,
     activate_plugins,
+    LEVEL_DIRS,
+    STPIPE_LEVELS,
+    identity_of,
     resolve_target,
+    step_identity,
     source_fingerprint,
 )
 

@@ -57,10 +57,9 @@ class Association:
     def filename(self) -> str:
         return f"{self.name}_asn.json"
 
-    def write(self, directory: Path, *, relative: bool = True) -> Path:
+    def serialize(self, directory: Path, *, relative: bool = False) -> dict[str, Any]:
+        """The association exactly as it would be written into ``directory``."""
         directory = Path(directory)
-        directory.mkdir(parents=True, exist_ok=True)
-        path = directory / self.filename
         data = json.loads(json.dumps(self.data))  # deep copy, JSON-safe
         for product in data["products"]:
             for member in product["members"]:
@@ -68,7 +67,13 @@ class Association:
                 member["expname"] = (
                     os.path.relpath(p, directory) if relative and p.is_absolute() else str(p)
                 )
-        path.write_text(json.dumps(data, indent=2) + "\n")
+        return data
+
+    def write(self, directory: Path, *, relative: bool = False) -> Path:
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / self.filename
+        path.write_text(json.dumps(self.serialize(directory, relative=relative), indent=2) + "\n")
         return path
 
 
@@ -118,6 +123,8 @@ class _SafeMap(dict):
 def product_name(template: str, rec: FileRecord) -> str:
     values = _SafeMap({k: v for k, v in rec.meta.items()})
     values["OPTELEM"] = _optelem(rec)
+    if not values.get("TARGID"):  # DMS target id comes from the MAST log; slug of the proposal name otherwise
+        values["TARGID"] = sanitize(str(rec.get("TARGPROP") or rec.get("TARGNAME") or "target"))
     if "PROGRAM" in values:
         values["PROGRAM"] = f"{int(values['PROGRAM']):05d}" if str(values["PROGRAM"]).isdigit() else values["PROGRAM"]
     if "OBSERVTN" in values:
@@ -308,7 +315,7 @@ def official(records: list[FileRecord], cfg: AssociationConfig, *, stage: str) -
     return out
 
 
-def write_all(asns: Iterable[Association], directory: Path, *, relative: bool = True) -> list[Path]:
+def write_all(asns: Iterable[Association], directory: Path, *, relative: bool = False) -> list[Path]:
     return [a.write(directory, relative=relative) for a in asns]
 
 

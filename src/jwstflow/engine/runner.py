@@ -133,8 +133,9 @@ class Runner:
     # ------------------------------------------------------------------ setup
     def prepare(self) -> None:
         cfg = self.cfg
-        for d in (cfg.root, cfg.state_dir, cfg.log_dir, cfg.asn_dir):
+        for d in (cfg.run_dir, cfg.state_dir, cfg.log_dir, cfg.asn_dir):
             d.mkdir(parents=True, exist_ok=True)
+        log.info("preparing run directory %s", cfg.run_dir)
         try:
             self.crds_context = crds_mod.resolve_context(cfg.crds)
         except RuntimeError:
@@ -189,19 +190,53 @@ class Runner:
             return []
         from ..data.download import download
 
-        dest = cfg.stage_dir(RAW_STAGE)
-        log.info("downloading program %s to %s", cfg.download.program, dest)
+        dest = cfg.raw_dir
+        log.info("querying MAST for program %s, observations %s, %s %s -> %s", cfg.download.program,
+                 cfg.download.observations or "all", cfg.download.instrument, cfg.download.modes or "", dest)
         files = download(cfg.download, dest, dry_run=self.dry_run)
         log.info("%d file(s) available in %s", len(files), dest)
+        if cfg.download.reference_products and not self.dry_run:
+            self._start_reference_download()
         if cfg.crds.prefetch and files and not self.dry_run:
             crds_mod.prefetch_references(files, cfg.crds, self.crds_context)
         return files
+
+    def _start_reference_download(self) -> None:
+        """Fetch MAST's own products in a background thread (network-bound; stages keep running)."""
+        import threading
+
+        from ..data.download import download_reference_products
+
+        cfg = self.cfg
+        assert cfg.download is not None
+
+        def work() -> None:
+            try:
+                files = download_reference_products(cfg.download, cfg.reference_dir)
+                log.info("MAST reference products: %d file(s) in %s", len(files), cfg.reference_dir)
+            except Exception as exc:  # never take the run down for a QA extra
+                log.error("MAST reference products download failed: %s", exc)
+
+        log.info("fetching MAST reference products in the background -> %s", cfg.reference_dir)
+        self._reference_thread = threading.Thread(target=work, name="mast-archive", daemon=True)
+        self._reference_thread.start()
+
+    def wait_for_reference(self) -> None:
+        thread = getattr(self, "_reference_thread", None)
+        if thread is not None and thread.is_alive():
+            log.info("waiting for the MAST reference download to finish")
+            thread.join()
 
     # --------------------------------------------------------------- planning
     def stage_inputs(self, stage: StageConfig) -> list[FileRecord]:
         records: dict[Path, FileRecord] = {}
         for spec in stage.inputs:
-            directory = spec.path.expanduser() if spec.path else self.cfg.stage_dir(spec.stage or RAW_STAGE)
+            if spec.path:
+                directory = spec.path.expanduser()
+            elif spec.run:
+                directory = self.cfg.sibling_stage_dir(spec.run, spec.stage or RAW_STAGE)
+            else:
+                directory = self.cfg.stage_dir(spec.stage or RAW_STAGE)
             found = discover(
                 directory,
                 spec.pattern,
@@ -214,9 +249,22 @@ class Runner:
                 records.setdefault(r.path.resolve(), r)
             log.debug("stage %s: %d file(s) from %s/%s", stage.name, len(found), directory, spec.pattern)
         self.headers.save()
+        targids = self.mast_target_ids()
+        for r in records.values():
+            key = (str(r.get("PROGRAM") or "").zfill(5), str(r.get("OBSERVTN") or "").zfill(3))
+            r.meta.setdefault("TARGID", targids.get(key) or _fallback_targid(r))
         return list(records.values())
 
+    def mast_target_ids(self) -> dict[tuple[str, str], str]:
+        """(program, observation) -> DMS target id ('t010') recorded by the download step."""
+        from ..data.download import target_ids_from_log
+
+        if not hasattr(self, "_targids"):
+            self._targids = target_ids_from_log(self.cfg.raw_dir)
+        return self._targids
+
     def plan_stage(self, stage: StageConfig) -> list[Task]:
+        log.info("stage %s: selecting inputs and building tasks", stage.name)
         records = self.stage_inputs(stage)
         out_dir = self.cfg.stage_dir(stage.name)
         log_dir = self.cfg.log_dir / stage.name
@@ -306,18 +354,24 @@ class Runner:
             "log_file": str(task.log_file) if task.log_file else None,
             "log_level": self.cfg.logging.level,
             "run_name": self.cfg.name,
-            "root": str(self.cfg.root),
+            "root": str(self.cfg.run_dir),
             "raw_dir": str(self.cfg.stage_dir(RAW_STAGE)),
             "stage_dirs": {s.name: str(self.cfg.stage_dir(s.name)) for s in self.cfg.stages},
             "crds_context": self.crds_context,
             "dry_run": self.dry_run,
             "env": self._env,
             "sys_path": list(self.sys_path),
+            "target": self.cfg.target,
+            "target_coords": self.cfg.target_coords,
+            "target_dir": str(self.cfg.target_dir),
+            "reference_dir": str(self.cfg.reference_dir),
             "extra": {"save_results": stage.save_results},
         }
 
     # -------------------------------------------------------------- execution
     def run_stage(self, stage: StageConfig, tasks: list[Task] | None = None) -> StageSummary:
+        if stage.name.startswith("mast_compare"):
+            self.wait_for_reference()
         tasks = self.plan_stage(stage) if tasks is None else tasks
         if self.task_filter:
             tasks = [t for t in tasks if any(fnmatch.fnmatch(t.label, pat) for pat in self.task_filter)]
@@ -442,6 +496,10 @@ class Runner:
             dry_run=False,
             task_id=payload["task_id"],
             extra=payload["extra"],
+            target=payload.get("target", ""),
+            target_coords=payload.get("target_coords"),
+            target_dir=Path(payload["target_dir"]) if payload.get("target_dir") else None,
+            reference_dir=Path(payload["reference_dir"]) if payload.get("reference_dir") else None,
         )
         ctx.output_dir.mkdir(parents=True, exist_ok=True)
         return make_step(st.step), list(task.inputs), ctx, dict(task.parameters)
@@ -449,12 +507,13 @@ class Runner:
     def run(self) -> RunSummary:
         self.prepare()
         stages = select_stages(self.cfg, **self.selection)
-        log.info("run %r in %s  (%s)", self.cfg.name, self.cfg.root, " -> ".join(s.name for s in stages))
+        log.info("run %r in %s  (%s)", self.cfg.name, self.cfg.run_dir, " -> ".join(s.name for s in stages))
         if self.selection["start"] is None and self.selection["only"] is None:
             self.download()
         summary = RunSummary()
         for stage in stages:
             summary.stages.append(self.run_stage(stage))
+        self.wait_for_reference()
         return summary
 
     def plan(self) -> dict[str, list[Task]]:
@@ -485,6 +544,13 @@ def _infer_asn_type(stage: StageConfig, records: list[FileRecord]) -> str:
     return f"{'image' if imaging else 'spec'}{stage.association.level}"
 
 
+def _fallback_targid(rec: FileRecord) -> str:
+    """When MAST's target id is unknown: the DMS-style slug of TARGPROP (never a bare 'tNNN')."""
+    from ..config.schema import slugify
+
+    return slugify(str(rec.get("TARGPROP") or rec.get("TARGNAME") or "target"))
+
+
 def _normalized(asn_data: dict[str, Any]) -> str:
     data = dict(asn_data)
     data.pop("version_id", None)
@@ -492,13 +558,15 @@ def _normalized(asn_data: dict[str, Any]) -> str:
 
 
 def _write_if_changed(asn: Association, directory: Path, *, relative: bool) -> Path:
-    """Write the association file only when its content (ignoring version_id)
-    changed, so checkpoints stay valid across runs."""
+    """Write the association file only when the file *as it would be written*
+    differs (ignoring version_id) from what is on disk, so mtimes stay stable
+    across runs -- but a change of member-path form (relative vs absolute) is
+    a real change and is written out."""
     path = directory / asn.filename
     if path.exists():
         try:
             old = json.loads(path.read_text())
-            if _normalized(_abs_members(old, directory)) == _normalized(_abs_members(asn.data, directory)):
+            if _normalized(old) == _normalized(asn.serialize(directory, relative=relative)):
                 return path
         except (json.JSONDecodeError, KeyError):
             pass

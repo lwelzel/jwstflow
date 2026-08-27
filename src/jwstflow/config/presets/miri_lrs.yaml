@@ -1,8 +1,8 @@
 # yaml-language-server: $schema=jwstflow.schema.json
 # MIRI LRS fixed slit: uncal -> detector1 -> spec2 (nod subtraction) -> spec3 -> plots
 version: 1
-name: miri_lrs
-root: ./miri_lrs_run
+run: miri_lrs
+# target: set in your workflow (extends: preset:...); results go to <workspace>/<target>/miri_lrs/
 
 crds: {path: "${env:CRDS_PATH,~/crds_cache}", context: null}
 parallel: {backend: process, workers: 4}
@@ -14,15 +14,13 @@ download:
   products: [UNCAL]
 
 stages:
-  - name: detector1
-    step: detector1
+  - step: detector1
     inputs:
       - {stage: raw, pattern: "*_uncal.fits", filters: {EXP_TYPE: [MIR_LRS-FIXEDSLIT]}}
 
-  - name: spec2
-    step: spec2
+  - step: spec2
     inputs:
-      - {stage: detector1, pattern: "*_rate.fits"}
+      - {stage: calwebb_detector1, pattern: "*_rate.fits"}
     association:
       mode: per_exposure
       level: 2
@@ -32,18 +30,16 @@ stages:
           match_on: [OBSERVTN, VISIT, DETECTOR, FILTER]
           differ_on: [PATT_NUM]
 
-  - name: spec3
-    step: spec3
+  - step: spec3
     inputs:
-      - {stage: spec2, pattern: "*_cal.fits"}
+      - {stage: calwebb_spec2, pattern: "*_cal.fits"}
     association:
       mode: group
       level: 3
       group_by: [PROGRAM, OBSERVTN]
-      product_name: "jw{PROGRAM}-o{OBSERVTN}_{TARGPROP}_miri_lrs"
+      product_name: "jw{PROGRAM}-o{OBSERVTN}_{TARGID}_miri_lrs"
 
-  - name: qa
-    step: plot_spectrum
+  - step: plot_spectrum
     inputs:
-      - {stage: spec3, pattern: "*_x1d.fits"}
+      - {stage: calwebb_spec3, pattern: "*_x1d.fits"}
     tags: [qa]

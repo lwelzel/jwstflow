@@ -15,7 +15,7 @@ from ..config.schema import RAW_STAGE, Config, StageConfig
 
 
 def dependencies(stage: StageConfig) -> set[str]:
-    deps = {i.stage for i in stage.inputs if i.stage and i.stage != RAW_STAGE}
+    deps = {i.stage for i in stage.inputs if i.stage and i.stage != RAW_STAGE and i.run is None}
     deps.update(d for d in stage.depends_on if d != RAW_STAGE)
     return deps
 

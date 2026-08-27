@@ -2,8 +2,8 @@
 # NIRSpec MOS (MSA): uncal -> detector1 -> msa keyword fix -> spec2 (nod subtraction)
 #                    -> spec3 -> plots
 version: 1
-name: nirspec_mos
-root: ./nirspec_mos_run
+run: nirspec_mos
+# target: set in your workflow (extends: preset:...); results go to <workspace>/<target>/nirspec_mos/
 
 crds: {path: "${env:CRDS_PATH,~/crds_cache}", context: null}
 parallel: {backend: process, workers: 4}
@@ -15,26 +15,23 @@ download:
   products: [UNCAL, MSA]   # the *_msa.fits metadata files are required by spec2
 
 stages:
-  - name: detector1
-    step: detector1
+  - step: detector1
     inputs:
       - {stage: raw, pattern: "*_uncal.fits", filters: {EXP_TYPE: [NRS_MSASPEC]}}
     parameters:
       steps:
         jump: {expand_large_events: true}
 
-  # spec2 opens the file named in MSAMETFL; make that an absolute path into <root>/raw
-  - name: msa_fix
-    step: jwstflow.contrib.nirspec:fix_msa_metafile
+  # spec2 opens the file named in MSAMETFL; make that an absolute path into the target's raw directory
+  - step: jwstflow.contrib.nirspec:fix_msa_metafile
     inputs:
-      - {stage: detector1, pattern: "*_rate.fits"}
+      - {stage: calwebb_detector1, pattern: "*_rate.fits"}
     parameters: {search: raw}
 
-  - name: spec2
-    step: spec2
-    depends_on: [msa_fix]
+  - step: spec2
+    depends_on: [fix_msa_metafile]
     inputs:
-      - {stage: detector1, pattern: "*_rate.fits"}
+      - {stage: calwebb_detector1, pattern: "*_rate.fits"}
     association:
       mode: per_exposure
       level: 2
@@ -51,18 +48,16 @@ stages:
       steps:
         master_background_mos: {skip: true}    # nod subtraction is done by bkg_subtract
 
-  - name: spec3
-    step: spec3
+  - step: spec3
     inputs:
-      - {stage: spec2, pattern: "*_cal.fits"}
+      - {stage: calwebb_spec2, pattern: "*_cal.fits"}
     association:
       mode: group
       level: 3
       group_by: [PROGRAM, OBSERVTN, GRATING, FILTER]
-      product_name: "jw{PROGRAM}-o{OBSERVTN}_{TARGPROP}_nirspec_{OPTELEM}"
+      product_name: "jw{PROGRAM}-o{OBSERVTN}_{TARGID}_nirspec_{OPTELEM}"
 
-  - name: qa
-    step: plot_spectrum
+  - step: plot_spectrum
     inputs:
-      - {stage: spec3, pattern: "*_x1d.fits"}
+      - {stage: calwebb_spec3, pattern: "*_x1d.fits"}
     tags: [qa]

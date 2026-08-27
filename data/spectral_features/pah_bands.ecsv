@@ -1,0 +1,41 @@
+# %ECSV 1.0
+# ---
+# datatype:
+# - {name: id, datatype: string, description: stable identifier used in configs}
+# - {name: label, datatype: string}
+# - {name: species, datatype: string}
+# - {name: kind, datatype: string, description: 'line: narrow feature (edges = +/- width); band: broad feature (edges as given)'}
+# - {name: wavelength_um, unit: um, datatype: float64, description: central (vacuum) wavelength; NaN for bands with no single centre}
+# - {name: wave_min_um, unit: um, datatype: float64, description: lower edge used when masking/selecting the feature}
+# - {name: wave_max_um, unit: um, datatype: float64, description: upper edge used when masking/selecting the feature}
+# - {name: transition, datatype: string}
+# - {name: source, datatype: string}
+# - {name: notes, datatype: string}
+# meta: !!omap
+# - {dataset: pah_bands}
+# - {description: Polycyclic aromatic hydrocarbon emission bands}
+# - {version: '2026.08'}
+# - {provenance: Compiled for jwstflow from the references below; wavelengths are vacuum values as commonly quoted in the JWST literature.
+#     Verify against the primary source before line-precise work.}
+# - references: ['Peeters et al. 2002; Tielens 2008 ARA&A 46, 289; Draine & Li 2007']
+# - {notes: Edges are generous so that band emission does not bias continuum-level fits (stitching) or get clipped as spikes.}
+# - {usage: 'Select in a workflow with `features: {<dataset>: all | [ids or species]}` or a list of ids.'}
+# schema: astropy-2.0
+id label species kind wavelength_um wave_min_um wave_max_um transition source notes
+pah_3.3 "PAH 3.3" PAH band 3.29 3.22 3.36 "aromatic C-H stretch" "Peeters et al. 2002; Tielens 2008 ARA&A 46, 289; Draine & Li 2007" ""
+pah_3.4 "PAH 3.4 (aliphatic)" PAH band 3.4 3.36 3.55 "aliphatic C-H stretch" "Peeters et al. 2002; Tielens 2008 ARA&A 46, 289; Draine & Li 2007" "plus 3.47 plateau"
+pah_5.25 "PAH 5.25" PAH band 5.25 5.15 5.35 "C-H combination" "Peeters et al. 2002; Tielens 2008 ARA&A 46, 289; Draine & Li 2007" weak
+pah_5.7 "PAH 5.7" PAH band 5.7 5.55 5.85 "C-H combination" "Peeters et al. 2002; Tielens 2008 ARA&A 46, 289; Draine & Li 2007" weak
+pah_6.2 "PAH 6.2" PAH band 6.22 6.0 6.5 "C-C stretch" "Peeters et al. 2002; Tielens 2008 ARA&A 46, 289; Draine & Li 2007" ""
+pah_6.9 "PAH 6.9" PAH band 6.9 6.8 7.0 "aliphatic C-H bend" "Peeters et al. 2002; Tielens 2008 ARA&A 46, 289; Draine & Li 2007" "weak; blends with NH4+ ice 6.85"
+pah_7.7 "PAH 7.7 complex" PAH band 7.7 7.3 8.0 "C-C stretch / C-H in-plane" "Peeters et al. 2002; Tielens 2008 ARA&A 46, 289; Draine & Li 2007" "7.6 + 7.8 components"
+pah_8.6 "PAH 8.6" PAH band 8.6 8.3 8.9 "C-H in-plane bend" "Peeters et al. 2002; Tielens 2008 ARA&A 46, 289; Draine & Li 2007" ""
+pah_11.0 "PAH 11.0" PAH band 11.0 10.9 11.1 "solo C-H out-of-plane (cation)" "Peeters et al. 2002; Tielens 2008 ARA&A 46, 289; Draine & Li 2007" ""
+pah_11.3 "PAH 11.3" PAH band 11.25 11.05 11.6 "solo C-H out-of-plane" "Peeters et al. 2002; Tielens 2008 ARA&A 46, 289; Draine & Li 2007" ""
+pah_12.0 "PAH 12.0" PAH band 12.0 11.8 12.15 "duo C-H out-of-plane" "Peeters et al. 2002; Tielens 2008 ARA&A 46, 289; Draine & Li 2007" ""
+pah_12.7 "PAH 12.7" PAH band 12.7 12.45 13.0 "trio C-H out-of-plane" "Peeters et al. 2002; Tielens 2008 ARA&A 46, 289; Draine & Li 2007" "blends with [Ne II] 12.81"
+pah_13.5 "PAH 13.5" PAH band 13.55 13.4 13.7 "quartet C-H out-of-plane" "Peeters et al. 2002; Tielens 2008 ARA&A 46, 289; Draine & Li 2007" ""
+pah_14.2 "PAH 14.2" PAH band 14.2 14.1 14.35 "" "Peeters et al. 2002; Tielens 2008 ARA&A 46, 289; Draine & Li 2007" weak
+pah_16.4 "PAH 16.4" PAH band 16.4 16.25 16.55 "C-C-C bend" "Peeters et al. 2002; Tielens 2008 ARA&A 46, 289; Draine & Li 2007" ""
+pah_17.4 "PAH 17.4" PAH band 17.4 17.25 17.55 "C-C-C bend" "Peeters et al. 2002; Tielens 2008 ARA&A 46, 289; Draine & Li 2007" ""
+pah_17.8 "PAH 17.8 complex" PAH band 17.8 17.0 18.2 "C-C-C bend plateau" "Peeters et al. 2002; Tielens 2008 ARA&A 46, 289; Draine & Li 2007" "broad 16-19 um plateau"

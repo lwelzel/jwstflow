@@ -219,11 +219,5 @@ __marimo__/
 .streamlit/secrets.toml
 
 # jwstflow
-data/
-output/
+reductions/
 
-.venv/
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.ruff_cache/

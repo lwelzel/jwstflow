@@ -24,6 +24,7 @@ import importlib.util
 import inspect
 import logging
 import os
+import re
 import sys
 import shutil
 import time
@@ -66,6 +67,81 @@ BUILTIN_ALIASES: dict[str, str] = {
 }
 
 # Default asn_type for association files fed to these aliases.
+# Calibration level of the official pipelines and steps, keyed by stpipe class_alias.
+# 1: ramps -> rate, 2: exposure calibration, 3: combined products; unknown single steps -> 3.
+STPIPE_LEVELS: dict[str, int] = {
+    "calwebb_detector1": 1, "calwebb_dark": 1, "calwebb_guider": 1,
+    **{a: 1 for a in ("group_scale", "dq_init", "emicorr", "saturation", "ipc", "superbias", "refpix", "rscd",
+                      "firstframe", "lastframe", "linearity", "dark_current", "reset", "persistence",
+                      "charge_migration", "jump", "clean_flicker_noise", "ramp_fit", "gain_scale", "undersampling_correction")},
+    "calwebb_spec2": 2, "calwebb_image2": 2, "calwebb_wfs-image2": 2,
+    **{a: 2 for a in ("assign_wcs", "badpix_selfcal", "msa_flagging", "bkg_subtract", "imprint_subtract", "extract_2d",
+                      "master_background_mos", "targ_centroid", "wavecorr", "flat_field", "srctype", "straylight", "fringe",
+                      "residual_fringe", "pathloss", "barshadow", "wfss_contam", "photom", "picture_frame", "resample_spec",
+                      "nsclean")},
+    "calwebb_spec3": 3, "calwebb_image3": 3, "calwebb_tso3": 3, "calwebb_coron3": 3, "calwebb_ami3": 3, "calwebb_wfs-image3": 3,
+    **{a: 3 for a in ("assign_mtwcs", "master_background", "outlier_detection", "cube_build", "pixel_replace", "extract_1d",
+                      "combine_1d", "spectral_leak", "adaptive_trace_model", "resample", "tweakreg", "skymatch",
+                      "source_catalog", "klip", "stack_refs", "align_refs", "white_light", "tso_photometry")},
+}
+
+LEVEL_DIRS: dict[int | str, str] = {1: "stage1", 2: "stage2", 3: "stage3", 4: "stage4", "qa": "qa"}
+
+
+def _snake(name: str) -> str:
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+
+def identity_of(target: Any, spec: str = "") -> tuple[str, int | str]:
+    """Canonical ``(name, level)`` of a resolved step object.
+
+    stpipe classes: their ``class_alias`` (``calwebb_spec3``, ``extract_1d``; a
+    subclass inherits its parent's alias unless it sets its own) and the level
+    of that alias. jwstflow steps: the class/function ``name`` attribute or the
+    snake-cased class name, and their ``level`` attribute (default 4, "qa" for
+    plot-type steps).
+    """
+    if is_stpipe_step(target):
+        alias = getattr(target, "class_alias", None) or _snake(target.__name__)
+        return str(alias), STPIPE_LEVELS.get(str(alias), 3)
+    obj = target if isinstance(target, type) or callable(target) else type(target)
+    name = getattr(obj, "name", None) or getattr(obj, "__name__", None) or spec.rpartition(":")[2] or spec
+    level = getattr(obj, "level", 4)
+    if isinstance(name, str) and name and name[0].isupper():
+        name = _snake(name)
+    return str(name), level
+
+
+def step_identity(spec: str) -> tuple[str, int | str]:
+    """``(canonical name, level)`` for a step spec without running it.
+
+    Built-in aliases are answered from a table; everything else is imported.
+    If the import fails the name is derived from the spec (validation reports
+    the import error later) and the level defaults to 4.
+    """
+    if spec in BUILTIN_ALIASES:
+        alias = BUILTIN_ALIASES[spec].rpartition(":")[2]
+        canonical = {"Detector1Pipeline": "calwebb_detector1", "Image2Pipeline": "calwebb_image2", "Spec2Pipeline": "calwebb_spec2",
+                     "Image3Pipeline": "calwebb_image3", "Spec3Pipeline": "calwebb_spec3", "Tso3Pipeline": "calwebb_tso3",
+                     "Coron3Pipeline": "calwebb_coron3", "DarkPipeline": "calwebb_dark"}.get(alias)
+        if canonical is None:
+            canonical = spec  # single-step aliases are the jwst class_alias already (extract_1d, cube_build, ...)
+        return canonical, STPIPE_LEVELS.get(canonical, 3)
+    try:
+        target = resolve_target(spec)
+    except Exception as exc:
+        log.debug("cannot import %s for its identity: %s", spec, exc)
+        tail = spec.rpartition(":")[2] or spec.rpartition(".")[2]
+        return _snake(tail), 4
+    name, level = identity_of(target, spec)
+    # steps registered by name (entry points, contrib table, register_step) are known by that
+    # name to users and in `jwstflow steps`; keep it unless the class declares its own `name`
+    registered = spec in _REGISTRY or spec in CONTRIB_ALIASES or any(ep.name == spec for ep in entry_points(group=ENTRY_POINT_GROUP))
+    if registered and not is_stpipe_step(target) and getattr(target, "name", None) in (None, ""):
+        name = spec
+    return name, level
+
+
 # jwstflow's own QA steps; also exposed as `jwstflow.steps` entry points, this table
 # is the fallback when a package was installed without them.
 CONTRIB_ALIASES: dict[str, str] = {
@@ -73,6 +149,7 @@ CONTRIB_ALIASES: dict[str, str] = {
     "quicklook_image": "jwstflow.contrib.qa:QuicklookImage",
     "header_summary": "jwstflow.contrib.qa:HeaderSummary",
     "fix_msa_metafile": "jwstflow.contrib.nirspec:fix_msa_metafile",
+    "mast_compare": "jwstflow.contrib.mast_compare:MastCompare",
 }
 
 ALIAS_ASN_TYPE: dict[str, str] = {
@@ -121,6 +198,13 @@ class RunContext:
     dry_run: bool = False
     task_id: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
+    #: target label of the run, explicit coordinates if the workflow gave any, and the
+    #: target directory (shared by all runs of the target; holds the name-resolution cache)
+    target: str = ""
+    target_coords: dict[str, Any] | None = None
+    target_dir: Path | None = None
+    #: <target>/mast_reference/<run>: MAST's own products mirroring this run's layout (opt-in download)
+    reference_dir: Path | None = None
 
     def dir_of(self, stage: str) -> Path:
         """Output directory of another stage (e.g. to find companion files)."""
@@ -151,6 +235,11 @@ class Step(ABC):
 
     #: Default batching if the stage does not say otherwise ("per_file" | "all").
     batch: ClassVar[str] = "per_file"
+    #: Canonical stage name (default: snake_case of the class name). Fixed by the step,
+    #: not by the workflow, so runs stay comparable across users; `variant:` disambiguates.
+    name: ClassVar[str | None] = None
+    #: Calibration level of the products: 1, 2, 3 (jwst stages), 4 (derived products) or "qa".
+    level: ClassVar[int | str] = 4
 
     @abstractmethod
     def run(self, inputs: list[Path], ctx: RunContext, **params: Any) -> Iterable[Path] | None:

@@ -30,6 +30,7 @@ app = typer.Typer(
     rich_markup_mode="markdown",
 )
 console = Console()
+log = logging.getLogger("jwstflow")
 err = Console(stderr=True)
 
 ConfigArg = Annotated[Path, typer.Argument(help="YAML configuration file.", exists=True, dir_okay=False)]
@@ -89,8 +90,12 @@ def run(
     log_level: Annotated[str | None, typer.Option("--log-level", help="DEBUG/INFO/WARNING")] = None,
 ) -> None:
     """Run the workflow (resumes automatically from checkpoints)."""
+    setup_logging(log_level or "INFO")
+    log.info("jwstflow run: loading %s", config)
     cfg = _load(config, set_)
     setup_logging(log_level or cfg.logging.level, cfg.log_dir / "jwstflow.log")
+    log.info("target %r, run %r -> %s", cfg.target, cfg.run, cfg.run_dir)
+    log.info("stages: %s", " -> ".join(st.name for st in cfg.stages if st.enabled))
     runner = Runner(
         cfg, force=force, dry_run=dry_run, only=only, start=start, until=until, tags=tag,
         workers=workers, skip_download=skip_download, tasks=task,
@@ -142,7 +147,7 @@ def status(config: ConfigArg, set_: SetOpt = None, failed: Annotated[bool, typer
     """Summarise recorded task results per stage."""
     cfg = _load(config, set_)
     store = StateStore(cfg.state_dir / "state")
-    table = Table(title=f"{cfg.name}  ({cfg.root})")
+    table = Table(title=f"{cfg.name}  ({cfg.run_dir})")
     for col in ("stage", "success", "failed", "last finished"):
         table.add_column(col)
     for st in select_stages(cfg):
@@ -272,11 +277,11 @@ def init(
         text = (
             f"# yaml-language-server: $schema=jwstflow.schema.json\n"
             f"extends: preset:{preset}\n"
-            f"name: my_{preset}_run\n"
-            f"root: ./{preset}_run\n"
+            f"target: My Target          # resolved by name when a step needs coordinates; slug names the directory\n"
+            f"run: {preset}              # outputs: <project root>/reductions/<target>/{preset}/\n"
             f"download:\n  program: 1234\n  observations: [1]\n"
-            f"# Override anything from the preset below, e.g.:\n"
-            f"# stages:\n#   - name: detector1\n#     parameters: {{steps: {{jump: {{rejection_threshold: 5}}}}}}\n"
+            f"# Override anything from the preset below; stages are addressed by step (names are derived), e.g.:\n"
+            f"# stages:\n#   - step: detector1\n#     parameters: {{steps: {{jump: {{rejection_threshold: 5}}}}}}\n"
         )
     else:
         text = src.read_text()
@@ -328,7 +333,7 @@ def clean(
             console.print(f"{name}: removed {len(files)} orphan file(s)")
         return
     if outputs and not yes:
-        typer.confirm(f"delete outputs of {', '.join(targets)} under {cfg.root}?", abort=True)
+        typer.confirm(f"delete outputs of {', '.join(targets)} under {cfg.run_dir}?", abort=True)
     for name in targets:
         n = store.clear(name)
         msg = f"{name}: forgot {n} record(s)"

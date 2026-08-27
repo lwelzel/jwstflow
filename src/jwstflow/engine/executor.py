@@ -77,6 +77,10 @@ def execute_task(payload: Payload) -> Result:
                 dry_run=payload.get("dry_run", False),
                 task_id=payload["task_id"],
                 extra=payload.get("extra", {}),
+                target=payload.get("target", ""),
+                target_coords=payload.get("target_coords"),
+                target_dir=Path(payload["target_dir"]) if payload.get("target_dir") else None,
+                reference_dir=Path(payload["reference_dir"]) if payload.get("reference_dir") else None,
             )
             ctx.output_dir.mkdir(parents=True, exist_ok=True)
             outputs = step.run([Path(p) for p in payload["inputs"]], ctx, **payload["parameters"])

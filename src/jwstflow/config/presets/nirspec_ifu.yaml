@@ -6,8 +6,8 @@
 # Start from it with:   jwstflow init nirspec_ifu --extend -o my_run.yaml
 # ---------------------------------------------------------------------------
 version: 1
-name: nirspec_ifu
-root: ./nirspec_ifu_run
+run: nirspec_ifu
+# target: set in your workflow (extends: preset:...); results go to <workspace>/<target>/nirspec_ifu/
 
 crds:
   path: ${env:CRDS_PATH,~/crds_cache}
@@ -27,8 +27,7 @@ download:
   products: [UNCAL]
 
 stages:
-  - name: detector1
-    step: detector1
+  - step: detector1
     inputs:
       - {stage: raw, pattern: "*_uncal.fits", filters: {EXP_TYPE: [NRS_IFU]}}
     parameters:
@@ -38,10 +37,9 @@ stages:
         clean_flicker_noise: {skip: true}         # set false for 1/f cleaning
         # ramp_fit: {maximum_cores: half}         # only with parallel: false (see docs)
 
-  - name: spec2
-    step: spec2
+  - step: spec2
     inputs:
-      - {stage: detector1, pattern: "*_rate.fits"}
+      - {stage: calwebb_detector1, pattern: "*_rate.fits"}
     association:
       mode: per_exposure
       level: 2
@@ -57,15 +55,14 @@ stages:
         cube_build: {skip: true}                  # per-exposure cubes are rarely needed
         extract_1d: {skip: true}
 
-  - name: spec3
-    step: spec3
+  - step: spec3
     inputs:
-      - {stage: spec2, pattern: "*_cal.fits"}
+      - {stage: calwebb_spec2, pattern: "*_cal.fits"}
     association:
       mode: group
       level: 3
       group_by: [PROGRAM, OBSERVTN, GRATING, FILTER]
-      product_name: "jw{PROGRAM}-o{OBSERVTN}_{TARGPROP}_nirspec_{GRATING}"   # cube_build appends _<grating>-<filter> itself
+      product_name: "jw{PROGRAM}-o{OBSERVTN}_{TARGID}_nirspec_{GRATING}"   # cube_build appends _<grating>-<filter> itself
       science_filters: {BKGDTARG: false, IS_IMPRT: false}
       members:
         - exptype: background
@@ -78,14 +75,12 @@ stages:
         cube_build: {coord_system: skyalign}      # or ifualign
         extract_1d: {ifu_autocen: true}
 
-  - name: qa
-    step: plot_spectrum
+  - step: plot_spectrum
     inputs:
-      - {stage: spec3, pattern: "*_x1d.fits"}
+      - {stage: calwebb_spec3, pattern: "*_x1d.fits"}
     tags: [qa]
 
-  - name: qa_cubes
-    step: quicklook_image
+  - step: quicklook_image
     inputs:
-      - {stage: spec3, pattern: "*_s3d.fits"}
+      - {stage: calwebb_spec3, pattern: "*_s3d.fits"}
     tags: [qa]

@@ -2,8 +2,8 @@
 # MIRI MRS: uncal -> detector1 -> spec2 -> spec3 (all bands of an observation,
 #           dedicated backgrounds via master background) -> plots
 version: 1
-name: miri_mrs
-root: ./miri_mrs_run
+run: miri_mrs
+# target: set in your workflow (extends: preset:...); results go to <workspace>/<target>/miri_mrs/
 
 crds: {path: "${env:CRDS_PATH,~/crds_cache}", context: null}
 parallel: {backend: process, workers: 4}
@@ -15,8 +15,7 @@ download:
   products: [UNCAL]
 
 stages:
-  - name: detector1
-    step: detector1
+  - step: detector1
     inputs:
       - {stage: raw, pattern: "*_uncal.fits", filters: {EXP_TYPE: [MIR_MRS]}}
     parameters:
@@ -24,10 +23,9 @@ stages:
         jump: {expand_large_events: true, three_group_rejection_threshold: 6}
         # emicorr: {skip: false}   # MIRI EMI correction (on by default in recent versions)
 
-  - name: spec2
-    step: spec2
+  - step: spec2
     inputs:
-      - {stage: detector1, pattern: "*_rate.fits"}
+      - {stage: calwebb_detector1, pattern: "*_rate.fits"}
     association:
       mode: per_exposure
       level: 2
@@ -37,15 +35,14 @@ stages:
         cube_build: {skip: true}
         extract_1d: {skip: true}
 
-  - name: spec3
-    step: spec3
+  - step: spec3
     inputs:
-      - {stage: spec2, pattern: "*_cal.fits"}
+      - {stage: calwebb_spec2, pattern: "*_cal.fits"}
     association:
       mode: group
       level: 3
       group_by: [PROGRAM, OBSERVTN]              # one product per observation, all bands
-      product_name: "jw{PROGRAM}-o{OBSERVTN}_{TARGPROP}_miri"
+      product_name: "jw{PROGRAM}-o{OBSERVTN}_{TARGID}_miri"
       science_filters: {BKGDTARG: false}
       members:
         - exptype: background
@@ -57,8 +54,7 @@ stages:
         cube_build: {output_type: band, coord_system: skyalign}
         extract_1d: {ifu_autocen: true, ifu_rfcorr: true}
 
-  - name: qa
-    step: plot_spectrum
+  - step: plot_spectrum
     inputs:
-      - {stage: spec3, pattern: "*_x1d.fits"}
+      - {stage: calwebb_spec3, pattern: "*_x1d.fits"}
     tags: [qa]

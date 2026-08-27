@@ -54,6 +54,7 @@ def resolve_context(cfg: CRDSConfig) -> str | None:
     if cfg.context != "latest":
         return cfg.context
     apply_environment(crds_environment(cfg))
+    log.info("resolving the latest CRDS context from %s", cfg.server_url)
     try:
         import crds
 
@@ -76,7 +77,7 @@ def prefetch_references(files: Iterable[Path], cfg: CRDSConfig, context: str | N
     cmd = [sys.executable, "-m", "crds.bestrefs", "--files", *files, "--sync-references=1"]
     if context or (cfg.context and cfg.context != "latest"):
         cmd += ["--new-context", context or cfg.context]  # type: ignore[list-item]
-    log.info("prefetching CRDS references for %d file(s)", len(files))
+    log.info("prefetching CRDS references for %d file(s) (crds bestrefs --sync-references)", len(files))
     subprocess.run(cmd, env=env, check=True)
 
 

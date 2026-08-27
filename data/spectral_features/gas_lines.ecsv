@@ -1,0 +1,100 @@
+# %ECSV 1.0
+# ---
+# datatype:
+# - {name: id, datatype: string, description: stable identifier used in configs}
+# - {name: label, datatype: string}
+# - {name: species, datatype: string}
+# - {name: kind, datatype: string, description: 'line: narrow feature (edges = +/- width); band: broad feature (edges as given)'}
+# - {name: wavelength_um, unit: um, datatype: float64, description: central (vacuum) wavelength; NaN for bands with no single centre}
+# - {name: wave_min_um, unit: um, datatype: float64, description: lower edge used when masking/selecting the feature}
+# - {name: wave_max_um, unit: um, datatype: float64, description: upper edge used when masking/selecting the feature}
+# - {name: transition, datatype: string}
+# - {name: source, datatype: string}
+# - {name: notes, datatype: string}
+# meta: !!omap
+# - {dataset: gas_lines}
+# - {description: 'Atomic and molecular gas-phase lines/bands in the 1-28 um range commonly seen with NIRSpec and MIRI, including the
+#     molecular inventory of inner protoplanetary disks reported by JWST'}
+# - {version: 2026.08.1}
+# - {provenance: Compiled for jwstflow from the references below; wavelengths are vacuum values as commonly quoted in the JWST literature.
+#     Verify against the primary source before line-precise work.}
+# - references: ['Roueff et al. 2019, A&A 630, A58 (H2 line list)', NIST ASD (Kramida et al.); fine-structure lines, 'Hydrogen recombination
+#       lines (vacuum), e.g. van Hoof 2018', HITRAN2020 (Gordon et al. 2022), Tabone et al. 2023 (soot line; C4H2 and C6H6) and Arabhavi
+#       et al. 2024 (hydrocarbon-rich VLMS disks), 'Grant et al. 2023, ApJL 947, L6 (13CO2 detection)', 'Banzatti et al. 2023, 2025 (JWST-MIRI
+#       water excitation atlas)', Tabone et al. 2021 and Zannese et al. 2024 (OH prompt emission), 'Henning et al. 2024, PASP 136, 054302
+#       (MINDS overview)']
+# - {notes: For narrow lines a mask half-width of `line_width_um` or n resolution elements is applied by the consuming step.}
+# - {usage: 'Select in a workflow with `features: {<dataset>: all | [ids or species]}` or a list of ids.'}
+# schema: astropy-2.0
+id label species kind wavelength_um wave_min_um wave_max_um transition source notes
+h2_0-0_s0 "H2 0-0 S(0)" H2 line 28.2188 nan nan "v=0-0 S(0)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" "beyond MRS ch4 nominal range"
+h2_0-0_s1 "H2 0-0 S(1)" H2 line 17.0348 nan nan "v=0-0 S(1)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" ""
+h2_0-0_s2 "H2 0-0 S(2)" H2 line 12.2786 nan nan "v=0-0 S(2)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" ""
+h2_0-0_s3 "H2 0-0 S(3)" H2 line 9.6649 nan nan "v=0-0 S(3)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" "inside the 9.7 um silicate band"
+h2_0-0_s4 "H2 0-0 S(4)" H2 line 8.0251 nan nan "v=0-0 S(4)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" ""
+h2_0-0_s5 "H2 0-0 S(5)" H2 line 6.9095 nan nan "v=0-0 S(5)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" "blend with [Ar II] 6.985 at low R"
+h2_0-0_s6 "H2 0-0 S(6)" H2 line 6.1086 nan nan "v=0-0 S(6)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" "inside the 6.0 um H2O ice band"
+h2_0-0_s7 "H2 0-0 S(7)" H2 line 5.5112 nan nan "v=0-0 S(7)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" ""
+h2_0-0_s8 "H2 0-0 S(8)" H2 line 5.0531 nan nan "v=0-0 S(8)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" ""
+h2_0-0_s9 "H2 0-0 S(9)" H2 line 4.6947 nan nan "v=0-0 S(9)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" "inside the CO ice / gas band"
+h2_0-0_s10 "H2 0-0 S(10)" H2 line 4.4096 nan nan "v=0-0 S(10)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" ""
+h2_0-0_s11 "H2 0-0 S(11)" H2 line 4.181 nan nan "v=0-0 S(11)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" "near the NIRSpec G395H detector gap"
+h2_0-0_s13 "H2 0-0 S(13)" H2 line 3.8464 nan nan "v=0-0 S(13)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" ""
+h2_1-0_s1 "H2 1-0 S(1)" H2 line 2.1218 nan nan "v=1-0 S(1)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" ""
+h2_1-0_s0 "H2 1-0 S(0)" H2 line 2.2233 nan nan "v=1-0 S(0)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" ""
+h2_1-0_s2 "H2 1-0 S(2)" H2 line 2.0338 nan nan "v=1-0 S(2)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" ""
+h2_1-0_s3 "H2 1-0 S(3)" H2 line 1.9576 nan nan "v=1-0 S(3)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" ""
+h2_1-0_q1 "H2 1-0 Q(1)" H2 line 2.4066 nan nan "v=1-0 Q(1)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" ""
+h2_1-0_o3 "H2 1-0 O(3)" H2 line 2.8025 nan nan "v=1-0 O(3)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" ""
+hi_bra "H I Br-alpha" HI line 4.0523 nan nan n=5-4 "Hydrogen recombination lines (vacuum), e.g. van Hoof 2018" ""
+hi_brb "H I Br-beta" HI line 2.6259 nan nan n=6-4 "Hydrogen recombination lines (vacuum), e.g. van Hoof 2018" ""
+hi_brg "H I Br-gamma" HI line 2.1661 nan nan n=7-4 "Hydrogen recombination lines (vacuum), e.g. van Hoof 2018" ""
+hi_pfa "H I Pf-alpha" HI line 7.4599 nan nan n=6-5 "Hydrogen recombination lines (vacuum), e.g. van Hoof 2018" ""
+hi_pfb "H I Pf-beta" HI line 4.6538 nan nan n=7-5 "Hydrogen recombination lines (vacuum), e.g. van Hoof 2018" ""
+hi_pfg "H I Pf-gamma" HI line 3.7406 nan nan n=8-5 "Hydrogen recombination lines (vacuum), e.g. van Hoof 2018" ""
+hi_pfd "H I Pf-delta" HI line 3.297 nan nan n=9-5 "Hydrogen recombination lines (vacuum), e.g. van Hoof 2018" ""
+hi_hua "H I Hu-alpha" HI line 12.3719 nan nan n=7-6 "Hydrogen recombination lines (vacuum), e.g. van Hoof 2018" ""
+hi_paa "H I Pa-alpha" HI line 1.8751 nan nan n=4-3 "Hydrogen recombination lines (vacuum), e.g. van Hoof 2018" ""
+hi_pab "H I Pa-beta" HI line 1.2822 nan nan n=5-3 "Hydrogen recombination lines (vacuum), e.g. van Hoof 2018" ""
+feii_1.644 "[Fe II] 1.644" FeII line 1.644 nan nan a4D7/2-a4F9/2 "NIST ASD (Kramida et al.); fine-structure lines" ""
+feii_5.340 "[Fe II] 5.340" FeII line 5.3403 nan nan a4F9/2-a6D9/2 "NIST ASD (Kramida et al.); fine-structure lines" "connects a4F to the a6D ground term"
+feii_17.936 "[Fe II] 17.936" FeII line 17.936 nan nan a4F7/2-a4F9/2 "NIST ASD (Kramida et al.); fine-structure lines" ""
+feii_25.988 "[Fe II] 25.988" FeII line 25.988 nan nan a6D7/2-a6D9/2 "NIST ASD (Kramida et al.); fine-structure lines" ""
+arii_6.985 "[Ar II] 6.985" ArII line 6.9853 nan nan 2P1/2-2P3/2 "NIST ASD (Kramida et al.); fine-structure lines" ""
+ariii_8.991 "[Ar III] 8.991" ArIII line 8.9914 nan nan 3P1-3P2 "NIST ASD (Kramida et al.); fine-structure lines" ""
+neii_12.814 "[Ne II] 12.814" NeII line 12.8136 nan nan 2P1/2-2P3/2 "NIST ASD (Kramida et al.); fine-structure lines" "strong in photoionised background"
+neiii_15.555 "[Ne III] 15.555" NeIII line 15.5551 nan nan 3P1-3P2 "NIST ASD (Kramida et al.); fine-structure lines" ""
+siv_10.511 "[S IV] 10.511" SIV line 10.5105 nan nan 2P3/2-2P1/2 "NIST ASD (Kramida et al.); fine-structure lines" ""
+siii_18.713 "[S III] 18.713" SIII line 18.713 nan nan 3P2-3P1 "NIST ASD (Kramida et al.); fine-structure lines" ""
+si_25.249 "[S I] 25.249" SI line 25.249 nan nan 3P1-3P2 "NIST ASD (Kramida et al.); fine-structure lines" ""
+clii_14.368 "[Cl II] 14.368" ClII line 14.3678 nan nan 3P1-3P2 "NIST ASD (Kramida et al.); fine-structure lines" "blends with [Ne V] 14.322 at low R"
+niii_6.636 "[Ni II] 6.636" NiII line 6.636 nan nan a2D3/2-a2D5/2 "NIST ASD (Kramida et al.); fine-structure lines" ""
+oiv_25.890 "[O IV] 25.890" OIV line 25.89 nan nan 2P3/2-2P1/2 "NIST ASD (Kramida et al.); fine-structure lines" ""
+co_fund "CO fundamental (gas)" CO band nan 4.4 5.2 "v=1-0 P/R branches" "HITRAN2020 (Gordon et al. 2022)" "individual ro-vibrational lines; masked as a band"
+co_overtone "CO overtone bandheads" CO band nan 2.29 2.45 "v=2-0.. bandheads" "HITRAN2020 (Gordon et al. 2022)" ""
+h2o_gas_6um "H2O gas nu2" H2O band nan 5.5 7.3 "nu2 ro-vibrational" "HITRAN2020 (Gordon et al. 2022)" "dense forest of lines"
+c2h2_13.7 "C2H2 Q-branch" C2H2 band 13.71 13.65 13.76 "nu5 Q" "HITRAN2020 (Gordon et al. 2022)" ""
+hcn_14.0 "HCN Q-branch" HCN band 14.04 13.98 14.1 "nu2 Q" "HITRAN2020 (Gordon et al. 2022)" ""
+co2_gas_15.0 "CO2 gas Q-branch" CO2 band 14.98 14.93 15.02 "nu2 Q" "Grant et al. 2023, ApJL 947, L6 (13CO2 in GW Lup); HITRAN2020 (Gordon et al. 2022)" "Q branch at 14.98; contaminated by H I 16-10 at 14.962"
+h2_0-0_s12 "H2 0-0 S(12)" H2 line 3.9947 nan nan "v=0-0 S(12)" "Roueff et al. 2019, A&A 630, A58 (H2 line list)" "para line; wavelength from Dabrowski-Herzberg tables, confirm against Roueff"
+feii_24.519 "[Fe II] 24.519" FeII line 24.519 nan nan a4F5/2-a4F7/2 "NIST ASD (Kramida et al.); fine-structure lines" "completes the a4F ladder with 5.34/17.94"
+hi_16-10 "H I 16-10" HI line 14.962 nan nan n=16-10 "Hydrogen recombination lines (vacuum), e.g. van Hoof 2018" "sits on the CO2 14.98 Q branch; common contaminant"
+hei_1.083 "He I 1.083" HeI line 1.083 nan nan "2p 3P-2s 3S" "NIST ASD (Kramida et al.)" "accretion/wind tracer; He I 2.058 is the singlet analogue"
+h2o_rot_mir "H2O pure rotational" H2O band nan 10.0 28.0 "pure rotational ladder" "Banzatti et al. 2023, 2025 (JWST-MIRI water excitation atlas and cold-water diagnostics)" "dense forest across all MRS channels; dominant disk coolant"
+h2o_hot_17 "H2O hot diagnostic 17.0-17.6" H2O band nan 17.0 17.6 "high-Eu rotational blends" "Banzatti et al. 2023, 2025 (JWST-MIRI water excitation atlas and cold-water diagnostics)" "highest-S/N window for the hot component"
+h2o_cold_23.9 "H2O cold diagnostic 23.8-24.0" H2O band nan 23.7 24.0 "low-Eu rotational pair" "Banzatti et al. 2023, 2025 (JWST-MIRI water excitation atlas and cold-water diagnostics)" "cold water near the snow line; Eu ~ 900-1800 K"
+oh_prompt_9-13 "OH prompt rotational" OH band nan 9.1 13.0 "high-N rotational (prompt)" "Tabone et al. 2021 and Zannese et al. 2024 (OH prompt emission); Henning et al. 2024, PASP 136, 054302 (MINDS)" "band head 9.13; A'/A'' asymmetry traces H2O photodissociation"
+oh_thermal_14-28 "OH thermal rotational" OH band nan 14.0 28.0 "rotational quadruplets" "Tabone et al. 2021 and Zannese et al. 2024 (OH prompt emission); Henning et al. 2024, PASP 136, 054302 (MINDS)" "more symmetric quadruplets than the prompt lines"
+oh_rovib_3.4 "OH ro-vibrational" OH band nan 2.8 3.8 "dv=1 ro-vibrational" "Tabone et al. 2021 and Zannese et al. 2024 (OH prompt emission); Henning et al. 2024, PASP 136, 054302 (MINDS)" "NIRSpec; overlaps the 3 um H2O ice band"
+ch4_7.65 "CH4 Q-branch" CH4 band 7.65 7.58 7.75 "nu4 Q" "HITRAN2020 (Gordon et al. 2022); Tabone et al. 2023 and Arabhavi et al. 2024 (JWST/MIRI hydrocarbon-rich disks)" "overlaps the CH4 ice band at 7.67"
+c2h4_10.53 "C2H4 Q-branch" C2H4 band 10.53 10.45 10.6 "nu7 Q" "HITRAN2020 (Gordon et al. 2022); Tabone et al. 2023 and Arabhavi et al. 2024 (JWST/MIRI hydrocarbon-rich disks)" "inside the silicate band"
+c2h6_12.17 "C2H6 Q-branch" C2H6 band 12.17 12.1 12.25 "nu9 Q" "HITRAN2020 (Gordon et al. 2022); Tabone et al. 2023 and Arabhavi et al. 2024 (JWST/MIRI hydrocarbon-rich disks)" ""
+13cch2_13.73 "13CCH2 Q-branch" 13CCH2 band 13.73 13.7 13.78 "nu5 Q" "HITRAN2020 (Gordon et al. 2022); Tabone et al. 2023 and Arabhavi et al. 2024 (JWST/MIRI hydrocarbon-rich disks)" "blended with the 12C2H2 Q branch; HITRAN data incomplete"
+c6h6_14.85 "C6H6 Q-branch" C6H6 band 14.85 14.8 14.9 "nu4 Q (hot band)" "HITRAN2020 (Gordon et al. 2022); Tabone et al. 2023 and Arabhavi et al. 2024 (JWST/MIRI hydrocarbon-rich disks)" "benzene; can rival C2H2 in C/O > 1 disks"
+hc3n_15.08 "HC3N Q-branch" HC3N band 15.08 15.02 15.14 "nu5 Q" "HITRAN2020 (Gordon et al. 2022); Tabone et al. 2023 and Arabhavi et al. 2024 (JWST/MIRI hydrocarbon-rich disks)" "overlaps H2O rotational emission"
+13co2_15.42 "13CO2 Q-branch (gas)" 13CO2 band 15.42 15.35 15.45 "nu2 Q" "Grant et al. 2023, ApJL 947, L6 (13CO2 in GW Lup); HITRAN2020 (Gordon et al. 2022)" "blended with the 12CO2 P(23) line"
+c3h4_15.80 "C3H4 Q-branch" C3H4 band 15.8 15.74 15.86 "nu9 Q" "HITRAN2020 (Gordon et al. 2022); Tabone et al. 2023 and Arabhavi et al. 2024 (JWST/MIRI hydrocarbon-rich disks)" "methyl acetylene"
+c4h2_15.92 "C4H2 Q-branch" C4H2 band 15.92 15.86 15.96 "nu8 Q" "HITRAN2020 (Gordon et al. 2022); Tabone et al. 2023 and Arabhavi et al. 2024 (JWST/MIRI hydrocarbon-rich disks)" "diacetylene; least affected by water of the rare C species"
+co2_hot_16.18 "CO2 hot-band Q-branch" CO2 band 16.18 16.1 16.25 "nu2 hot band Q" "Grant et al. 2023, ApJL 947, L6 (13CO2 in GW Lup); HITRAN2020 (Gordon et al. 2022)" "column density diagnostic alongside the 14.98 Q branch"
+ch3_16.48 "CH3 Q-branch" CH3 band 16.48 16.42 16.54 "nu2 Q" "HITRAN2020 (Gordon et al. 2022); Tabone et al. 2023 and Arabhavi et al. 2024 (JWST/MIRI hydrocarbon-rich disks)" "single band only; spectroscopic data incomplete"
+nh3_10.75 "NH3 gas Q-branch" NH3 band 10.75 10.65 10.85 "nu2 Q" "HITRAN2020 (Gordon et al. 2022)" "tentative in disks; inside the silicate band"

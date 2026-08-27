@@ -1,8 +1,8 @@
 # yaml-language-server: $schema=jwstflow.schema.json
 # MIRI imaging: uncal -> detector1 -> image2 -> image3 (mosaic per filter) -> quick-looks
 version: 1
-name: miri_imaging
-root: ./miri_imaging_run
+run: miri_imaging
+# target: set in your workflow (extends: preset:...); results go to <workspace>/<target>/miri_imaging/
 
 crds: {path: "${env:CRDS_PATH,~/crds_cache}", context: null}
 parallel: {backend: process, workers: 4}
@@ -14,15 +14,13 @@ download:
   products: [UNCAL]
 
 stages:
-  - name: detector1
-    step: detector1
+  - step: detector1
     inputs:
       - {stage: raw, pattern: "*_uncal.fits", filters: {EXP_TYPE: [MIR_IMAGE]}}
 
-  - name: image2
-    step: image2
+  - step: image2
     inputs:
-      - {stage: detector1, pattern: "*_rate.fits"}
+      - {stage: calwebb_detector1, pattern: "*_rate.fits"}
     association:
       mode: per_exposure
       level: 2
@@ -31,23 +29,21 @@ stages:
           filters: {BKGDTARG: true}
           match_on: [FILTER, SUBARRAY]
 
-  - name: image3
-    step: image3
+  - step: image3
     inputs:
-      - {stage: image2, pattern: "*_cal.fits"}
+      - {stage: calwebb_image2, pattern: "*_cal.fits"}
     association:
       mode: group
       level: 3
       group_by: [PROGRAM, OBSERVTN, FILTER]
-      product_name: "jw{PROGRAM}-o{OBSERVTN}_{TARGPROP}_miri_{FILTER}"
+      product_name: "jw{PROGRAM}-o{OBSERVTN}_{TARGID}_miri_{FILTER}"
     parameters:
       steps:
         tweakreg: {skip: false}
         skymatch: {skymethod: match}
         source_catalog: {snr_threshold: 5}
 
-  - name: qa
-    step: quicklook_image
+  - step: quicklook_image
     inputs:
-      - {stage: image3, pattern: "*_i2d.fits"}
+      - {stage: calwebb_image3, pattern: "*_i2d.fits"}
     tags: [qa]
