@@ -293,6 +293,25 @@ def init(
 
 
 @app.command()
+def graph(
+    config: Annotated[Path, typer.Argument(help="Workflow YAML.")],
+    out: Annotated[Path | None, typer.Option("-o", "--out", help="Output directory (default: the run's qa/workflow_graph).")] = None,
+    fmt: Annotated[str, typer.Option("--format", help="Comma-separated figure formats matplotlib can save, e.g. svg,pdf,png.")] = "pdf,",
+    set_: Annotated[list[str] | None, typer.Option("--set", help="Override config values (key=value).")] = None,
+) -> None:
+    """Render the workflow DAG (data patterns -> steps -> products) without running anything."""
+    from .dagviz import render
+    from .steps.base import LEVEL_DIRS
+
+    setup_logging("WARNING")
+    cfg = _load(config, set_)
+    out_dir = out or cfg.run_dir / LEVEL_DIRS["qa"] / "workflow_graph"
+    files = render(cfg, out_dir, formats=tuple(f.strip() for f in fmt.split(",") if f.strip()))
+    for f in files:
+        console.print(str(f))
+
+
+@app.command()
 def prefetch(
     config: Annotated[Path, typer.Argument(help="Workflow YAML.")],
     set_: Annotated[list[str] | None, typer.Option("--set", help="Override config values (key=value).")] = None,

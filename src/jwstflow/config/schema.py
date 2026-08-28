@@ -442,6 +442,13 @@ class Config(_Base):
         description="Explicit run directory (overrides workspace/target/run). Its parent is the target directory.",
     )
     description: str | None = None
+    workflow_graph: bool = Field(
+        default=True,
+        description="Render the workflow DAG (data patterns -> steps -> products) into "
+        "qa/workflow_graph/ at the start of every run (matplotlib; no extra dependencies), "
+        "plus the .dot source as a portable text artifact. `jwstflow graph` renders it "
+        "without running.",
+    )
     env: dict[str, str] = Field(
         default_factory=dict,
         description="Extra environment variables exported to all workers.",
