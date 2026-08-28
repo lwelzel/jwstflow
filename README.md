@@ -12,11 +12,11 @@
 
 **jwstflow** turns a JWST reduction into one declarative YAML file and one
 command. It orchestrates the official STScI [`jwst`](https://github.com/spacetelescope/jwst)
-pipeline -- never reimplementing its calibration -- and adds the parts the
-pipeline leaves to you: MAST download (verified), CRDS pinning and prefetch,
-association building, DMS-compliant product naming, checkpointed parallel
-execution that resumes where it stopped, structured per-target/per-run output
-directories, QA plots, and automatic comparison against the archive's own
+pipeline and adds the parts the pipeline leaves to you: MAST download, 
+CRDS pinning and prefetch, association building, DMS-compliant 
+product naming, checkpointed parallel execution that resumes 
+where it stopped, structured per-target/per-run output directories, 
+quality assurance plots, and automatic comparison against the archive's own
 products. Reductions become reproducible, restartable and identical across
 machines and collaborators, while every calibration decision stays a visible,
 version-controlled line of YAML. Custom science steps (extractions,
@@ -26,27 +26,27 @@ contract and run as first-class stages next to the official ones.
 ## Installation
 
 ```bash
-git clone <repo-url> jwstflow && cd jwstflow
+git clone https://github.com/lwelzel/jwstflow.git && cd jwstflow
 uv sync                    # core: jwstflow + the official jwst pipeline
-uv sync --extra joys       # + the jwstflow-joys contributed steps (MIRI MRS post-processing)
+uv sync --all-extras       # + proprietary collaboration contributed steps if available
 ```
 
 Put your credentials in the project root (they are found automatically):
-`.env.crds` with `CRDS_PATH=...`, and `.env.mast` with `MAST_API_TOKEN=...`
-(optional for public data). Requires Python >= 3.12; `uv run jwstflow --help`
-shows every command.
+`.env.crds` with `CRDS_PATH=...`, and `CRDS_SERVER_URL=...`, as well as
+`.env.mast` with `MAST_API_TOKEN=...` (optional for public data). 
+`uv run jwstflow --help` shows the available commands.
 
 ## Usage
 
 ### One command per reduction
 
 ```bash
-uv run jwstflow run reductions/eso-ha-569/nirspec_ifu.yaml
+uv run jwstflow run PATH/TO/OUTPUT/.../workflow.yaml # path pointing at the workflow.yaml
 ```
 
 A run downloads what it needs, syncs CRDS, executes the stages in parallel
-with checkpointing, and can be interrupted and rerun at any time -- finished
-work is never repeated. A **workflow YAML** names a `target` and a `run`,
+with checkpointing, and can be interrupted and rerun at any time. Finished
+work is not unnecessarily repeated. A workflow YAML names a `target` and a `run`,
 optionally a `download:` block (program/observations/instrument), and a list
 of `stages:`, each an official pipeline (`detector1`, `spec2`, `spec3`, ...)
 or a custom step, with its inputs and parameters:
@@ -66,13 +66,11 @@ stages:
     association: {mode: group, level: 3, group_by: [PROGRAM, OBSERVTN, GRATING, FILTER]}
 ```
 
-Outputs land in `reductions/<target>/<run>/` split by calibration level
+Outputs land in `PATH/TO/OUTPUT/<target>/<run>/` split by calibration level
 (`stage1/ ... stage4/`, `qa/`), raw data is shared per target, and stage
 names come from the steps themselves so every run looks the same everywhere.
 Start from a preset (`extends: preset:nirspec_ifu`; also `nirspec_mos`,
 `miri_mrs`, `miri_imaging`) and override only what your data needs.
-`reductions/eso-ha-569/` is a complete real example (NIRSpec IFU + MIRI MRS
-from uncal, plus a level-4 workflow combining both instruments).
 
 ### The rest of the interface
 
@@ -97,7 +95,7 @@ reference, associations, checkpointing and parallelism.
 
 Any part of a reduction can be replaced or extended: subclass an official
 pipeline to change its behaviour (it keeps its stage identity), or write a
-new step -- a small class declaring what it consumes and produces, with typed
+new step, a small class declaring what it consumes and produces, with typed
 parameters and a `run()` method:
 
 ```python
@@ -113,25 +111,21 @@ class ExtractExtended(Step):
 ```
 
 jwstflow validates the declaration at import, the parameters at config load,
-and the outputs after every run (custom steps can never masquerade as
-official products); `jwstflow new-step` scaffolds a step with a passing test
+and the outputs after every run. `jwstflow new-step` scaffolds a step with a passing test
 and `jwstflow.testing` runs steps on synthetic data without CRDS or real
-files. Details in [docs/custom_steps.md](docs/custom_steps.md); the private
-`jwstflow-joys` package (in `contrib_packages/`) is a full worked example.
+files. Details in [docs/custom_steps.md](docs/custom_steps.md).
 
 ## Citing
 
 There is no jwstflow publication yet. If jwstflow contributed to your
 research, please acknowledge it, e.g.:
 
-> This work made use of jwstflow (L. Welzel), an orchestrator for the JWST
-> calibration pipeline, and of the `jwst` calibration software (Bushouse et
-> al.) and CRDS provided by STScI.
+> This work made use of jwstflow (L. Welzel), an orchestrator for the JWST calibration pipeline.
 
 and cite the [`jwst` pipeline](https://github.com/spacetelescope/jwst)
 version and CRDS context recorded in your run manifest
 (`<run>/.jwstflow/manifest.json`). If a jwstflow paper appears, this section
-will change to the reference -- check back before submitting.
+will change to the reference, please check back before submitting.
 
 ## Author & license
 
