@@ -5,28 +5,45 @@ products, scheduling and the full YAML reference.
 
 ## Why this design
 
-We wanted to build a light-weight, maintainable, compartmentalised, `jwst` orchestrator,
-with a clean YAML interface, and built on well-maintained libraries.
+The requirements were: light-weight, maintainable, compartmentalised, a
+clean YAML interface, and built on well-maintained libraries. The choices,
+and the alternatives that were rejected:
 
 | concern | choice | why |
 |---|---|---|
-| configuration | pydantic v2 models are the single source of truth; YAML via PyYAML | validation with readable errors, defaults, docstrings, and a JSON Schema for editor autocompletion all come from one class hierarchy |
-| composition | ~150 lines of own code: `extends:` (files or `preset:<name>`), deep merge with stages merged by name, `${a.b}` / `${env:VAR,default}` interpolation, CLI dot-list overrides | these are the four Hydra features people actually use; no framework needed |
+| configuration | **pydantic v2** models are the single source of truth; YAML via PyYAML | validation with readable errors, defaults, docstrings, and a JSON Schema for editor autocompletion all come from one class hierarchy |
+| composition | ~150 lines of own code: `extends:` (files or `preset:<name>`), deep merge with stages merged **by name**, `${a.b}` / `${env:VAR,default}` interpolation, CLI dot-list overrides | these are the four Hydra features people actually use; no framework needed |
 | unit of work | `stpipe.Step.call()` | pulls CRDS parameter-reference files (`pars-*`), so results match STScI's defaults; any `Step` subclass works, including subclasses of the official pipelines |
-| user steps | tiny `jwstflow.Step` ABC or a plain function `f(inputs, ctx, params) -> list[Path]`; discovered through the `jwstflow.steps` entry-point group or a dotted path | no plugin framework, just `importlib.metadata` |
+| user steps | tiny `jwstflow.Step` ABC or a plain function `f(inputs, ctx, **params) -> list[Path]`; discovered through the `jwstflow.steps` entry-point group or a dotted path | no plugin framework, just `importlib.metadata` |
 | execution | stage DAG from `graphlib`, tasks in a `concurrent.futures` process pool (`spawn`) or `dask.distributed` | matches the jwst multiprocessing guidance; dask gives clusters/SLURM (via `dask-jobqueue`) without changing the model |
 | checkpoints | one JSON record per task keyed by a hash of (stage, step, parameters, input fingerprints, jwst version, CRDS context) | inspectable and diffable with plain tools; no database |
 
+**Why not Hydra / hydra-zen as the core?** Hydra is an *application*
+framework: it owns `main()`, the working directory, logging and sweeps, and it
+has no notion of a task graph or checkpoints. That fights an orchestrator that
+must also run inside notebooks and be embeddable. OmegaConf alone is a weak
+foundation too (stable release 2.3 dates from 2022; 2.4 is still a
+pre-release). jwstflow therefore keeps the useful ideas (presets, overrides,
+interpolation) in a few dependency-free functions. It stays **compatible**:
+compose with OmegaConf or Hydra and hand the resulting dict to
+`jwstflow.config_from_dict()`, see `examples/python_api.py`.
+
+**Why not Snakemake / Prefect / Dagster?** They are excellent but heavy for
+this scope, require learning their DSL/UI, and their task model does not map
+cleanly onto "one association file -> one pipeline call". jwstflow tasks are
+plain dictionaries executed by one function (`jwstflow.engine.executor.execute_task`),
+so wrapping them in one of those systems later is straightforward.
+
 ## Projects, targets, runs
 
-jwstflow works inside a project: the directory tree that holds your
+jwstflow works inside a *project*: the directory tree that holds your
 workflows (a git checkout or uv project; the nearest ancestor with `.git`,
 `pyproject.toml`, `uv.lock` or a `.jwstflow-root` marker). Two things come
 from the project root: every `.env` / `.env.*` file there is loaded (they win
 over the shell unless `env_file_override: false`), and the default
 `workspace` is `<project root>/reductions`.
 
-A workflow names a target and a run; a target directory holds the raw
+A workflow names a **target** and a **run**; a target directory holds the raw
 data of all its observations and one run per reduction, and a run holds its
 products by calibration level:
 
@@ -45,7 +62,7 @@ reductions/eso-ha-569/                 target: ESO-Ha 569  (slugified)
   combine/                              a level-4 run reading from both (`inputs: [{run: nirspec_ifu, ...}]`)
 ```
 
-Stage names are derived from the step, never chosen in the YAML: the stpipe
+Stage names are **derived from the step**, never chosen in the YAML: the stpipe
 `class_alias` (`calwebb_spec3`, `extract_1d`; a subclass inherits it unless it
 sets its own), or a jwstflow step's `name` / entry-point name. Use
 `variant: pass1` when the same step appears twice (`calwebb_spec3-pass1`). The
@@ -69,7 +86,7 @@ edit in the header.
 ## Data products shipped with jwstflow
 
 Reference data lives outside the code, in `data/` at the project root
-(e.g. `data/spectral_features/*.ecsv`). It is found through
+(`data/spectral_features/*.ecsv` today). It is found through
 `$JWSTFLOW_DATA_DIR`, then `<project root>/data`, then the `data/` directory
 of the jwstflow checkout; a wheel-only install needs one of the first two.
 
@@ -77,18 +94,18 @@ of the jwstflow checkout; a wheel-only install needs one of the first two.
 
 A run overlaps its network work with compute where that is safe:
 
-* MAST reference products download in a background thread while the
+* **MAST reference products** download in a background thread while the
   stages run; the run only waits for them when a `mast_compare` stage needs
   them (or at the very end).
-* CRDS references are synced once, up front, for the raw files
+* **CRDS references** are synced once, up front, for the raw files
   (`crds bestrefs --sync-references`); reference selection depends only on
   header keys the raw files already carry, so this one sync covers every
   later stage -- there is nothing left to look ahead for during the run.
-  It runs before the first stage on purpose: several worker processes
+  It runs *before* the first stage on purpose: several worker processes
   populating a shared (often NFS-mounted) CRDS cache concurrently is the
   classic way to corrupt it, so jwstflow never races the cache against
   running tasks.
-* Raw data must exist before stage 1 by definition, and is verified for
+* **Raw data** must exist before stage 1 by definition, and is verified for
   completeness at download time.
 
 None of this needs to be requested: a plain `jwstflow run` on a clean
@@ -103,6 +120,21 @@ time entirely:
 jwstflow prefetch reductions/eso-ha-569/miri_mrs.yaml   # network only: raw + CRDS + reference products
 jwstflow run      reductions/eso-ha-569/miri_mrs.yaml   # starts computing immediately, needs no network
 ```
+
+## The workflow DAG figure
+
+Every run starts by rendering its own DAG into `qa/workflow_graph/`
+(`workflow_graph: false` turns it off), and `jwstflow graph <wf>` draws it
+without running anything. Nodes are the data products per file pattern
+(cylinder: the MAST query; notes: patterns, dashed when they come from a
+sibling run), and the steps coloured by calibration level (dashed when
+disabled); dotted edges are `depends_on`, and a legend explains every colour
+and style. The figure is drawn with matplotlib (already a dependency:
+nothing extra to install, no system binaries) using a full Sugiyama layered
+layout -- crossing minimisation, edges routed through waypoints between the
+rows, and a straight main spine; any format matplotlib can save works
+(`--format svg,pdf,png`). The `.dot` source is written alongside as a
+portable text artifact.
 
 ## Comparing with the archive (opt-in)
 
@@ -308,8 +340,7 @@ print(summary.ok)
 
 ## Testing status
 
-#### WIP
-`jwstflow` aims to be covered by automated tests. Without `jwst` installed they cover
+`python -m pytest` runs 51 tests. Without `jwst` installed they cover
 configuration composition and validation, header filters, association
 building (imprints, nod backgrounds, grouping, product names), the runner on
 the serial and process backends (checkpoint reuse, invalidation, `--force`,
@@ -318,7 +349,7 @@ a real `JwstStep` through the adapter in a spawned process pool (outputs,
 per-task logs, cache hits), and the official DMS association generator at
 levels 2 and 3. These were run against jwst 3.0.0 / stpipe 1.1.0.
 
-Not exercised by tests (due to required network/CRDS access):
+Not exercised by tests (no network/CRDS in the development environment):
 end-to-end runs of the official pipelines on real data, the MAST download
 backends, `crds.prefetch`, and the dask backend.
 

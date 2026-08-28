@@ -1,0 +1,6 @@
+# Development-only assets: excluded from `git archive`, which also powers
+# GitHub's "Download ZIP" button and release source tarballs. They exist only
+# in full git clones and are never part of the installable package (the wheel
+# and sdist contain src/jwstflow only; see pyproject.toml).
+docs/make_overview_figure.py export-ignore
+docs/make_logo.py export-ignore

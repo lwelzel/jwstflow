@@ -7,7 +7,7 @@ validates and tests them. See also `examples/my_steps.py` and
 ## Custom steps
 
 A custom step is a Python class (or, for one-liners, a function) that
-jwstflow can validate, document and test without running it. The contract:
+jwstflow can validate, document and test **without running it**. The contract:
 
 ```python
 from pydantic import Field
@@ -25,7 +25,7 @@ class ExtractExtended(Step):
     class Params(StepParams):       # the `parameters:` block, checked by `jwstflow validate`
         threshold: float = Field(0.05, gt=0, description="aperture threshold (fraction of peak)")
 
-    def run(self, inputs, ctx: RunContext, *, threshold: float = 0.05, params):
+    def run(self, inputs, ctx: RunContext, *, threshold: float = 0.05, **params):
         (cube,) = inputs
         out = ctx.derived_path(cube, "s1d", descriptor="extended")   # naming rules applied
         ...
@@ -107,7 +107,7 @@ extract_extended = "my_pkg.steps:ExtractExtended"
    from jwstflow import Runner, load_config
    runner = Runner(load_config("my_run.yaml"))
    step, inputs, ctx, params = runner.debug_task("extract", "*g395h*")
-   outputs = step.run(inputs, ctx, params)      # set breakpoints inside your step
+   outputs = step.run(inputs, ctx, **params)      # set breakpoints inside your step
    ```
 
 While workers are busy the console is quiet; `tail -f logs/<stage>/<task>.log`

@@ -171,7 +171,7 @@ def _small(text: str) -> str:
 # --------------------------------------------------------------------------- rendering
 
 
-def render(cfg: Config, out_dir: Path, *, formats: tuple[str, ...] = ("pdf", )) -> list[Path]:
+def render(cfg: Config, out_dir: Path, *, formats: tuple[str, ...] = ("svg", "pdf")) -> list[Path]:
     """Write ``<run>_dag.dot`` plus the rendered figure in each requested format
     (anything matplotlib can save: svg, pdf, png, ...); returns the files written."""
     out_dir = Path(out_dir)

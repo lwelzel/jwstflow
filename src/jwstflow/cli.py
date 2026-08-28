@@ -296,7 +296,7 @@ def init(
 def graph(
     config: Annotated[Path, typer.Argument(help="Workflow YAML.")],
     out: Annotated[Path | None, typer.Option("-o", "--out", help="Output directory (default: the run's qa/workflow_graph).")] = None,
-    fmt: Annotated[str, typer.Option("--format", help="Comma-separated figure formats matplotlib can save, e.g. svg,pdf,png.")] = "pdf,",
+    fmt: Annotated[str, typer.Option("--format", help="Comma-separated figure formats matplotlib can save, e.g. svg,pdf,png.")] = "svg,pdf",
     set_: Annotated[list[str] | None, typer.Option("--set", help="Override config values (key=value).")] = None,
 ) -> None:
     """Render the workflow DAG (data patterns -> steps -> products) without running anything."""
