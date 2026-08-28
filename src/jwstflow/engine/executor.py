@@ -51,7 +51,7 @@ def init_worker(env: dict[str, str], sys_path: list[str] | None = None) -> None:
 
 def execute_task(payload: Payload) -> Result:
     """Run one task. Never raises; failures are reported in the result dict."""
-    from ..steps.base import RunContext, make_step
+    from ..steps.base import RunContext, check_outputs, make_step
 
     init_worker(payload.get("env", {}), payload.get("sys_path"))
     t0 = time.time()
@@ -84,7 +84,8 @@ def execute_task(payload: Payload) -> Result:
             )
             ctx.output_dir.mkdir(parents=True, exist_ok=True)
             outputs = step.run([Path(p) for p in payload["inputs"]], ctx, **payload["parameters"])
-            result["outputs"] = sorted({str(Path(o)) for o in (outputs or [])})
+            outputs = check_outputs(outputs, ctx, step)
+            result["outputs"] = sorted({str(Path(o)) for o in outputs})
             result["status"] = "success"
             logger.info("done: %d output(s)", len(result["outputs"]))
         except Exception as exc:

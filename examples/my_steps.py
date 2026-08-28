@@ -1,15 +1,21 @@
-"""Custom steps for jwstflow.
+"""Custom steps for jwstflow -- the three flavours, written against the step contract.
 
-Three flavours are shown; reference them from YAML by dotted path
-(``step: my_steps:Detector1WithSnowballMask``) or install a package that
-exposes them via the ``jwstflow.steps`` entry-point group.
+Reference them from a workflow by dotted path (``step: my_steps:SpectrumReport``
+with ``plugins: [./my_steps.py]``), by file path (``step: ./my_steps.py:tag_header``),
+or install a package that registers them in the ``jwstflow.steps`` entry-point group.
 
-1. Subclassing an official pipeline / step (any ``stpipe.Step`` works).
-2. A ``jwstflow.Step`` subclass — plain Python, gets a ``RunContext``.
-3. A plain function ``f(inputs, ctx, **params) -> list[Path]``.
+1. Subclass an official pipeline/step (any ``stpipe.Step``): same YAML
+   parameters as the original plus your own; it keeps the parent's
+   ``class_alias`` and therefore its stage name unless you set a new alias.
+2. A ``jwstflow.Step`` subclass: declare what it accepts and produces, type the
+   parameters, implement ``run``. This is the recommended form.
+3. A plain function ``f(inputs, ctx, **params) -> list[Path]`` for one-liners;
+   the same declaration is possible through function attributes.
 
-Run ``python -m pytest`` in this directory for a tiny self-test, or point the
-``examples/custom_steps.yaml`` workflow at real data.
+Check and test them without a run:
+
+    jwstflow check-step ./my_steps.py:SpectrumReport
+    python -m pytest examples/test_my_steps.py
 """
 
 from __future__ import annotations
@@ -18,14 +24,15 @@ import json
 import logging
 from pathlib import Path
 
-from jwstflow import RunContext, Step
+from pydantic import Field
+
+from jwstflow import RunContext, Step, StepParams
 
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# 1) Subclass an official pipeline: same YAML parameters, extra behaviour.
-#    jwstflow detects stpipe classes lazily inside the worker processes, so the
-#    jwst import is local: `jwstflow validate --resolve` still works elsewhere.
+# 1) Subclass an official pipeline. The jwst import is local so the module also
+#    imports where jwst is absent (`jwstflow validate --resolve` on a laptop).
 # ---------------------------------------------------------------------------
 try:
     from jwst.pipeline import Detector1Pipeline
@@ -38,13 +45,12 @@ except ImportError:  # keep the module importable without jwst
 class Detector1WithSnowballMask(Detector1Pipeline):  # type: ignore[misc,valid-type]
     """Detector1 that forces snowball flagging on and stores a small QA summary.
 
-    It inherits `class_alias = "calwebb_detector1"`, so in a workflow it *is* the
+    It inherits ``class_alias = "calwebb_detector1"``, so in a workflow it *is* the
     detector1 stage (same directory, replaces the preset's). Give a subclass its
-    own `class_alias` only when it should be a separate stage.
+    own ``class_alias`` only when it should be a separate stage. Parameters are
+    declared the stpipe way (``spec``) and set from YAML like any pipeline option.
     """
 
-    # Extra parameters are declared with the normal stpipe spec syntax and can be
-    # set from YAML under `parameters:` like any other pipeline parameter.
     spec = """
     qa_summary = boolean(default=True)  # write <stem>_det1qa.json next to the rate file
     """
@@ -68,14 +74,25 @@ class Extract1dWideAperture(Extract1dStep):  # type: ignore[misc,valid-type]
 
 
 # ---------------------------------------------------------------------------
-# 2) A jwstflow-native step. `batch = "all"` gives the step every input file at
-#    once (one task); the default `"per_file"` gives one task per input file,
-#    which then run in parallel across workers.
+# 2) A jwstflow Step: the recommended form.
+#    - `level`, `batch`, `inputs`, `outputs`, `version` describe the step;
+#    - `Params` types and documents the `parameters:` block (validated by
+#      `jwstflow validate`, listed by `jwstflow check-step`);
+#    - `run` gets the inputs, a RunContext, and the validated parameters, and
+#      returns every file it wrote (paths from `ctx.derived_path` follow the
+#      naming rules automatically).
 # ---------------------------------------------------------------------------
 class SpectrumReport(Step):
-    """Collect all *_x1d.fits products of a stage into one JSON report."""
+    """Collect all extracted spectra of a stage into one JSON report."""
 
-    batch = "all"
+    level = "qa"
+    batch = "all"                         # one task with every input
+    inputs = ("*_x1d.fits", "*_s1d.fits")
+    outputs = ("report",)                 # -> <run>_report.json
+    version = "1"
+
+    class Params(StepParams):
+        min_snr: float = Field(3.0, ge=0, description="S/N below which a spectrum is flagged in the report")
 
     def run(self, inputs: list[Path], ctx: RunContext, *, min_snr: float = 3.0, **params) -> list[Path]:
         from astropy.io import fits
@@ -84,25 +101,30 @@ class SpectrumReport(Step):
         for path in inputs:
             with fits.open(path) as hdul:
                 hdr = hdul[0].header
-                rows.append({"file": path.name, "target": hdr.get("TARGPROP"), "grating": hdr.get("GRATING")})
-        out = ctx.output_dir / f"{ctx.run_name}_spectrum_report.json"
+                rows.append({"file": path.name, "target": hdr.get("TARGPROP"), "grating": hdr.get("GRATING"),
+                             "channel": hdr.get("CHANNEL"), "band": hdr.get("BAND")})
+        out = ctx.derived_path(f"{ctx.run_name.replace('/', '_')}.fits", "report", ext=".json")
         out.write_text(json.dumps({"min_snr": min_snr, "n": len(rows), "rows": rows}, indent=2))
-        log.info("wrote report for %d spectra (CRDS context %s)", len(rows), ctx.crds_context)
+        ctx.log.info("wrote report for %d spectra (CRDS context %s)", len(rows), ctx.crds_context)
         return [out]
 
 
 # ---------------------------------------------------------------------------
-# 3) The smallest possible step: a function.
+# 3) The smallest possible step: a function. Declaration attributes are optional.
 # ---------------------------------------------------------------------------
-def tag_header(inputs: list[Path], ctx: RunContext, *, keyword: str = "JWSTFLOW", value: str = "1") -> list[Path]:
-    """Copy each input into the stage directory with an extra header keyword."""
+def tag_header(inputs: list[Path], ctx: RunContext, *, keyword: str = "JWSTFLOW", value: str = "1", **params) -> list[Path]:
+    """Copy each input with an extra header keyword (a jwstflow product, `_tagged` suffix)."""
     from astropy.io import fits
 
     outputs = []
     for path in inputs:
-        dst = ctx.output_dir / path.name.replace(".fits", "_tagged.fits")
+        dst = ctx.derived_path(path, "tagged")
         with fits.open(path) as hdul:
             hdul[0].header[keyword] = value
             hdul.writeto(dst, overwrite=True)
         outputs.append(dst)
     return outputs
+
+
+tag_header.level = 4              # type: ignore[attr-defined]
+tag_header.outputs = ("tagged",)  # type: ignore[attr-defined]

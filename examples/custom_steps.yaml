@@ -51,11 +51,11 @@ stages:
     inputs:
       - {stage: calwebb_spec3, pattern: "*_s3d.fits"}
 
-  - step: my_steps:SpectrumReport                 # jwstflow.Step, batch=all
+  - step: my_steps:SpectrumReport                 # jwstflow.Step, batch=all, level qa
     inputs:
       - {stage: calwebb_spec3, pattern: "*_x1d.fits"}
       - {stage: extract_1d, pattern: "*_x1d.fits"}
-    parameters: {min_snr: 5}
+    parameters: {min_snr: 5}                      # validated against SpectrumReport.Params
     tags: [qa]
 
   - step: my_steps:tag_header                     # plain function

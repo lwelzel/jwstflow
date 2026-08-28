@@ -374,9 +374,33 @@ def config_from_dict(data: dict[str, Any], *, base_dir: Path | None = None) -> C
                 spec["path"] = _absolute(spec["path"], base_dir)  # explicit input dirs: relative to the YAML too
     _derive_stage_identity(data.get("stages") or [])
     try:
-        return Config.model_validate(data)
+        cfg = Config.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(format_validation_error(exc)) from exc
+    _check_step_parameters(cfg)
+    return cfg
+
+
+def _check_step_parameters(cfg: Config) -> None:
+    """Validate each stage's `parameters:` against the step's `Params` model when the step is
+    a jwstflow Step that declares one (jwst steps validate their own parameters when they run)."""
+    import inspect
+
+    from ..steps.base import BUILTIN_ALIASES, Step, resolve_target
+
+    for stage in cfg.stages:
+        if stage.step in BUILTIN_ALIASES:
+            continue
+        try:
+            target = resolve_target(stage.step)
+        except Exception:
+            continue  # `validate --resolve` reports import problems
+        cls = target if inspect.isclass(target) else type(target)
+        if inspect.isclass(cls) and issubclass(cls, Step) and cls.Params is not None:
+            try:
+                cls.validate_params(dict(stage.parameters))
+            except ValueError as exc:
+                raise ConfigError(f"stage {stage.name}: {exc}") from exc
 
 
 def load_config(path: str | Path, overrides: list[str] | None = None) -> Config:

@@ -77,6 +77,35 @@ def _instrument_names(cfg: DownloadConfig) -> list[str] | str:
     return sorted({mast_instrument_name(cfg.instrument, m) for m in cfg.modes})
 
 
+def fits_is_complete(path: Path) -> bool:
+    """True when the file holds every byte its FITS structure declares.
+
+    Interrupted transfers leave truncated files that only fail much later, deep
+    inside detector1 ("cannot reshape array of size ..."); this catches them at
+    download time. Lazy loading makes the check cheap (headers only).
+    """
+    try:
+        from astropy.io import fits
+
+        with fits.open(path, memmap=True, lazy_load_hdus=True) as hdul:
+            info = hdul[-1].fileinfo()  # indexing [-1] walks every header without reading data
+            expected = ((info["datLoc"] + max(info["datSpan"], 0) + 2879) // 2880) * 2880
+        return path.stat().st_size >= expected
+    except Exception as exc:
+        log.debug("%s failed the FITS completeness check: %s", path.name, exc)
+        return False
+
+
+def ensure_complete_fits(paths: list[Path], *, delete: bool = True) -> list[Path]:
+    """Return the truncated/corrupt files among ``paths`` (and delete them so a retry re-downloads)."""
+    bad = [p for p in paths if p.suffix == ".fits" and p.exists() and not fits_is_complete(p)]
+    for p in bad:
+        log.error("%s is truncated or corrupt (%d bytes)%s", p.name, p.stat().st_size, "; deleting for re-download" if delete else "")
+        if delete:
+            p.unlink()
+    return bad
+
+
 MAST_LOG = "mast_observations.json"
 
 
@@ -200,19 +229,30 @@ def _download_astroquery(cfg: DownloadConfig, dest: Path, *, dry_run: bool) -> l
     products = products[idx]
     log.info("%d product file(s) selected", len(products))
 
-    have = {p.name for p in dest.glob("*")}
-    todo = [i for i, f in enumerate(products["productFilename"]) if str(f) not in have]
-    log.info("%d already present, %d to download", len(products) - len(todo), len(todo))
+    wanted = [dest / str(f) for f in products["productFilename"]]
+    ensure_complete_fits([p for p in wanted if p.exists()])  # a truncated leftover must be re-fetched, not trusted
+    todo = [i for i, p in enumerate(wanted) if not p.exists()]
+    log.info("%d already present, %d to download", len(wanted) - len(todo), len(todo))
     if dry_run or not todo:
-        return sorted(dest / str(f) for f in products["productFilename"] if (dest / str(f)).exists())
+        return sorted(p for p in wanted if p.exists())
 
-    manifest = Observations.download_products(
-        products[todo], download_dir=str(dest), flat=True, cache=True, mrp_only=False
-    )
-    bad = [str(r["Local Path"]) for r in manifest if str(r["Status"]).upper() != "COMPLETE"]
-    for b in bad:
-        log.error("download failed: %s", b)
-    return sorted(dest / str(f) for f in products["productFilename"] if (dest / str(f)).exists())
+    for attempt in (1, 2):
+        manifest = Observations.download_products(
+            products[todo], download_dir=str(dest), flat=True, cache=True, mrp_only=False
+        )
+        for r in manifest:
+            if str(r["Status"]).upper() != "COMPLETE":
+                log.error("download failed: %s", r["Local Path"])
+        bad = ensure_complete_fits([wanted[i] for i in todo])
+        todo = [i for i in todo if not wanted[i].exists()]
+        if not todo:
+            break
+        if attempt == 1:
+            log.warning("%d file(s) arrived truncated; retrying their download once", len(bad) or len(todo))
+    if todo:
+        raise RuntimeError(f"{len(todo)} file(s) could not be downloaded intact, e.g. {wanted[todo[0]].name}; "
+                           "rerun later or fetch them manually into the raw directory")
+    return sorted(p for p in wanted if p.exists())
 
 
 def _unique(values: list[str]) -> tuple[list[str], list[int]]:
@@ -328,6 +368,7 @@ def download_reference_products(cfg: DownloadConfig, dest: Path, *, dry_run: boo
             final.parent.mkdir(parents=True, exist_ok=True)
             local.replace(final)
         shutil.rmtree(staging, ignore_errors=True)
+        ensure_complete_fits([t for t in targets.values() if t.exists()])  # truncated ones vanish; the next run refetches
     files = sorted(p for p in targets.values() if p.exists())
     prov_path = dest / REFERENCE_LOG
     prov = json.loads(prov_path.read_text()) if prov_path.exists() else {}

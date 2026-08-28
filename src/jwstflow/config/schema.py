@@ -71,9 +71,12 @@ class CRDSConfig(_Base):
         ),
     )
     prefetch: bool = Field(
-        default=False,
-        description="Pre-download all reference files for the inputs before running "
-        "(runs `crds bestrefs --sync-references`). Useful before going offline / to a cluster node.",
+        default=True,
+        description="Sync all CRDS reference files for the inputs before the first stage "
+        "(`crds bestrefs --sync-references`). On by default: it makes a plain `jwstflow run` "
+        "self-sufficient and keeps parallel workers from racing to populate a shared (NFS) "
+        "cache on demand. Costs seconds when the cache is warm; set false only if you manage "
+        "the cache yourself.",
     )
     disable_steppars: bool = Field(
         default=False,

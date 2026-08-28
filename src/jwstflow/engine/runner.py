@@ -19,6 +19,7 @@ individually testable and replaceable.
 from __future__ import annotations
 
 import fnmatch
+import inspect
 import re
 import os
 import json
@@ -39,6 +40,7 @@ from ..data.discovery import FileRecord, HeaderCache, discover, fingerprint
 from ..steps.base import (
     ALIAS_ASN_TYPE,
     BUILTIN_ALIASES,
+    Step,
     activate_plugins,
     default_thread_env,
     is_stpipe_step,
@@ -124,6 +126,7 @@ class Runner:
         self.task_filter = list(tasks or [])  # glob patterns on task labels
         self._source_hashes: dict[str, str | None] = {}
         self._batch_modes: dict[str, str] = {}
+        self._step_classes: dict[str, type | None] = {}
         self.sys_path = activate_plugins(cfg.plugins)  # user step code, also handed to workers
         self.state = StateStore(cfg.state_dir / "state")
         self.headers = HeaderCache(cfg.state_dir / "headers.json")
@@ -186,19 +189,59 @@ class Runner:
     # --------------------------------------------------------------- download
     def download(self) -> list[Path]:
         cfg = self.cfg
-        if cfg.download is None or not cfg.download.enabled or self.skip_download:
-            return []
-        from ..data.download import download
+        files: list[Path] = []
+        if cfg.download is not None and cfg.download.enabled and not self.skip_download:
+            from ..data.download import download
 
-        dest = cfg.raw_dir
-        log.info("querying MAST for program %s, observations %s, %s %s -> %s", cfg.download.program,
-                 cfg.download.observations or "all", cfg.download.instrument, cfg.download.modes or "", dest)
-        files = download(cfg.download, dest, dry_run=self.dry_run)
-        log.info("%d file(s) available in %s", len(files), dest)
-        if cfg.download.reference_products and not self.dry_run:
-            self._start_reference_download()
-        if cfg.crds.prefetch and files and not self.dry_run:
-            crds_mod.prefetch_references(files, cfg.crds, self.crds_context)
+            dest = cfg.raw_dir
+            log.info("querying MAST for program %s, observations %s, %s %s -> %s", cfg.download.program,
+                     cfg.download.observations or "all", cfg.download.instrument, cfg.download.modes or "", dest)
+            files = download(cfg.download, dest, dry_run=self.dry_run)
+            log.info("%d file(s) available in %s", len(files), dest)
+            if cfg.download.reference_products and not self.dry_run:
+                self._start_reference_download()
+        if not files and cfg.raw_dir.is_dir():
+            files = sorted(cfg.raw_dir.glob("*.fits"))  # --skip-download / no download section: what is on disk
+        if cfg.crds.prefetch and files and not self.dry_run and self._uses_stpipe():
+            try:
+                crds_mod.prefetch_references(files, cfg.crds, self.crds_context)
+            except Exception as exc:  # best-effort: a failed sync must not stop the run
+                log.warning("CRDS prefetch failed (%s); continuing -- workers will fetch references on demand",
+                            str(exc).splitlines()[0][:160])
+        return files
+
+    def _uses_stpipe(self) -> bool:
+        """True when any enabled stage runs an official pipeline/step (i.e. will need CRDS)."""
+        from ..steps.base import is_stpipe_step
+
+        for stage in self.cfg.stages:
+            if not stage.enabled:
+                continue
+            if stage.step in BUILTIN_ALIASES:
+                return True
+            try:
+                if is_stpipe_step(resolve_target(stage.step)):
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def prefetch(self) -> list[Path]:
+        """Fetch everything a later `run` will need, without running any stage.
+
+        Resolves and pins the CRDS context, downloads the raw MAST products
+        (with completeness verification), syncs every CRDS reference the
+        pipeline stages will select for those files, and waits for the MAST
+        reference products (when opted in). Afterwards `jwstflow run` starts
+        computing immediately and needs no network. Useful on a login node or
+        overnight, before compute time is spent.
+        """
+        self.prepare()
+        files = self.download()
+        self.wait_for_reference()
+        log.info("prefetch complete: %d raw file(s), CRDS context %s%s", len(files), self.crds_context,
+                 "" if self.cfg.download is None or not self.cfg.download.reference_products
+                 else f", reference products in {self.cfg.reference_dir}")
         return files
 
     def _start_reference_download(self) -> None:
@@ -266,6 +309,7 @@ class Runner:
     def plan_stage(self, stage: StageConfig) -> list[Task]:
         log.info("stage %s: selecting inputs and building tasks", stage.name)
         records = self.stage_inputs(stage)
+        self.check_stage_contract(stage, records)
         out_dir = self.cfg.stage_dir(stage.name)
         log_dir = self.cfg.log_dir / stage.name
         tasks: list[Task] = []
@@ -293,6 +337,46 @@ class Runner:
         if not records:
             log.warning("stage %s: no input files found", stage.name)
         return tasks
+
+    def step_class(self, stage: StageConfig) -> type | None:
+        """The jwstflow Step class behind a stage (None for jwst steps, functions, unresolvable specs)."""
+        if stage.name not in self._step_classes:
+            cls = None
+            if stage.step not in BUILTIN_ALIASES:
+                try:
+                    target = resolve_target(stage.step)
+                except Exception as exc:
+                    log.debug("cannot resolve %s: %s", stage.step, exc)
+                else:
+                    if inspect.isclass(target) and issubclass(target, Step):
+                        cls = target
+                    elif isinstance(target, Step):
+                        cls = type(target)
+            self._step_classes[stage.name] = cls
+        return self._step_classes[stage.name]
+
+    def step_version(self, stage: StageConfig) -> str | None:
+        cls = self.step_class(stage)
+        return str(cls.version) if cls is not None and getattr(cls, "version", None) else None
+
+    def check_stage_contract(self, stage: StageConfig, records: list[FileRecord]) -> None:
+        """Planning-time checks of a jwstflow Step against the stage: parameters match `Params`
+        (an error), inputs match the declared patterns (a warning)."""
+        import fnmatch
+
+        cls = self.step_class(stage)
+        if cls is None:
+            return
+        try:
+            cls.validate_params(dict(stage.parameters))
+        except ValueError as exc:
+            raise ValueError(f"stage {stage.name}: {exc}") from exc
+        patterns = tuple(getattr(cls, "inputs", ()) or ())
+        if patterns and records:
+            odd = [r.path.name for r in records if not any(fnmatch.fnmatch(r.path.name, pat) for pat in patterns)]
+            if odd:
+                log.warning("stage %s: %d input file(s) do not match the step's declared inputs %s (e.g. %s)",
+                            stage.name, len(odd), patterns, odd[0])
 
     def batch_mode(self, stage: StageConfig) -> str:
         """'per_file' or 'all': the YAML value if given, else the step's own `batch`
@@ -324,6 +408,9 @@ class Runner:
         log_dir: Path,
     ) -> Task:
         signature = {**self.env_signature, **extra, "save_results": stage.save_results}
+        version = self.step_version(stage)
+        if version:
+            signature["step_version"] = version
         if stage.step not in self._source_hashes:
             self._source_hashes[stage.step] = source_fingerprint(stage.step)
         if self._source_hashes[stage.step]:

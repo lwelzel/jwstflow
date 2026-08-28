@@ -293,6 +293,68 @@ def init(
 
 
 @app.command()
+def prefetch(
+    config: Annotated[Path, typer.Argument(help="Workflow YAML.")],
+    set_: Annotated[list[str] | None, typer.Option("--set", help="Override config values (key=value).")] = None,
+    log_level: Annotated[str | None, typer.Option("--log-level")] = None,
+) -> None:
+    """Download raw data, sync CRDS references and fetch MAST reference products -- no stages run.
+
+    A later `jwstflow run` then starts computing immediately (handy before batch jobs or overnight).
+    """
+    setup_logging(log_level or "INFO")
+    log.info("jwstflow prefetch: loading %s", config)
+    cfg = _load(config, set_)
+    setup_logging(log_level or cfg.logging.level, cfg.log_dir / "jwstflow.log")
+    Runner(cfg).prefetch()
+
+
+@app.command("check-step")
+def check_step_cmd(
+    spec: Annotated[list[str], typer.Argument(help="Step spec(s): name, pkg.module:Object or ./file.py:Object")],
+    plugins: Annotated[list[Path] | None, typer.Option("--plugins", help="Files/directories with step code.")] = None,
+) -> None:
+    """Audit custom steps against the step contract without running them."""
+    from .testing import check_step
+
+    activate_plugins(plugins or [])
+    bad = 0
+    for one in spec:
+        desc, problems = check_step(one)
+        kind = desc.get("kind", "?")
+        console.print(f"[bold]{one}[/bold]  ({kind}" + (f", stage '{desc['name']}', level {desc['level']}, batch {desc['batch']}" if kind == "step" else "") + ")")
+        if kind == "step":
+            console.print(f"  {desc.get('doc') or '(no docstring)'}")
+            console.print(f"  inputs {desc['inputs'] or '(undeclared)'}  outputs {desc['outputs'] or '(undeclared)'}  version {desc['version']}")
+            for prm in desc["params"]:
+                console.print(f"  - {prm['name']}: {prm['type']} = {prm['default']!r}  {prm['description']}")
+        for problem in problems:
+            console.print(f"  [red]problem:[/red] {problem}")
+            bad += 1
+        if not problems:
+            console.print("  [green]OK[/green]")
+    if bad:
+        raise typer.Exit(1)
+
+
+@app.command("new-step")
+def new_step(
+    class_name: Annotated[str, typer.Argument(help="CamelCase class name, e.g. ExtractExtended")],
+    directory: Annotated[Path, typer.Option("--dir", help="Where to write <snake>.py and test_<snake>.py")] = Path("."),
+    level: Annotated[str, typer.Option("--level", help="1, 2, 3, 4 or qa")] = "4",
+    inputs: Annotated[str, typer.Option("--inputs", help="Accepted input glob")] = "*_cal.fits",
+    suffix: Annotated[str | None, typer.Option("--suffix", help="Product suffix written (lowercase alphanumeric)")] = None,
+) -> None:
+    """Scaffold a custom step (documented class + a passing test) following the step contract."""
+    from .testing import scaffold
+
+    lvl: int | str = int(level) if level.isdigit() else level
+    for f in scaffold(class_name, directory, level=lvl, inputs=inputs, suffix=suffix):
+        console.print(f"wrote {f}")
+    console.print(f"next: edit the run() method, then `python -m pytest {directory}` and `jwstflow check-step {directory}/<module>.py:{class_name}`")
+
+
+@app.command()
 def steps() -> None:
     """List step names usable in `step:` (built-in aliases, entry points, registry)."""
     table = Table(title="registered steps")

@@ -38,8 +38,9 @@ def _matplotlib() -> Any:
 
 
 class PlotSpectrum(Step):
-    level = "qa"
     """Quick-look plot of every 1-D spectrum (``*_x1d.fits`` / ``*_c1d.fits``)."""
+
+    level = "qa"
 
     def run(
         self,
@@ -85,8 +86,9 @@ class PlotSpectrum(Step):
 
 
 class QuicklookImage(Step):
-    level = "qa"
     """PNG of the SCI extension (2-D images, or the middle slice of 3-D cubes)."""
+
+    level = "qa"
 
     def run(
         self,
@@ -126,8 +128,9 @@ class QuicklookImage(Step):
 
 
 class HeaderSummary(Step):
-    level = "qa"
     """One JSON/CSV table with the key header values of all inputs (batch step)."""
+
+    level = "qa"
 
     batch: ClassVar[str] = "all"
 

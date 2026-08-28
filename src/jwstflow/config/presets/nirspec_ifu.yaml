@@ -12,7 +12,6 @@ run: nirspec_ifu
 crds:
   path: ${env:CRDS_PATH,~/crds_cache}
   context: null            # e.g. jwst_1364.pmap, or "latest" to resolve+pin
-  prefetch: false
 
 parallel:
   backend: process
