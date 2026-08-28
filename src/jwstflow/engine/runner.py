@@ -595,6 +595,14 @@ class Runner:
         self.prepare()
         stages = select_stages(self.cfg, **self.selection)
         log.info("run %r in %s  (%s)", self.cfg.name, self.cfg.run_dir, " -> ".join(s.name for s in stages))
+        if self.cfg.workflow_graph and not self.dry_run:
+            try:
+                from ..dagviz import render as render_graph
+
+                files = render_graph(self.cfg, self.cfg.run_dir / LEVEL_DIRS["qa"] / "workflow_graph")
+                log.info("workflow graph: %s", ", ".join(f.name for f in files))
+            except Exception as exc:  # a figure must never stop a reduction
+                log.warning("workflow graph rendering failed: %s", exc)
         if self.selection["start"] is None and self.selection["only"] is None:
             self.download()
         summary = RunSummary()
