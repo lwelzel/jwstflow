@@ -10,7 +10,7 @@
   <img alt="status" src="https://img.shields.io/badge/status-alpha-orange">
 </p>
 
-**jwstflow** turns a JWST reduction into one declarative YAML file and one
+**jwstflow** (pronounced justflow) turns a JWST reduction into one declarative YAML file and one
 command. It orchestrates the official STScI [`jwst`](https://github.com/spacetelescope/jwst)
 pipeline and adds the parts the pipeline leaves to you: MAST download, 
 CRDS pinning and prefetch, association building, DMS-compliant 
