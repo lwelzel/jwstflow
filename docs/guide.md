@@ -5,9 +5,8 @@ products, scheduling and the full YAML reference.
 
 ## Why this design
 
-The requirements were: light-weight, maintainable, compartmentalised, a
-clean YAML interface, and built on well-maintained libraries. The choices,
-and the alternatives that were rejected:
+We wanted to build a light-weight, maintainable, compartmentalised, `jwst` orchestrator,
+with a clean YAML interface, and built on well-maintained libraries.
 
 | concern | choice | why |
 |---|---|---|
