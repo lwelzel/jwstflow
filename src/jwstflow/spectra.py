@@ -24,6 +24,17 @@ X1D_COLUMNS: tuple[str, ...] = (
 )
 X1D_DTYPE = [(n, "u4" if n == "DQ" else "f8") for n in X1D_COLUMNS]
 
+#: Source/aperture provenance keywords that travel through 1-D processing steps.
+#: ``multi.update(like, only="PRIMARY")`` copies schema-mapped metadata only, so
+#: :func:`write_x1d` inherits these non-schema keywords from ``like``'s primary
+#: header explicitly -- otherwise a defringed/cleaned spectrum forgets which
+#: source and aperture it belongs to, and grouping steps downstream
+#: (``stitch_bands`` groups by APERKEY) collapse everything into one group.
+X1D_PROVENANCE_KEYS: tuple[str, ...] = (
+    "SRCNAME", "SRC_RA", "SRC_DEC", "APERTYPE", "APERSIZE", "APERUNIT", "APERKEY",
+    "EXTRMETH", "APCORR", "APCORMED", "JWFCUBE",
+)
+
 #: Units of the EXTRACT1D columns (the jwst x1d contract); stamped as TUNITs by
 #: :func:`write_x1d` and the fallback consumers use when a table carries none.
 X1D_UNITS: dict[str, str] = {
@@ -76,9 +87,12 @@ def write_x1d(path: Path, spectrum: Spectrum1D, *, like: Any = None, surf_bright
     """Write ``spectrum`` as a ``MultiSpecModel`` (one EXTRACT1D extension).
 
     ``like`` is a datamodel (or path) whose primary metadata is copied so
-    instrument keywords travel along; ``header`` adds/overrides primary keywords;
-    ``columns`` fills any further EXTRACT1D columns (``sb_error``, ``npixels``,
-    ``background``, ... -- see :data:`X1D_COLUMNS`), which would otherwise be zero.
+    instrument keywords travel along; when it is a FITS path, the
+    :data:`X1D_PROVENANCE_KEYS` of its primary header are inherited too (the
+    datamodel copy carries schema-mapped keywords only). ``header``
+    adds/overrides primary keywords; ``columns`` fills any further EXTRACT1D
+    columns (``sb_error``, ``npixels``, ``background``, ... -- see
+    :data:`X1D_COLUMNS`), which would otherwise be zero.
     """
     from stdatamodels.jwst import datamodels
 
@@ -100,8 +114,14 @@ def write_x1d(path: Path, spectrum: Spectrum1D, *, like: Any = None, surf_bright
     multi.save(str(path))
     from astropy.io import fits
 
+    inherited: dict[str, Any] = {}
+    if isinstance(like, (str, Path)) and str(like).lower().endswith(".fits"):
+        src_hdr = fits.getheader(like)
+        for key in X1D_PROVENANCE_KEYS:
+            if key in src_hdr:
+                inherited[key] = (src_hdr[key], src_hdr.comments[key])
     with fits.open(path, mode="update") as hdul:
-        for key, value in (header or {}).items():
+        for key, value in {**inherited, **(header or {})}.items():
             hdul[0].header[key] = value
         hdr = hdul["EXTRACT1D"].header
         for i in range(1, int(hdr.get("TFIELDS", 0)) + 1):  # units of the x1d contract
