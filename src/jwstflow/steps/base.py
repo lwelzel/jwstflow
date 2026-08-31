@@ -149,6 +149,7 @@ def step_identity(spec: str) -> tuple[str, int | str]:
 CONTRIB_ALIASES: dict[str, str] = {
     "plot_spectrum": "jwstflow.contrib.qa:PlotSpectrum",
     "quicklook_image": "jwstflow.contrib.qa:QuicklookImage",
+    "plot_stitch": "jwstflow.contrib.qa:PlotStitch",
     "header_summary": "jwstflow.contrib.qa:HeaderSummary",
     "fix_msa_metafile": "jwstflow.contrib.nirspec:fix_msa_metafile",
     "mast_compare": "jwstflow.contrib.mast_compare:MastCompare",

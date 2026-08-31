@@ -16,7 +16,9 @@ from jwstflow import RunContext, Step, StepParams
 class ExtractExtended(Step):
     """Sum an extended source over an aperture mask."""   # first line = description
 
-    level = 4                       # 1/2/3 jwst stages, 4 derived products, "qa" plots -> directory
+    level = 4                       # 1/2/3 jwst stages, 4 derived products, "qa" figures -> directory
+                                    # figures only ever come from level="qa" steps, built with
+                                    # jwstflow.qafig (the QA figure standard: docs/qa_figures.md)
     batch = "per_file"              # or "all": one task receives every input
     inputs = ("*_s3d.fits",)        # accepted files (documentation + planning-time check)
     outputs = ("s1d",)              # suffixes written; a reserved jwst suffix is refused

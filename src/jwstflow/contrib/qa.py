@@ -1,4 +1,4 @@
-"""Example user-defined steps.
+"""jwstflow's stock QA steps.
 
 These double as documentation of the :class:`jwstflow.Step` API:
 
@@ -9,6 +9,11 @@ These double as documentation of the :class:`jwstflow.Step` API:
 
 Reference them in YAML by entry-point name (``plot_spectrum``) or dotted path
 (``jwstflow.contrib.qa:PlotSpectrum``).
+
+Every figure follows the jwstflow QA figure standard (``docs/qa_figures.md``)
+through :mod:`jwstflow.qafig`: no titles (legends annotate), fluxes in mJy,
+mid-point step plots, height-matched colorbars, nan-aware cube collapses, the
+cmasher ``torch`` palette with black main lines, and units in square brackets.
 """
 
 from __future__ import annotations
@@ -19,28 +24,20 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, ClassVar
 
+import numpy as np
+
+from .. import qafig
 from ..data.discovery import read_metadata
 from ..steps.base import RunContext, Step
 
 log = logging.getLogger(__name__)
 
 
-def _matplotlib() -> Any:
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-
-        return plt
-    except ImportError as exc:  # pragma: no cover
-        raise RuntimeError("plot steps need `pip install matplotlib`") from exc
-
-
 class PlotSpectrum(Step):
-    """Quick-look plot of every 1-D spectrum (``*_x1d.fits`` / ``*_c1d.fits``)."""
+    """Figure of every 1-D spectrum (``*_x1d.fits`` / ``*_c1d.fits``), flux in mJy."""
 
     level = "qa"
+    version = "2"   # 1 -> 2: jwstflow QA figure standard (qafig)
 
     def run(
         self,
@@ -49,46 +46,46 @@ class PlotSpectrum(Step):
         *,
         ylim: tuple[float, float] | list[float] | None = None,
         column: str = "FLUX",
-        dpi: int = 120,
+        dpi: int = 150,
         fmt: str = "png",
         **_: Any,
     ) -> Iterable[Path]:
         from astropy.io import fits
 
-        plt = _matplotlib()
         out: list[Path] = []
         for inp in inputs:
             with fits.open(inp) as hdul:
-                tables = [h for h in hdul if h.name == "EXTRACT1D" or (h.name == "COMBINE1D")]
+                tables = [h for h in hdul if h.name in ("EXTRACT1D", "COMBINE1D")]
                 if not tables:
                     log.warning("%s has no EXTRACT1D/COMBINE1D extension; skipped", inp.name)
                     continue
-                fig, ax = plt.subplots(figsize=(9, 4))
-                for i, h in enumerate(tables):
+                fig, ax = qafig.subplots(figsize=(9, 4))
+                colors = qafig.line_colors(len(tables))
+                ylabel = ""
+                for i, (h, color) in enumerate(zip(tables, colors)):
                     tab = h.data
                     if "WAVELENGTH" not in tab.names or column not in tab.names:
                         continue
-                    label = h.header.get("SLTNAME") or h.header.get("SRCNAME") or f"ext {i + 1}"
-                    ax.plot(tab["WAVELENGTH"], tab[column], lw=0.8, label=str(label))
-                ax.set_xlabel("wavelength [um]")
-                ax.set_ylabel(column)
-                ax.set_title(inp.name)
+                    values, ylabel = qafig.to_mjy(tab[column], _column_unit(h, column))
+                    label = None
+                    if len(tables) > 1 and len(tables) <= 12:
+                        label = str(h.header.get("SLTNAME") or h.header.get("SRCNAME") or f"ext {i + 1}")
+                    qafig.step(ax, tab["WAVELENGTH"], values, color=color, label=label)
+                ax.set_xlabel(qafig.WAVE_LABEL)
+                ax.set_ylabel(ylabel or f"{column}")
                 if ylim:
                     ax.set_ylim(*ylim)
-                if len(tables) > 1 and len(tables) <= 12:
-                    ax.legend(fontsize=7)
-                fig.tight_layout()
-                path = ctx.output_dir / f"{inp.stem}.{fmt}"
-                fig.savefig(path, dpi=dpi)
-                plt.close(fig)
-                out.append(path)
+                qafig.annotate(ax, inp.name)
+                qafig.figlegend(fig)
+                out.append(qafig.save(fig, ctx.output_dir / f"{inp.stem}.{fmt}", dpi=dpi))
         return out
 
 
 class QuicklookImage(Step):
-    """PNG of the SCI extension (2-D images, or the middle slice of 3-D cubes)."""
+    """PNG of the SCI extension (2-D images; 3-D cubes are nan-median collapsed)."""
 
     level = "qa"
+    version = "2"   # 1 -> 2: qafig standard; cubes nan-collapsed instead of the middle slice
 
     def run(
         self,
@@ -96,14 +93,14 @@ class QuicklookImage(Step):
         ctx: RunContext,
         *,
         percentiles: tuple[float, float] | list[float] = (1.0, 99.0),
-        cmap: str = "viridis",
-        dpi: int = 120,
+        collapse: str = "median",
+        stretch: str = "linear",
+        cmap: str | None = None,
+        dpi: int = 150,
         **_: Any,
     ) -> Iterable[Path]:
-        import numpy as np
         from astropy.io import fits
 
-        plt = _matplotlib()
         out: list[Path] = []
         for inp in inputs:
             with fits.open(inp) as hdul:
@@ -111,20 +108,104 @@ class QuicklookImage(Step):
                     log.warning("%s has no SCI extension; skipped", inp.name)
                     continue
                 data = np.asarray(hdul["SCI"].data, dtype=float)
-            while data.ndim > 2:
-                data = data[data.shape[0] // 2]
-            finite = data[np.isfinite(data)]
-            lo, hi = (np.percentile(finite, percentiles) if finite.size else (0.0, 1.0))
-            fig, ax = plt.subplots(figsize=(6, 6))
-            im = ax.imshow(data, origin="lower", vmin=lo, vmax=hi, cmap=cmap)
-            fig.colorbar(im, ax=ax, shrink=0.8)
-            ax.set_title(inp.name, fontsize=9)
-            fig.tight_layout()
-            path = ctx.output_dir / f"{inp.stem}.png"
-            fig.savefig(path, dpi=dpi)
-            plt.close(fig)
-            out.append(path)
+                unit = hdul["SCI"].header.get("BUNIT")
+            image = qafig.collapse(data, collapse)
+            fig, ax = qafig.subplots(figsize=(6.5, 6))
+            qafig.imshow(ax, image, unit=unit, stretch=stretch,
+                         percentiles=tuple(percentiles), cmap=cmap or qafig.CMAP)
+            ax.set(xlabel="x [pix]", ylabel="y [pix]")
+            qafig.annotate(ax, inp.name)
+            qafig.figlegend(fig)
+            out.append(qafig.save(fig, ctx.output_dir / f"{inp.stem}.png", dpi=dpi))
         return out
+
+
+class PlotStitch(Step):
+    """Comparison figure of a stitched spectrum (``*_s1dcomb.ecsv``): the combination
+    in black over its rescaled input segments.
+
+    The segment files named in the ECSV metadata are searched in
+    ``segments_stage`` (when given), in every stage directory of the run, and
+    next to the ECSV itself; segments that are not found any more are simply
+    left out of the figure.
+    """
+
+    level = "qa"
+    inputs = ("*_s1dcomb.ecsv",)
+    version = "1"
+
+    def run(self, inputs: list[Path], ctx: RunContext, *, segments_stage: str | None = None,
+            dpi: int = 150, **_: Any) -> Iterable[Path]:
+        from astropy.table import Table
+
+        out: list[Path] = []
+        for inp in inputs:
+            tab = Table.read(inp)
+            wave = np.asarray(tab["WAVELENGTH"], dtype=float)
+            flux, ylabel = qafig.to_mjy(np.asarray(tab["FLUX"], dtype=float),
+                                        str(tab["FLUX"].unit or "Jy"))
+            meta = tab.meta
+            names = [str(n) for n in meta.get("inputs", [])]
+            labels = [str(s) for s in meta.get("segments", names)]
+            scales = [float(s) for s in meta.get("scales_applied", [1.0] * len(names))]
+            fig, ax = qafig.subplots(figsize=(11, 4))
+            colors = qafig.line_colors(len(names)) if len(names) > 1 else qafig.line_colors(2)
+            for name, label, scale, color in zip(names, labels, scales, colors):
+                segment = _find_file(name, ctx, segments_stage, inp.parent)
+                if segment is None:
+                    log.warning("%s: segment %s not found in any stage directory; left out", inp.name, name)
+                    continue
+                w, f, unit = _read_segment(segment)
+                f, _ = qafig.to_mjy(f * scale, unit)
+                qafig.step(ax, w, f, color=color, alpha=0.6, lw=0.7,
+                           label=label + (f" x {scale:.3f}" if scale != 1.0 else ""))
+            qafig.step(ax, wave, flux, color=qafig.MAIN_COLOR, label="stitched")
+            crossovers = [float(b) for b in meta.get("crossovers_um", [])]
+            for b in crossovers:
+                ax.axvline(b, color="0.6", lw=0.6, ls=":")
+            if crossovers:
+                ax.plot([], [], color="0.6", lw=0.6, ls=":", label="crossover")
+            ax.set(xlabel=qafig.WAVE_LABEL, ylabel=ylabel)
+            qafig.annotate(ax, inp.name)
+            qafig.figlegend(fig)
+            out.append(qafig.save(fig, ctx.output_dir / f"{inp.stem}.png", dpi=dpi))
+        return out
+
+
+def _find_file(name: str, ctx: RunContext, stage: str | None, *extra: Path) -> Path | None:
+    """Locate ``name`` in a stage's directory, in any stage directory, or in ``extra``."""
+    dirs: list[Path] = []
+    if stage:
+        try:
+            dirs.append(ctx.dir_of(stage))
+        except KeyError:
+            log.warning("stage %r is not part of this workflow; searching all stages", stage)
+    dirs += [d for _, d in sorted(ctx.stage_dirs.items())] + list(extra)
+    for d in dirs:
+        candidate = Path(d) / name
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _column_unit(hdu: Any, column: str) -> str | None:
+    """A table column's TUNIT, falling back to the x1d contract's unit."""
+    from ..spectra import X1D_UNITS
+
+    return hdu.columns[column].unit or X1D_UNITS.get(column.upper())
+
+
+def _read_segment(path: Path) -> tuple[np.ndarray, np.ndarray, str | None]:
+    """(wavelength, flux, flux unit) of a segment file's EXTRACT1D/COMBINE1D table."""
+    from astropy.io import fits
+
+    with fits.open(path) as hdul:
+        for name in ("EXTRACT1D", "COMBINE1D"):
+            if name in hdul:
+                tab = hdul[name].data
+                return (np.asarray(tab["WAVELENGTH"], dtype=float),
+                        np.asarray(tab["FLUX"], dtype=float), _column_unit(hdul[name], "FLUX"))
+    raise ValueError(f"{path}: no EXTRACT1D/COMBINE1D extension")
 
 
 class HeaderSummary(Step):
