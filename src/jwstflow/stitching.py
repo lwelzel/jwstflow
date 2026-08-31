@@ -14,7 +14,8 @@ implements the generic mechanics once:
 * the spectrum switches segments at ``crossovers`` (default: the midpoint of
   each overlap, or of the gap when neighbours do not overlap);
 * the result is one ECSV (WAVELENGTH/FLUX/FLUX_ERROR/SEGMENT + provenance
-  metadata) and a comparison plot.
+  metadata); the ``plot_stitch`` QA step draws the comparison figure from it
+  (data steps never plot -- see ``docs/qa_figures.md``).
 
 Contributed packages subclass it to add mode-specific behaviour -- override
 :meth:`segment_label` for naming, :meth:`overlap_ratio` for the measurement
@@ -44,7 +45,7 @@ class StitchSegments(Step):
     inputs = ("*_s1d.fits", "*_x1d.fits", "*_c1d.fits")
     outputs = ("s1dcomb",)
     batch = "all"
-    version = "1"
+    version = "2"   # 1 -> 2: the comparison figure moved to the plot_stitch QA step
 
     class Params(StepParams):
         crossovers: list[float] | None = Field(None, description="wavelengths [um] where the combination switches "
@@ -120,11 +121,7 @@ class StitchSegments(Step):
                  [f"{b:.3f}" for b in bounds], [f"{r:.4f}" for r in ratios], [f"{s:.4f}" for s in scales])
         out = ctx.output_dir / derived_name(self._product_stem(segments), "s1dcomb", ext=".ecsv")
         combined.write(out, format="ascii.ecsv", overwrite=True)
-        outputs = [out]
-        png = _plot(out.with_suffix(".png"), segments, scales, combined)
-        if png:
-            outputs.append(png)
-        return outputs
+        return [out]
 
     # ------------------------------------------------------------------ hooks / helpers
     def overlap_ratio(self, a: dict[str, Any], b: dict[str, Any], *, min_overlap_points: int = 5) -> float:
@@ -185,24 +182,3 @@ class StitchSegments(Step):
             prefix = prefix.rsplit("_", 1)[0]  # drop the partial token (g235h... vs g395h... -> ..._nirspec)
         prefix = prefix.rstrip("-_")
         return (prefix or stems[0]) + ".fits"  # derived_name strips the extension again
-
-
-def _plot(path: Path, segments: list[dict[str, Any]], scales: list[float], combined: Any) -> Path | None:
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError:
-        return None
-    fig, ax = plt.subplots(figsize=(11, 4))
-    for seg, scale in zip(segments, scales):
-        ax.plot(seg["WAVELENGTH"], seg["FLUX"] * scale, lw=0.6, alpha=0.5,
-                label=f"{seg['label']}" + (f" x {scale:.3f}" if scale != 1.0 else ""))
-    ax.plot(combined["WAVELENGTH"], combined["FLUX"], "k", lw=0.6, label="stitched")
-    ax.set(xlabel="wavelength [um]", ylabel="flux [Jy]")
-    ax.legend(fontsize=8)
-    fig.tight_layout()
-    fig.savefig(path, dpi=110)
-    plt.close(fig)
-    return path

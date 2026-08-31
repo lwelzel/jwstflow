@@ -24,6 +24,17 @@ X1D_COLUMNS: tuple[str, ...] = (
 )
 X1D_DTYPE = [(n, "u4" if n == "DQ" else "f8") for n in X1D_COLUMNS]
 
+#: Units of the EXTRACT1D columns (the jwst x1d contract); stamped as TUNITs by
+#: :func:`write_x1d` and the fallback consumers use when a table carries none.
+X1D_UNITS: dict[str, str] = {
+    "WAVELENGTH": "um", "FLUX": "Jy", "FLUX_ERROR": "Jy",
+    "FLUX_VAR_POISSON": "Jy^2", "FLUX_VAR_RNOISE": "Jy^2", "FLUX_VAR_FLAT": "Jy^2",
+    "SURF_BRIGHT": "MJy/sr", "SB_ERROR": "MJy/sr",
+    "SB_VAR_POISSON": "(MJy/sr)^2", "SB_VAR_RNOISE": "(MJy/sr)^2", "SB_VAR_FLAT": "(MJy/sr)^2",
+    "BACKGROUND": "MJy/sr", "BKGD_ERROR": "MJy/sr",
+    "BKGD_VAR_POISSON": "(MJy/sr)^2", "BKGD_VAR_RNOISE": "(MJy/sr)^2", "BKGD_VAR_FLAT": "(MJy/sr)^2",
+}
+
 
 @dataclass
 class Spectrum1D:
@@ -87,12 +98,16 @@ def write_x1d(path: Path, spectrum: Spectrum1D, *, like: Any = None, surf_bright
             multi.update(src, only="PRIMARY")
     multi.meta.filename = Path(path).name
     multi.save(str(path))
-    if header:
-        from astropy.io import fits
+    from astropy.io import fits
 
-        with fits.open(path, mode="update") as hdul:
-            for key, value in header.items():
-                hdul[0].header[key] = value
+    with fits.open(path, mode="update") as hdul:
+        for key, value in (header or {}).items():
+            hdul[0].header[key] = value
+        hdr = hdul["EXTRACT1D"].header
+        for i in range(1, int(hdr.get("TFIELDS", 0)) + 1):  # units of the x1d contract
+            unit = X1D_UNITS.get(str(hdr.get(f"TTYPE{i}", "")).upper())
+            if unit and not hdr.get(f"TUNIT{i}"):
+                hdr[f"TUNIT{i}"] = unit
     return Path(path)
 
 

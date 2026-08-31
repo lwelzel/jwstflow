@@ -36,6 +36,7 @@ class MastCompare(Step):
     """Difference a jwstflow s3d/x1d product against the MAST archive product of the same name."""
 
     level = "qa"
+    version = "2"   # 1 -> 2: jwstflow QA figure standard (qafig)
 
     def run(self, inputs: list[Path], ctx: RunContext, *, reference_dir: str | None = None,
             plot: bool = True, **params: Any) -> list[Path]:
@@ -152,9 +153,7 @@ def compare_spectra(ours: Path, theirs: Path, out_dir: Path, *, plot: bool = Tru
     log.info("%s vs MAST: median flux ratio %.4f", ours.name, float(np.nanmedian(ratio)))
     outputs = [out]
     if plot:
-        png = _plot(out.with_suffix(".png"), wa, fa, fb_on_a, ratio, ours.name, prov)
-        if png:
-            outputs.append(png)
+        outputs.append(_plot(out.with_suffix(".png"), wa, fa, fb_on_a, ratio, out.name, prov))
     return outputs
 
 
@@ -163,19 +162,21 @@ def _wavelengths(hdr: Any) -> np.ndarray:
     return float(hdr.get("CRVAL3", 0)) + (np.arange(n) + 1 - float(hdr.get("CRPIX3", 1))) * float(hdr.get("CDELT3", 1))
 
 
-def _plot(path: Path, w, fa, fb, ratio, title: str, prov: dict[str, Any]) -> Path | None:
-    try:
-        import matplotlib
+def _plot(path: Path, w, fa, fb, ratio, name: str, prov: dict[str, Any]) -> Path:
+    from .. import qafig
 
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError:
-        return None
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 6), sharex=True, gridspec_kw={"height_ratios": [3, 1]})
-    ax1.plot(w, fb, lw=0.7, alpha=0.7, label=f"MAST (jwst {prov['MASTCAL'][0]}, {prov['MASTCTX'][0]})")
-    ax1.plot(w, fa, lw=0.7, alpha=0.7, label=f"jwstflow (jwst {prov['JWFCAL'][0]}, {prov['JWFCTX'][0]})")
-    ax1.set_ylabel("flux [Jy]"); ax1.legend(fontsize=8); ax1.set_title(title)
-    ax2.plot(w, ratio, lw=0.7, color="k"); ax2.axhline(1, color="grey", lw=0.5)
-    ax2.set(xlabel="wavelength [um]", ylabel="jwstflow / MAST", ylim=(0.5, 1.5))
-    fig.tight_layout(); fig.savefig(path, dpi=110); plt.close(fig)
-    return path
+    fig, (ax1, ax2) = qafig.subplots(2, 1, figsize=(11, 6), sharex=True,
+                                     gridspec_kw={"height_ratios": [3, 1]})
+    # both spectra are in Jy; jwstflow's is the main product -> black, MAST a palette color
+    (mast_color,) = qafig.line_colors(2)[1:]
+    qafig.step(ax1, w, fb * 1e3, color=mast_color, alpha=0.8, lw=0.7,
+               label=f"MAST (jwst {prov['MASTCAL'][0]}, {prov['MASTCTX'][0]})")
+    qafig.step(ax1, w, fa * 1e3, color=qafig.MAIN_COLOR, lw=0.7,
+               label=f"jwstflow (jwst {prov['JWFCAL'][0]}, {prov['JWFCTX'][0]})")
+    ax1.set_ylabel(qafig.FLUX_LABEL)
+    qafig.step(ax2, w, ratio, color=qafig.MAIN_COLOR, lw=0.7)
+    ax2.axhline(1, color="0.6", lw=0.5)
+    ax2.set(xlabel=qafig.WAVE_LABEL, ylabel="jwstflow / MAST", ylim=(0.5, 1.5))
+    qafig.annotate(ax1, name)
+    qafig.figlegend(fig)
+    return qafig.save(fig, path, dpi=150)
