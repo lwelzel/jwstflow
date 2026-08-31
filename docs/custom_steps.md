@@ -49,7 +49,8 @@ products of another stage), `ctx.target` / `ctx.target_coords` /
 `ctx.crds_context`. Shared building blocks live in `jwstflow.spectra` (x1d
 I/O, cube wavelengths), `jwstflow.masks` (the wavelength-resolved mask-product
 contract and its geometry helpers), `jwstflow.stitching` (the generic segment
-stitcher to subclass), `jwstflow.features` (line/band datasets),
+stitcher to subclass), `jwstflow.apcorr` (CRDS aperture-correction tables for
+MIRI MRS / NIRSpec IFU extraction), `jwstflow.features` (line/band datasets),
 `jwstflow.targets` (positions) and `jwstflow.naming`.
 
 Steps that deliberately write *edited copies of official products* under the
