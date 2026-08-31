@@ -29,6 +29,26 @@ def test_write_x1d_rejects_unknown_columns(tmp_path: Path):
         write_x1d(tmp_path / "b_s1d.fits", spec, columns={"bogus": np.ones(5)})
 
 
+def test_write_x1d_stamps_units_and_inherits_provenance(tmp_path: Path):
+    from astropy.io import fits
+
+    wave = np.linspace(1.0, 2.0, 20)
+    spec = Spectrum1D(wave, np.ones(20), np.full(20, 0.1))
+    src = write_x1d(tmp_path / "a_s1d.fits", spec,
+                    header={"SRCNAME": "T", "APERKEY": "T_circle1", "APERTYPE": "circle"})
+    # non-schema source/aperture keywords survive a like= copy (the datamodel
+    # update carries schema-mapped metadata only), so processing steps
+    # (defringe, clean) never lose the grouping keys downstream steps need
+    out = write_x1d(tmp_path / "b_s1d.fits", spec, like=src, header={"APERTYPE": "override"})
+    hdr = fits.getheader(out)
+    assert hdr["APERKEY"] == "T_circle1" and hdr["SRCNAME"] == "T"
+    assert hdr["APERTYPE"] == "override"          # an explicit header= wins over inheritance
+    with fits.open(out) as hdul:                  # the x1d contract units are stamped as TUNITs
+        cols = hdul["EXTRACT1D"].columns
+        assert cols["WAVELENGTH"].unit == "um" and cols["FLUX"].unit == "Jy"
+        assert cols["SURF_BRIGHT"].unit == "MJy/sr"
+
+
 def test_reference_data_ships_with_the_package(tmp_path: Path, monkeypatch):
     """The spectral-feature tables resolve without a project data/ directory or env var."""
     import jwstflow.features as features
