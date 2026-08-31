@@ -21,6 +21,8 @@ from .base import (
     STPIPE_LEVELS,
     identity_of,
     resolve_target,
+    split_description,
+    step_description,
     step_identity,
     source_fingerprint,
 )
@@ -39,4 +41,6 @@ __all__ = [
     "register_step",
     "registered_steps",
     "resolve_target",
+    "split_description",
+    "step_description",
 ]

@@ -139,7 +139,10 @@ stitching -- every stage served by installed packages, with the target-local
 Steps that belong to a collaboration or project live in their own installable
 package and register through the `jwstflow.steps` entry-point group;
 installing the package is all it takes for `step: <name>` to work, and
-`jwstflow steps` lists everything installed. Scaffold one with
+`jwstflow steps` lists everything installed with a short description of each
+step (`jwstflow steps <name>` prints the detailed one -- both come straight
+from the step's docstring: first paragraph = short, rest = detailed).
+Scaffold one with
 `jwstflow new-package` (see the guide's "Contributed packages" section for
 the tiers, distribution and versioning conventions). Existing packages:
 `jwstflow-midas` (public: edge-on disk masks, backgrounds, extraction, QA,

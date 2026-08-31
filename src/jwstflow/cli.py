@@ -406,15 +406,46 @@ def new_package(
 
 
 @app.command()
-def steps() -> None:
-    """List step names usable in `step:` (built-in aliases, entry points, registry)."""
+def steps(
+    name: Annotated[str | None, typer.Argument(help="Show this one step with its detailed description.")] = None,
+    describe: Annotated[bool, typer.Option("--describe", "-d", help="Detailed description of every step.")] = False,
+) -> None:
+    """List step names usable in `step:` (built-in aliases, entry points, registry).
+
+    Each step carries a short description (shown in the table) and a detailed one
+    (`--describe`, or `jwstflow steps NAME` for a single step). Custom steps document
+    themselves through their docstring: first paragraph = short, rest = detailed.
+    """
+    from rich.padding import Padding
+    from rich.text import Text
+
+    from .steps.base import step_description
+
+    known = registered_steps()
+    if name is not None:
+        if name not in known:
+            err.print(f"[red]unknown step {name!r}[/red] -- `jwstflow steps` lists the registered names")
+            raise typer.Exit(2)
+        known = {name: known[name]}
+    if name is not None or describe:
+        for i, (step_name, target) in enumerate(known.items()):
+            short, detailed = step_description(step_name)
+            if i:
+                console.print()
+            console.print(Text(step_name, style="bold") + Text(f"  {target}", style="dim"))
+            for block in (short, detailed):
+                if block:
+                    console.print(Padding(Text(block), (0, 0, 0, 2)))
+        return
     table = Table(title="registered steps")
     table.add_column("name")
+    table.add_column("description")
     table.add_column("target")
-    for name, target in registered_steps().items():
-        table.add_row(name, str(target))
+    for step_name, target in known.items():
+        short, _ = step_description(step_name)
+        table.add_row(step_name, Text(short), Text(str(target), style="dim"))
     console.print(table)
-    console.print("Any dotted path `pkg.module:Object` works as well.")
+    console.print("Any dotted path `pkg.module:Object` works as well. `jwstflow steps NAME` explains one step in detail.")
 
 
 @app.command()

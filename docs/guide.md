@@ -118,7 +118,9 @@ jwstflow new-package jwstflow-mysteps --steps defringe,stitch_bands [--private]
 The templates live inside jwstflow, so generated boilerplate always matches
 the plugin contract of the installed version. Users install whichever
 packages they have access to and reference the steps by entry-point name in
-YAML; `jwstflow steps` lists everything installed.
+YAML; `jwstflow steps` lists everything installed, each with a short
+description (`jwstflow steps <name>` or `--describe` shows the detailed
+explanation, taken from the step's docstring).
 Public packages come from PyPI or a public git URL; proprietary ones (e.g.
 JOYS+) live in private repositories and install with
 `uv pip install git+ssh://git@github.com/<org>/jwstflow-joys` (pin them in
