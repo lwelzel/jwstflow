@@ -1,0 +1,49 @@
+# %ECSV 1.0
+# ---
+# datatype:
+# - {name: id, datatype: string, description: stable identifier used in configs}
+# - {name: label, datatype: string}
+# - {name: species, datatype: string}
+# - {name: kind, datatype: string, description: 'line: narrow feature (edges = +/- width); band: broad feature (edges as given)'}
+# - {name: wavelength_um, unit: um, datatype: float64, description: central (vacuum) wavelength; NaN for bands with no single centre}
+# - {name: wave_min_um, unit: um, datatype: float64, description: lower edge used when masking/selecting the feature}
+# - {name: wave_max_um, unit: um, datatype: float64, description: upper edge used when masking/selecting the feature}
+# - {name: transition, datatype: string}
+# - {name: source, datatype: string}
+# - {name: notes, datatype: string}
+# meta: !!omap
+# - {dataset: ice_bands}
+# - {description: 'Solid-state (ice) absorption bands and the silicate features, 2.5-25 um'}
+# - {version: '2026.08'}
+# - {provenance: Compiled for jwstflow from the references below; wavelengths are vacuum values as commonly quoted in the JWST literature.
+#     Verify against the primary source before line-precise work.}
+# - references: ['Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023']
+# - {notes: Edges follow the review literature; adjust per source when profiles are unusual. Silicate features are included because they
+#     matter for the same masking decisions.}
+# - {usage: 'Select in a workflow with `features: {<dataset>: all | [ids or species]}` or a list of ids.'}
+# schema: astropy-2.0
+id label species kind wavelength_um wave_min_um wave_max_um transition source notes
+h2o_3.0 "H2O ice O-H stretch" H2O band 3.05 2.7 3.7 "nu1/nu3 O-H stretch" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" "very broad; long-wavelength wing to ~4 um from scattering/ NH3-H2O"
+h2o_4.5 "H2O ice combination" H2O band 4.5 4.3 4.8 "nu2+nuL combination" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" "weak, underlies CO/OCN-"
+h2o_6.0 "H2O ice bending" H2O band 6.0 5.5 6.6 "nu2 H-O-H bend" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" "blends with other 6.0 um carriers"
+h2o_12 "H2O ice libration" H2O band 12.5 10.5 14.5 libration "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" "very broad; overlaps silicate 9.7/18"
+co2_4.27 "CO2 ice stretch" CO2 band 4.27 4.2 4.33 "nu3 C=O stretch" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" "saturated in dense cores"
+13co2_4.38 "13CO2 ice stretch" 13CO2 band 4.38 4.36 4.41 nu3 "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" ""
+co2_15.2 "CO2 ice bending" CO2 band 15.2 15.0 15.45 "nu2 bend (double peak)" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" "profile diagnostic of ice mixing/heating"
+co_4.67 "CO ice" CO band 4.67 4.64 4.7 "C=O stretch" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" "apolar/polar components; gas-phase CO lines overlap"
+13co_4.78 "13CO ice" 13CO band 4.78 4.77 4.8 "C=O stretch" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" weak
+ocn_4.62 "OCN- ice" OCN- band 4.62 4.58 4.66 "C=N stretch" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" "aka XCN"
+ocs_4.90 "OCS ice" OCS band 4.9 4.87 4.93 "C=O stretch" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" ""
+ch3oh_3.53 "CH3OH ice C-H stretch" CH3OH band 3.53 3.47 3.6 "nu3 C-H stretch" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" "on the H2O 3 um wing"
+ch3oh_3.95 "CH3OH ice" CH3OH band 3.95 3.9 4.0 "nu9 CH3 rock + combination" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" ""
+ch3oh_9.74 "CH3OH ice C-O stretch" CH3OH band 9.74 9.55 9.9 "nu8 C-O stretch" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" "inside the silicate band"
+ch4_7.67 "CH4 ice" CH4 band 7.67 7.58 7.76 "nu4 deformation" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" ""
+nh3_9.0 "NH3 ice umbrella" NH3 band 9.0 8.8 9.3 "nu2 umbrella" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" "inside the silicate band"
+nh4_6.85 "NH4+ ice" NH4+ band 6.85 6.7 7.0 "nu4 deformation" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" "6.85 um band carrier debated"
+hcooh_7.25 "HCOOH / 7.25 um" HCOOH band 7.25 7.2 7.32 "C-H bend" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" "also C2H5OH; the 7.2/7.4 complex"
+ch3cho_7.41 "CH3CHO / 7.41 um" CH3CHO band 7.41 7.36 7.46 "CH3 deformation" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" "part of the 7.2/7.4 complex"
+h2co_5.81 "H2CO ice" H2CO band 5.81 5.77 5.85 "C=O stretch" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" "in the 5-8 um complex"
+so2_7.6 "SO2 ice" SO2 band 7.6 7.55 7.66 "nu3 stretch" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" tentative
+ice_5-8_complex "5-8 um ice complex" mixed band nan 5.2 8.0 "H2O bend + organics" "Boogert, Gerakines & Whittet 2015, ARA&A 53, 541 (review); Rocha et al. 2024 (JWST Ice Age); McClure et al. 2023" "Boogert 2008 C1-C5 components"
+silicate_9.7 "silicate 9.7 (dust)" silicate band 9.7 8.0 12.5 "Si-O stretch" "Kessler-Silacci et al. 2006" "not ice: listed for masking"
+silicate_18 "silicate 18 (dust)" silicate band 18.0 15.5 22.0 "O-Si-O bend" "Kessler-Silacci et al. 2006" "not ice: listed for masking"

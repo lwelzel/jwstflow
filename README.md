@@ -3,7 +3,7 @@
 <p align="center">
   <a href="https://github.com/spacetelescope/jwst"><img alt="jwst" src="https://img.shields.io/badge/jwst-3.x-blue"></a>
   <img alt="python" src="https://img.shields.io/badge/python-%E2%89%A53.12-blue">
-  <img alt="tests" src="https://img.shields.io/badge/tests-81%20passing-brightgreen">
+  <img alt="tests" src="https://img.shields.io/badge/tests-19%20passing-brightgreen">
   <img alt="status" src="https://img.shields.io/badge/status-alpha-orange">
 </p>
 
@@ -39,14 +39,16 @@ so you can inspect what a workflow does before and after it runs.
 ## Installation
 
 ```bash
-git clone <repo-url> jwstflow && cd jwstflow
-uv sync                    # core: jwstflow + the official jwst pipeline
+uv pip install git+https://github.com/lwelzel/jwstflow   # core: jwstflow + the official jwst pipeline
 ```
-If you or your collaboration has proprietary steps you can simply plug them in:
+Contributed step packages are separate distributions that register their steps
+with jwstflow on install -- add the ones you have access to:
 ```bash
-uv sync --extra joys       # e.g. + JOYS+ (PI: E. F. van Dishoeck, M. E. Ressler, T. P. Ray, T. P. Greene) contributed steps
-uv sync --all-extras       # every contributed package in ./contrib_packages
+uv pip install jwstflow-midas                                  # public contributed steps
+uv pip install git+ssh://git@github.com/<org>/jwstflow-joys    # proprietary, e.g. JOYS+
 ```
+Your reductions live in a project repository of their own that depends on
+jwstflow (see [docs/guide.md](docs/guide.md), "Projects, targets, runs").
 
 Put your credentials in the project root (they are found automatically):
 `.env.crds` with `CRDS_PATH=...`, and `CRDS_SERVER_URL=...`, as well as `.env.mast` with `MAST_API_TOKEN=...`
@@ -58,7 +60,7 @@ Put your credentials in the project root (they are found automatically):
 ### One command per reduction
 
 ```bash
-uv run jwstflow run reductions/eso-ha-569/nirspec_ifu.yaml # example
+uv run jwstflow run reductions/eso-ha-569/nirspec_ifu.yaml # from inside your reduction project repo
 ```
 
 A run downloads what it needs, syncs CRDS, executes the stages in parallel
@@ -103,6 +105,7 @@ Start from a preset (`extends: preset:nirspec_ifu`; also `nirspec_mos`,
 | `debug-task <wf> <task-id>` | rerun one task in-process (drop into `pdb` on failure) |
 | `steps [--describe NAME]` | list every available step: official, contributed, plugins |
 | `check-step SPEC` / `new-step Name` | audit a custom step against the contract / scaffold one with a test |
+| `new-package NAME [--steps a,b] [--private]` | scaffold a whole contributed package: entry points, stubs, tests, README, git |
 | `init [preset]` | write a starter workflow |
 
 Everything is also a Python API (`load_config`, `Runner`); see
@@ -150,7 +153,7 @@ will change to the reference -- check back before submitting.
 ## Author & license
 
 Lukas Welzel (<welzel@strw.leidenuniv.nl>), Leiden Observatory.
-Issues and contributions are welcome; run `python -m pytest` (core) and
-`python -m pytest contrib_packages/jwstflow-joys` before a PR.
+Issues and contributions are welcome; run `python -m pytest` before a PR
+(contributed packages carry their own test suites in their own repositories).
 
-License: to be decided before public release.
+License: BSD 3-Clause (see [LICENSE](LICENSE)).

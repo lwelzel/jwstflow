@@ -32,11 +32,12 @@ DATASETS = ("gas_lines", "pah_bands", "ice_bands")
 
 
 def data_dir() -> Path:
-    """Directory holding jwstflow's data products (spectral features, ...).
+    """Directory holding jwstflow's reference data (spectral features, ...).
 
-    Order: ``$JWSTFLOW_DATA_DIR``; ``<project root>/data`` of the working
-    directory; the ``data/`` directory next to the jwstflow source tree (an
-    editable/checkout install). Data is kept out of the package on purpose.
+    The curated tables ship *inside* the package (``jwstflow/refdata``) so any
+    install has them; a project can override them by placing a
+    ``data/spectral_features/`` directory at its project root, or by setting
+    ``$JWSTFLOW_DATA_DIR``. Lookup order: env var, project override, package.
     """
     from .project import find_project_root
 
@@ -44,13 +45,13 @@ def data_dir() -> Path:
     if os.environ.get("JWSTFLOW_DATA_DIR"):
         candidates.append(Path(os.environ["JWSTFLOW_DATA_DIR"]).expanduser())
     candidates.append(find_project_root(Path.cwd()) / "data")
-    candidates.append(Path(__file__).resolve().parents[2] / "data")
+    candidates.append(Path(__file__).resolve().parent / "refdata")
     for c in candidates:
         if (c / "spectral_features").is_dir():
             return c
     raise FileNotFoundError(
-        "jwstflow data directory not found; set JWSTFLOW_DATA_DIR or keep a `data/` directory "
-        f"in the project root (looked at {[str(c) for c in candidates]})"
+        "jwstflow reference data not found (broken install?); looked at "
+        f"{[str(c) for c in candidates]}"
     )
 
 

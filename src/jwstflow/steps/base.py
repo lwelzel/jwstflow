@@ -152,6 +152,7 @@ CONTRIB_ALIASES: dict[str, str] = {
     "header_summary": "jwstflow.contrib.qa:HeaderSummary",
     "fix_msa_metafile": "jwstflow.contrib.nirspec:fix_msa_metafile",
     "mast_compare": "jwstflow.contrib.mast_compare:MastCompare",
+    "stitch_segments": "jwstflow.stitching:StitchSegments",
 }
 
 ALIAS_ASN_TYPE: dict[str, str] = {
@@ -483,10 +484,19 @@ def is_path_spec(spec: str) -> bool:
 
 
 def import_file(path: str | Path) -> Any:
-    """Import a Python file as a module named after its stem (cached in sys.modules)."""
+    """Import a Python file as a module named after its stem (cached in sys.modules).
+
+    The file's directory is put on ``sys.path`` first -- exactly what
+    :func:`activate_plugins` does for a workflow's ``plugins:`` -- so a plugin
+    file behaves the same under ``jwstflow check-step ./steps.py:X`` as inside
+    a run, including imports of sibling modules.
+    """
     path = Path(path).expanduser().resolve()
     if not path.is_file():
         raise ImportError(f"step file not found: {path}")
+    directory = str(path.parent)
+    if directory not in sys.path:
+        sys.path.insert(0, directory)
     name = path.stem
     existing = sys.modules.get(name)
     if existing is not None and Path(getattr(existing, "__file__", "") or "").resolve() == path:
@@ -591,6 +601,24 @@ def import_object(dotted: str) -> Any:
     raise ImportError(f"cannot import {dotted!r}")
 
 
+def step_package_versions() -> dict[str, str]:
+    """Installed distributions providing `jwstflow.steps` entry points -> version.
+
+    Recorded in every run manifest so a reduction's provenance names the
+    contributed-package versions that produced it, next to jwst and CRDS.
+    """
+    from importlib.metadata import distributions
+
+    out: dict[str, str] = {}
+    for dist in distributions():
+        try:
+            if any(ep.group == ENTRY_POINT_GROUP for ep in dist.entry_points):
+                out[str(dist.metadata["Name"])] = str(dist.version)
+        except Exception:  # a broken .dist-info must never take the run down
+            continue
+    return dict(sorted(out.items()))
+
+
 def registered_steps() -> dict[str, str]:
     """All known step names -> description (built-ins, entry points, runtime registry)."""
     out = {k: v for k, v in BUILTIN_ALIASES.items()}
@@ -608,29 +636,31 @@ def resolve_target(spec: str) -> Any:
         return _REGISTRY[spec]
     if spec in BUILTIN_ALIASES:
         return import_object(BUILTIN_ALIASES[spec])
-    for ep in entry_points(group=ENTRY_POINT_GROUP):
-        if ep.name == spec:
-            return ep.load()
+    matches = [ep for ep in entry_points(group=ENTRY_POINT_GROUP) if ep.name == spec]
+    if matches:
+        if len({ep.value for ep in matches}) > 1:
+            log.warning("step name %r is registered by several installed packages (%s); using %s -- "
+                        "uninstall one, or address the step by dotted path",
+                        spec, ", ".join(sorted({ep.value for ep in matches})), matches[0].value)
+        return matches[0].load()
     if spec in CONTRIB_ALIASES:
         return import_object(CONTRIB_ALIASES[spec])
     return import_object(spec)
 
 
-def source_fingerprint(spec: str) -> str | None:
-    """Short hash of the source file that defines a user step, or None.
+def source_origin(spec: str) -> Path | None:
+    """Path of the source file that defines a user step, or None.
 
     Built-in jwst aliases return None (the jwst version already identifies
     them). For dotted paths, entry points and registered objects the module
     file is located with ``importlib.util.find_spec`` -- the module is *not*
-    imported -- and hashed, so editing a custom step invalidates its tasks.
+    imported.
     """
     if spec in BUILTIN_ALIASES:
         return None
     if is_path_spec(spec):
         file = Path(spec.rpartition(":")[0]).expanduser()
-        if not file.is_file():
-            return None
-        return hashlib.sha1(file.read_bytes()).hexdigest()[:12]
+        return file if file.is_file() else None
     if spec in _REGISTRY:
         mod_name = getattr(_REGISTRY[spec], "__module__", None)
     else:
@@ -649,8 +679,37 @@ def source_fingerprint(spec: str) -> str | None:
     origin = getattr(found, "origin", None)
     if not origin or not os.path.isfile(origin):
         return None
-    with open(origin, "rb") as fh:
-        return hashlib.sha1(fh.read()).hexdigest()[:12]
+    return Path(origin)
+
+
+def source_fingerprint(spec: str) -> str | None:
+    """Short hash of the file that defines a user step (None for jwst built-ins),
+    so editing a custom step invalidates its tasks."""
+    origin = source_origin(spec)
+    if origin is None:
+        return None
+    return hashlib.sha1(origin.read_bytes()).hexdigest()[:12]
+
+
+def plugins_fingerprint(paths: Iterable[str | Path]) -> str | None:
+    """One short hash over every plugin source file of a workflow.
+
+    ``plugins:`` files may import each other (helpers next to a workflow's
+    ``steps.py``), so a step's own file hash is not enough to invalidate its
+    checkpoints -- this combined hash is folded into the task identity of
+    every step that is defined inside a plugin location. Files are hashed
+    directly; for directories, their top-level ``*.py`` files.
+    """
+    entries: list[tuple[str, str]] = []
+    for entry in paths:
+        path = Path(entry).expanduser().resolve()
+        files = [path] if path.is_file() else sorted(path.glob("*.py")) if path.is_dir() else []
+        for f in files:
+            entries.append((f.name, hashlib.sha1(f.read_bytes()).hexdigest()))
+    if not entries:
+        return None
+    combined = hashlib.sha1(repr(sorted(entries)).encode())
+    return combined.hexdigest()[:12]
 
 
 def is_stpipe_step(obj: Any) -> bool:

@@ -31,14 +31,12 @@ dependencies = [
     "typer>=0.27.1",
 ]
 
-# Contributed step packages: optional, resolved from this workspace.
-# Not installed by default. 
-# Install: 
-#   `uv sync --extra joys` (or `--all-extras`)
-# Alternative pip install:
-#   `pip install jwstflow[joys]`
-[project.optional-dependencies]
-joys = ["jwstflow-joys"]
+# Contributed step packages are separate distributions that depend on jwstflow and
+# register their steps in the `jwstflow.steps` entry-point group; the core never
+# references them. Install whichever you have access to, e.g.:
+#   uv pip install jwstflow-midas                          # public, PyPI/git
+#   uv pip install git+ssh://git@github.com/<org>/jwstflow-joys  # private
+# `jwstflow steps` lists whatever is installed.
 
 [project.scripts]
 jwstflow = "jwstflow.cli:app"
@@ -49,6 +47,8 @@ plot_spectrum = "jwstflow.contrib.qa:PlotSpectrum"
 quicklook_image = "jwstflow.contrib.qa:QuicklookImage"
 header_summary = "jwstflow.contrib.qa:HeaderSummary"
 fix_msa_metafile = "jwstflow.contrib.nirspec:fix_msa_metafile"
+mast_compare = "jwstflow.contrib.mast_compare:MastCompare"
+stitch_segments = "jwstflow.stitching:StitchSegments"
 
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]
@@ -57,14 +57,8 @@ build-backend = "uv_build"
 [tool.uv]
 link-mode = "copy"
 
-[tool.uv.workspace]
-members = ["contrib_packages/*"]
-
-[tool.uv.sources]
-jwstflow-joys = { 
-    workspace = true,
-    # index = "joys", # cannot specify both, TODO when jwst becomes public but JOYS+ pipeline remains private
-}
+[tool.pytest.ini_options]
+testpaths = ["tests", "examples"]   # the migration/ staging repos carry their own suites
 
 [dependency-groups]
 dev = [

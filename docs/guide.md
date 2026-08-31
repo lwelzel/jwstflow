@@ -36,20 +36,29 @@ so wrapping them in one of those systems later is straightforward.
 
 ## Projects, targets, runs
 
-jwstflow works inside a *project*: the directory tree that holds your
-workflows (a git checkout or uv project; the nearest ancestor with `.git`,
+jwstflow is an installed library/CLI; your reductions live in a **project
+repository of their own**, not inside the jwstflow checkout. A project is the
+directory tree that holds your workflows (the nearest ancestor with `.git`,
 `pyproject.toml`, `uv.lock` or a `.jwstflow-root` marker). Two things come
 from the project root: every `.env` / `.env.*` file there is loaded (they win
 over the shell unless `env_file_override: false`), and the default
-`workspace` is `<project root>/reductions`.
+`workspace` is `<project root>/reductions`. A minimal project:
+
+```
+my-survey/                              your repo; depends on jwstflow (+ contributed packages)
+  pyproject.toml
+  src/my_survey_steps/                  steps shared across the project's targets (optional)
+  reductions/eso-ha-569/…               targets, workflows, and their products (below)
+```
 
 A workflow names a **target** and a **run**; a target directory holds the raw
 data of all its observations and one run per reduction, and a run holds its
-products by calibration level:
+products by calibration level (version the YAMLs and `steps.py`, ignore
+`raw/` and the run directories):
 
 ```
 reductions/eso-ha-569/                 target: ESO-Ha 569  (slugified)
-  nirspec_ifu.yaml  miri_mrs.yaml  combine.yaml  steps.py     the workflows and custom steps
+  nirspec_ifu.yaml  miri_mrs.yaml  combine.yaml  steps.py     the workflows and target-specific steps
   raw/                                  downloads of every instrument/observation of the target
   raw/mast_observations.json            MAST obs_ids (carry the DMS target id, e.g. t010)
   targets.json                          cached name -> coordinates lookups
@@ -61,6 +70,80 @@ reductions/eso-ha-569/                 target: ESO-Ha 569  (slugified)
   miri_mrs/                             another run of the same target
   combine/                              a level-4 run reading from both (`inputs: [{run: nirspec_ifu, ...}]`)
 ```
+
+## Where step code lives: the graduation ladder
+
+Step code has a life cycle; keep each step at the lowest tier that fits it,
+and promote it when it is reused:
+
+1. **`steps.py` next to the workflow** (`plugins:`) -- genuinely one-off,
+   target-specific science: a rejection list, a hand-tuned subclass of a
+   contributed step. It is part of the reduction's provenance (its content is
+   hashed into the task ids) and must stay **single-file and self-contained**;
+   the moment it wants to import a sibling file, promote it.
+2. **Your project's package** (`src/my_survey_steps/`) -- steps shared by
+   several targets of one project. An ordinary package; reference steps by
+   dotted path (`my_survey_steps.disks:DiskMask`) or register entry points.
+3. **A contributed package** (`jwstflow-<name>` on PyPI or a git host) --
+   steps useful beyond one project. See the next section.
+4. **jwstflow itself** -- only broadly useful, dependency-free machinery
+   (`jwstflow.contrib` QA steps, the `jwstflow.masks` / `jwstflow.stitching`
+   contracts).
+
+## Contributed packages
+
+A contributed package is an ordinary distribution that **depends on
+jwstflow** and registers its steps in the `jwstflow.steps` entry-point
+group -- the core never references it, so absent or private packages can
+never break anyone's install:
+
+```toml
+[project]
+name = "jwstflow-midas"
+dependencies = ["jwstflow"]
+
+[project.entry-points."jwstflow.steps"]
+disk_mask = "jwstflow_midas.disk_mask:DiskMask"
+```
+
+Start a new package with the generator -- it writes the whole boilerplate
+(pyproject with entry points, src layout, step stubs whose `run()` awaits
+your science, a passing declaration test, README with a publish-to-GitHub
+walkthrough, CI workflow) and initialises a git repository:
+
+```bash
+jwstflow new-package jwstflow-mysteps --steps defringe,stitch_bands [--private]
+```
+
+The templates live inside jwstflow, so generated boilerplate always matches
+the plugin contract of the installed version. Users install whichever
+packages they have access to and reference the steps by entry-point name in
+YAML; `jwstflow steps` lists everything installed.
+Public packages come from PyPI or a public git URL; proprietary ones (e.g.
+JOYS+) live in private repositories and install with
+`uv pip install git+ssh://git@github.com/<org>/jwstflow-joys` (pin them in
+your *project's* `tool.uv.sources`, never in jwstflow's). Entry-point names
+are global across installed packages, so pick distinctive names and keep a
+step's canonical `name` equal to its entry-point name. Contributed steps
+should bump their `version` attribute when results change -- the module file
+hash covers direct edits, but not edits to helper modules.
+
+## Shared step contracts
+
+Two product shapes recur across instruments and packages, so their layout is
+fixed in core and plugins build on them instead of inventing variants:
+
+* **Mask products** (`jwstflow.masks`): wavelength-resolved spatial masks for
+  IFU cubes (a source aperture, a background exclusion zone, ...) in one FITS
+  layout (MASK/CONT/CONTIMG + optional per-feature extensions), with
+  `write_mask_product` / `read_mask_product` / `mask_from_stage` and the
+  geometry helpers (WCS resampling, NaN-aware smoothing, morphological
+  cleanup) such steps share. Any step can consume any other step's mask.
+* **Stitching** (`jwstflow.stitching.StitchSegments`, YAML name
+  `stitch_segments`): splice N overlapping 1-D segments (NIRSpec gratings,
+  MRS bands) with measured overlap ratios, optional rescaling onto a
+  reference segment, and configurable crossovers. Usable directly from YAML;
+  contributed packages subclass it for mode-specific behaviour.
 
 Stage names are **derived from the step**, never chosen in the YAML: the stpipe
 `class_alias` (`calwebb_spec3`, `extract_1d`; a subclass inherits it unless it
@@ -85,10 +168,12 @@ edit in the header.
 
 ## Data products shipped with jwstflow
 
-Reference data lives outside the code, in `data/` at the project root
-(`data/spectral_features/*.ecsv` today). It is found through
-`$JWSTFLOW_DATA_DIR`, then `<project root>/data`, then the `data/` directory
-of the jwstflow checkout; a wheel-only install needs one of the first two.
+Curated reference tables (`spectral_features/*.ecsv` today) ship **inside**
+the package (`jwstflow/refdata/`), so every install has them. A project can
+override them with a `data/spectral_features/` directory at its project root,
+or point `$JWSTFLOW_DATA_DIR` somewhere else; lookup order is env var,
+project override, package. Observational data and run products are never
+mixed into either.
 
 ## Prefetching and what runs in parallel
 
@@ -214,8 +299,10 @@ Environment files and custom-step code:
 ```yaml
 env_file: [../secrets/crds.env]   # optional; a `.env` next to the YAML, in any parent
                                   # directory, or in the cwd is loaded automatically
-plugins: [./my_steps.py, ./lib]   # files become importable by their stem, directories
-                                  # go on sys.path -- in the workers as well
+plugins: [./steps.py]             # files become importable by their stem, directories
+                                  # go on sys.path -- in the workers as well. Keep plugin
+                                  # files single and self-contained (see the graduation
+                                  # ladder); shared code belongs in a package.
 ```
 
 dotenv files (`.env`, `.env.crds`, `.env.mast`, … in the project root) hold
@@ -305,7 +392,8 @@ with that id exists and its outputs are still present. Consequently:
 * upgrading `jwst` or pinning a different CRDS context reruns everything;
 * editing the Python file that defines a custom step reruns that step's tasks
   (the file's hash is part of the task id; official jwst steps are covered by
-  the jwst version instead);
+  the jwst version instead), and editing *any* `plugins:` file reruns every
+  plugin-defined step's tasks (plugin files may import each other);
 * `--force`, `force: true` on a stage, or `jwstflow clean` override this.
 
 stpipe stages write into a private `<stage>/.tmp-<task>/` directory that is
@@ -340,18 +428,20 @@ print(summary.ok)
 
 ## Testing status
 
-`python -m pytest` runs 51 tests. Without `jwst` installed they cover
-configuration composition and validation, header filters, association
-building (imprints, nod backgrounds, grouping, product names), the runner on
-the serial and process backends (checkpoint reuse, invalidation, `--force`,
-`on_error`, stage selection) and the CLI. With `jwst` installed two more run:
-a real `JwstStep` through the adapter in a spawned process pool (outputs,
-per-task logs, cache hits), and the official DMS association generator at
-levels 2 and 3. These were run against jwst 3.0.0 / stpipe 1.1.0.
+`python -m pytest` runs the suite in `tests/` plus the example-step tests in
+`examples/`: the mask-product contract (`jwstflow.masks`), the generic
+stitcher (`jwstflow.stitching`), x1d writing with extra columns, the packaged
+reference data and its project override, the contributed-package generator
+(`jwstflow new-package`, both flavours, generated steps audited against the
+contract), and the three example custom-step flavours end to end on synthetic
+data. Contributed packages carry their own suites in their own repositories
+and are run there.
 
-Not exercised by tests (no network/CRDS in the development environment):
+Not exercised by tests in this repository: the configuration/association/
+runner internals (an earlier private suite; re-adding it is on the roadmap),
 end-to-end runs of the official pipelines on real data, the MAST download
-backends, `crds.prefetch`, and the dask backend.
+backends, `crds.prefetch`, and the dask backend. Current development is
+verified against jwst 3.0.0 / stpipe 1.1.0.
 
 ## Roadmap
 

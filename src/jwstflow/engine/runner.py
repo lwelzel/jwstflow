@@ -44,8 +44,11 @@ from ..steps.base import (
     activate_plugins,
     default_thread_env,
     is_stpipe_step,
+    plugins_fingerprint,
     resolve_target,
     source_fingerprint,
+    source_origin,
+    step_package_versions,
 )
 from .executor import Executor, Payload, Result, make_executor
 from .graph import select_stages
@@ -128,6 +131,8 @@ class Runner:
         self._batch_modes: dict[str, str] = {}
         self._step_classes: dict[str, type | None] = {}
         self.sys_path = activate_plugins(cfg.plugins)  # user step code, also handed to workers
+        self._plugins_hash = plugins_fingerprint(cfg.plugins)
+        self._plugin_dirs = [p if p.is_dir() else p.parent for p in (Path(x).expanduser().resolve() for x in cfg.plugins)]
         self.state = StateStore(cfg.state_dir / "state")
         self.headers = HeaderCache(cfg.state_dir / "headers.json")
         self.crds_context: str | None = None
@@ -163,6 +168,7 @@ class Runner:
             "jwstflow": _pkg_version("jwstflow"),
             "jwst": _pkg_version("jwst"),
             "stpipe": _pkg_version("stpipe"),
+            "step_packages": step_package_versions(),
             "crds": {**crds_mod.describe(), "pinned_context": self.crds_context},
             "selection": self.selection,
             "force": self.force,
@@ -378,6 +384,14 @@ class Runner:
                 log.warning("stage %s: %d input file(s) do not match the step's declared inputs %s (e.g. %s)",
                             stage.name, len(odd), patterns, odd[0])
 
+    def _step_from_plugins(self, spec: str) -> bool:
+        """True when the step's defining file lives in one of the workflow's plugin locations."""
+        origin = source_origin(spec)
+        if origin is None:
+            return False
+        origin = origin.resolve()
+        return any(d == origin.parent or d in origin.parents for d in self._plugin_dirs)
+
     def batch_mode(self, stage: StageConfig) -> str:
         """'per_file' or 'all': the YAML value if given, else the step's own `batch`
         attribute (jwst steps and pipelines are always per_file)."""
@@ -415,6 +429,9 @@ class Runner:
             self._source_hashes[stage.step] = source_fingerprint(stage.step)
         if self._source_hashes[stage.step]:
             signature["step_source"] = self._source_hashes[stage.step]
+        if self._plugins_hash and self._step_from_plugins(stage.step):
+            # plugin files may import each other, so any plugin edit invalidates plugin tasks
+            signature["plugins_source"] = self._plugins_hash
         tid = make_task_id(stage.name, stage.step, [str(p) for p in inputs], params, fps, signature)
         cached = None
         if not (self.force or stage.force):

@@ -61,17 +61,23 @@ def x1d_table(wave: np.ndarray, **columns: Any) -> np.ndarray:
 
 
 def write_x1d(path: Path, spectrum: Spectrum1D, *, like: Any = None, surf_bright: np.ndarray | None = None,
-              header: dict[str, Any] | None = None) -> Path:
+              header: dict[str, Any] | None = None, columns: dict[str, Any] | None = None) -> Path:
     """Write ``spectrum`` as a ``MultiSpecModel`` (one EXTRACT1D extension).
 
     ``like`` is a datamodel (or path) whose primary metadata is copied so
-    instrument keywords travel along; ``header`` adds/overrides primary keywords.
+    instrument keywords travel along; ``header`` adds/overrides primary keywords;
+    ``columns`` fills any further EXTRACT1D columns (``sb_error``, ``npixels``,
+    ``background``, ... -- see :data:`X1D_COLUMNS`), which would otherwise be zero.
     """
     from stdatamodels.jwst import datamodels
 
     cols = {"flux": spectrum.flux, "flux_error": spectrum.error, "dq": spectrum.dq}
     if surf_bright is not None:
         cols["surf_bright"] = surf_bright
+    for name, values in (columns or {}).items():
+        if name.upper() not in X1D_COLUMNS:
+            raise ValueError(f"unknown EXTRACT1D column {name!r}; valid: {X1D_COLUMNS}")
+        cols[name.lower()] = values
     spec = datamodels.SpecModel()
     spec.spec_table = x1d_table(spectrum.wavelength, **cols)
     multi = datamodels.MultiSpecModel()

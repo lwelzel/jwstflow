@@ -43,10 +43,13 @@ What jwstflow enforces, and when:
 | files written but not returned | after the stage | orphan warning |
 
 The context gives a step everything it may need: `ctx.output_dir`,
-`ctx.derived_path()`, `ctx.log`, `ctx.raw_dir`, `ctx.target` /
-`ctx.target_coords` / `ctx.target_dir` (for `jwstflow.targets`), `ctx.reference_dir`,
+`ctx.derived_path()`, `ctx.log`, `ctx.raw_dir`, `ctx.dir_of(stage)` (companion
+products of another stage), `ctx.target` / `ctx.target_coords` /
+`ctx.target_dir` (for `jwstflow.targets`), `ctx.reference_dir`,
 `ctx.crds_context`. Shared building blocks live in `jwstflow.spectra` (x1d
-I/O, cube wavelengths), `jwstflow.features` (line/band datasets),
+I/O, cube wavelengths), `jwstflow.masks` (the wavelength-resolved mask-product
+contract and its geometry helpers), `jwstflow.stitching` (the generic segment
+stitcher to subclass), `jwstflow.features` (line/band datasets),
 `jwstflow.targets` (positions) and `jwstflow.naming`.
 
 Steps that deliberately write *edited copies of official products* under the
@@ -56,11 +59,12 @@ record the edit in the header; everything else uses its own suffix.
 Tooling:
 
 ```bash
-jwstflow new-step ExtractExtended --dir reductions/my-target --level 4 --inputs "*_s3d.fits" --suffix s1d
+jwstflow new-step ExtractExtended --level 4 --inputs "*_s3d.fits" --suffix s1d
                                    # writes extract_extended.py + test_extract_extended.py (both pass)
+jwstflow new-package jwstflow-mysteps --steps defringe,stitch_bands [--private]
+                                   # scaffolds a whole contributed package (entry points, tests, README, git)
 jwstflow check-step ./steps.py:ExtractExtended mrs_extract spec3
                                    # audits declaration, run() signature, Params vs keywords
-python -m pytest reductions/my-target
 ```
 
 `jwstflow.testing` backs the tests: `run_step(step, inputs, tmp_path, params=...)`
@@ -119,24 +123,24 @@ If a stage's directory contains files that no current task produced (left
 over from a run with other parameters or product names), the run warns and
 `jwstflow clean my_run.yaml --stage <name> --orphans` deletes just those files.
 
-`reductions/eso-ha-569/` is a complete real case: `nirspec_ifu.yaml` (MAST
-level-2 inputs, custom frame/gap rejection, in-field background fed to the
-official `master_background` step through a `Spec3Pipeline` subclass,
-extended-source extraction, stitching), `miri_mrs.yaml` (background
-observation, `selfcal` members, jwstflow-joys extraction) and `combine.yaml`
-(a level-4 run stitching both instruments).
+A complete real case lives in the `jwstflow-reducer` project repository
+(MIDAS): `reductions/eso-ha-569/nirspec_ifu.yaml` drives MAST level-1b inputs
+through frame/gap rejection, a jointly-built disk emission mask, an in-field
+background fed to the official `master_background` step through a
+`Spec3Pipeline` subclass, mask-based extended-source extraction and grating
+stitching -- every stage served by installed packages, with the target-local
+`steps.py` as the escape hatch.
 
 ## Contributed step packages
 
-Steps that belong to a collaboration or project live in their own package
-and register through the `jwstflow.steps` entry-point group; installing the
-package is all it takes for `step: <name>` to work. `contrib_packages/jwstflow-joys`
-is the first: MIRI MRS multi-aperture extraction, band stitching, spike
-cleaning, LSR correction, region masking and Gaia astrometry, re-implemented
-from the JOYS+ `icebear` scripts (its `REVIEW.md` documents what was kept
-and why the rest was not).
-
-`jwstflow.spectra` offers the shared building blocks for such steps: x1d
-reading/writing in the pipeline's format, cube wavelength axes, the MRS PSF
-FWHM relation.
+Steps that belong to a collaboration or project live in their own installable
+package and register through the `jwstflow.steps` entry-point group;
+installing the package is all it takes for `step: <name>` to work, and
+`jwstflow steps` lists everything installed. Scaffold one with
+`jwstflow new-package` (see the guide's "Contributed packages" section for
+the tiers, distribution and versioning conventions). Existing packages:
+`jwstflow-midas` (public: edge-on disk masks, backgrounds, extraction, QA,
+built on the `jwstflow.masks` contract) and `jwstflow-joys` (private: JOYS+
+MIRI MRS astrometry, LSR, region masking, defringing, multi-aperture
+extraction, cleaning and band stitching).
 

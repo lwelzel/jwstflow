@@ -373,6 +373,38 @@ def new_step(
     console.print(f"next: edit the run() method, then `python -m pytest {directory}` and `jwstflow check-step {directory}/<module>.py:{class_name}`")
 
 
+@app.command("new-package")
+def new_package(
+    name: Annotated[str, typer.Argument(help="Distribution name, e.g. jwstflow-mysteps (lowercase-with-dashes)")],
+    directory: Annotated[Path, typer.Option("--dir", help="Parent directory; the package is written to <dir>/<name>")] = Path("."),
+    steps: Annotated[str | None, typer.Option("--steps", help="Comma-separated snake_case step names (default: one stub named after the package)")] = None,
+    private: Annotated[bool, typer.Option("--private", help="Proprietary flavour: restrictive LICENSE, 'Private :: Do Not Upload' classifier, private-repo instructions")] = False,
+    git: Annotated[bool, typer.Option("--git/--no-git", help="Initialise a git repository with an initial commit")] = True,
+) -> None:
+    """Scaffold a contributed step package: pyproject with `jwstflow.steps` entry points, src layout,
+    step stubs, a passing declaration test, README (with a publish-to-GitHub walkthrough), CI and git.
+    Only scaffolding is generated -- each step's run() awaits your science."""
+    from .scaffold import scaffold_package
+
+    step_names = [s.strip() for s in steps.split(",") if s.strip()] if steps else None
+    try:
+        root, files, notes = scaffold_package(name, directory, steps=step_names, private=private, git=git)
+    except (ValueError, FileExistsError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    for f in files:
+        console.print(f"wrote {f.relative_to(directory) if f.is_relative_to(directory) else f}")
+    for note in notes:
+        console.print(f"[yellow]{note}[/yellow]")
+    console.print(
+        f"\nnext:\n"
+        f"  cd {root}\n"
+        f"  uv sync && uv run python -m pytest     # green before any science exists\n"
+        f"  edit src/{name.replace('-', '_')}/steps.py   # implement each step's run()\n"
+        f"  README.md walks through publishing to GitHub ({'private' if private else 'public'})"
+    )
+
+
 @app.command()
 def steps() -> None:
     """List step names usable in `step:` (built-in aliases, entry points, registry)."""
