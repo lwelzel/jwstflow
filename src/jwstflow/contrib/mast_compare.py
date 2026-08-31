@@ -33,7 +33,24 @@ log = logging.getLogger(__name__)
 
 
 class MastCompare(Step):
-    """Difference a jwstflow s3d/x1d product against the MAST archive product of the same name."""
+    """Difference a jwstflow s3d/x1d product against the MAST archive product of the same name.
+
+    The reference is MAST's own reduction of the same observations, fetched by
+    ``download.reference_products: true`` into ``<target>/mast_reference/<run>/``
+    (mirroring the run's layout). Each input is matched with the reference file
+    at the same relative path -- jwstflow reproduces the DMS names, so
+    ``..._s3d.fits`` finds its archive twin -- falling back to a search by
+    name. Then, per product type:
+
+    * ``_s3d``: DIFF = jwstflow - MAST and RATIO cubes (when both share a
+      grid) plus a SUMMARY table of per-plane statistics -> ``*_s3ddiff.fits``;
+    * ``_x1d``: a table WAVELENGTH / FLUX_JWSTFLOW / FLUX_MAST (interpolated
+      onto jwstflow's wavelengths) / DIFF / RATIO -> ``*_x1ddiff.fits``, and a
+      figure with both spectra and their ratio.
+
+    Every output records both provenances (CAL_VER/CRDS context of each side).
+    Inputs without a reference are skipped with a warning.
+    """
 
     level = "qa"
     version = "2"   # 1 -> 2: jwstflow QA figure standard (qafig)

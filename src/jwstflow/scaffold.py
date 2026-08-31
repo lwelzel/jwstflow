@@ -185,7 +185,9 @@ __version__ = "0.1.0"
 _STEPS_HEADER = '''\
 """Steps of $name. Implement run() per step; the declarations below are the contract.
 
-The one-line docstring of each class is what `jwstflow steps --describe` shows.
+The docstring of each class is the step's description in `jwstflow steps`:
+its first paragraph is the short summary (the table), the rest the detailed
+explanation (`jwstflow steps <name>`).
 See jwstflow's docs (custom steps, `jwstflow.masks`, `jwstflow.stitching`) for
 the helpers and product contracts available to build on.
 """
@@ -202,7 +204,11 @@ log = logging.getLogger(__name__)
 
 _STEP_TEMPLATE = '''\
 class $cls(Step):
-    """$title: one line on what this step produces."""
+    """$title: one line on what this step produces (the `jwstflow steps` table).
+
+    Detailed description (`jwstflow steps $snake`): what run() computes, in
+    order, and what the output product contains.
+    """
 
     name = "$snake"                # canonical stage name == the entry-point name in pyproject.toml
     level = 4                      # 1/2/3 jwst stages, 4 derived products, "qa" plots

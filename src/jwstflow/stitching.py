@@ -40,7 +40,29 @@ log = logging.getLogger(__name__)
 
 
 class StitchSegments(Step):
-    """Splice overlapping 1-D spectra (``batch=all``: one task receives every segment)."""
+    """Splice overlapping 1-D spectra (``batch=all``: one task receives every segment).
+
+    Combines the wavelength-ordered segments of one target (NIRSpec gratings,
+    MRS bands, ...) into a single spectrum:
+
+    1. each input's EXTRACT1D/COMBINE1D table is read and sorted by
+       wavelength; segments are labelled from their headers (grating-filter /
+       channel-band) and ordered blue to red;
+    2. in every overlap between neighbours the median flux ratio is measured
+       (always recorded in the output metadata; applied only with
+       ``rescale``, which multiplicatively chains all segments onto the
+       ``reference`` segment -- default the reddest);
+    3. the combination switches from one segment to the next at the
+       ``crossovers`` wavelengths (default: the midpoint of each overlap, or
+       of the gap when neighbours do not overlap) -- no averaging across
+       segments, each wavelength comes from exactly one;
+    4. the result is one ECSV table (WAVELENGTH/FLUX/FLUX_ERROR/SEGMENT plus
+       scales, ratios and crossovers as metadata) named ``*_s1dcomb.ecsv``;
+       the ``plot_stitch`` QA step draws the comparison figure from it.
+
+    Contributed packages subclass it for mode-specific behaviour (labelling,
+    ratio measurement, validation) while producing byte-compatible products.
+    """
 
     inputs = ("*_s1d.fits", "*_x1d.fits", "*_c1d.fits")
     outputs = ("s1dcomb",)

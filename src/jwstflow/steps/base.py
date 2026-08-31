@@ -251,7 +251,11 @@ class Step(ABC):
     that lets jwstflow validate, document and test it without running it::
 
         class ExtractExtended(Step):
-            \"\"\"One-line summary (shown by `jwstflow steps --describe`).\"\"\"
+            \"\"\"One-line summary (the `jwstflow steps` table).
+
+            Detailed explanation of what run() computes, shown by
+            `jwstflow steps <name>` / `--describe`.
+            \"\"\"
 
             level = 4                       # 1/2/3 jwst stages, 4 derived products, "qa" plots
             batch = "per_file"              # or "all": one task with every input
@@ -331,8 +335,9 @@ class Step(ABC):
                                if field.default is not _PydanticUndefined() else "(required)",
                                "description": field.description or ""})
         name, level = identity_of(cls)
+        short, detailed = split_description(inspect.getdoc(cls))
         return {"name": name, "level": level, "batch": cls.batch, "inputs": list(cls.inputs), "outputs": list(cls.outputs),
-                "version": cls.version, "doc": (cls.__doc__ or "").strip().splitlines()[0] if cls.__doc__ else "", "params": params}
+                "version": cls.version, "doc": short, "description": detailed, "params": params}
 
 
 def _PydanticUndefined() -> Any:
@@ -621,7 +626,7 @@ def step_package_versions() -> dict[str, str]:
 
 
 def registered_steps() -> dict[str, str]:
-    """All known step names -> description (built-ins, entry points, runtime registry)."""
+    """All known step names -> target (built-ins, entry points, runtime registry)."""
     out = {k: v for k, v in BUILTIN_ALIASES.items()}
     out.update(CONTRIB_ALIASES)
     for ep in entry_points(group=ENTRY_POINT_GROUP):
@@ -629,6 +634,67 @@ def registered_steps() -> dict[str, str]:
     for k, v in _REGISTRY.items():
         out[k] = getattr(v, "__qualname__", repr(v))
     return out
+
+
+def split_description(doc: str | None) -> tuple[str, str]:
+    """``(short, detailed)`` from a docstring: the first paragraph collapsed to
+    one line, and everything after it."""
+    if not doc:
+        return "", ""
+    text = inspect.cleandoc(doc)
+    first, _, rest = text.partition("\n\n")
+    return " ".join(first.split()), rest.strip()
+
+
+def _docstring_from_source(spec: str) -> str | None:
+    """Docstring of the object a step spec names, parsed from its source file.
+
+    The module is located like in :func:`source_origin` but never executed, so
+    listing steps stays cheap even when a step's module imports heavy packages.
+    Only top-level classes/functions are found; a re-exported object yields None.
+    """
+    import ast
+
+    attr = spec.rpartition(":")[2] if ":" in spec else spec.rpartition(".")[2]
+    if spec in _REGISTRY:
+        obj = _REGISTRY[spec]  # already imported: ask the object itself
+        target = obj if isinstance(obj, type) or callable(obj) else type(obj)
+        return inspect.getdoc(target)
+    if not is_path_spec(spec):
+        dotted = CONTRIB_ALIASES.get(spec, spec)
+        for ep in entry_points(group=ENTRY_POINT_GROUP):
+            if ep.name == spec:
+                dotted = ep.value
+                break
+        attr = dotted.rpartition(":")[2] if ":" in dotted else dotted.rpartition(".")[2]
+    origin = source_origin(spec)
+    if origin is None or not attr:
+        return None
+    try:
+        tree = ast.parse(origin.read_text())
+    except (OSError, SyntaxError, ValueError):
+        return None
+    for node in tree.body:
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == attr:
+            return ast.get_docstring(node)
+    return None
+
+
+def step_description(spec: str) -> tuple[str, str]:
+    """``(short, detailed)`` description of a step name, importing nothing heavy.
+
+    Built-in jwst aliases are answered from a hand-written table (importing
+    jwst just to list steps would be slow and needless). Every other step
+    documents itself through its docstring -- first paragraph = short, rest =
+    detailed -- read from its source file without executing it, so a plugin's
+    imports (matplotlib, photutils, ...) never run either.
+    """
+    if spec in BUILTIN_ALIASES:
+        from .descriptions import BUILTIN_DESCRIPTIONS
+
+        short, long = BUILTIN_DESCRIPTIONS.get(spec, ("", ""))
+        return short, inspect.cleandoc(long) if long else ""
+    return split_description(_docstring_from_source(spec))
 
 
 def resolve_target(spec: str) -> Any:

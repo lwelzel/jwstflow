@@ -192,7 +192,7 @@ def check_step(spec: str | type | Any) -> tuple[dict[str, Any], list[str]]:
         if missing:
             problems.append(f"run() keyword parameters {missing} are not declared in Params")
     if not (cls.__doc__ or "").strip():
-        problems.append("add a docstring: its first line is the step's description")
+        problems.append("add a docstring: first paragraph = short description, rest = detailed (see `jwstflow steps`)")
     desc = cls.describe()
     desc["spec"] = str(spec)
     desc["kind"] = "step"

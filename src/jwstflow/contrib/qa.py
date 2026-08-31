@@ -34,7 +34,17 @@ log = logging.getLogger(__name__)
 
 
 class PlotSpectrum(Step):
-    """Figure of every 1-D spectrum (``*_x1d.fits`` / ``*_c1d.fits``), flux in mJy."""
+    """Figure of every 1-D spectrum (``*_x1d.fits`` / ``*_c1d.fits``), flux in mJy.
+
+    For each input file, every EXTRACT1D/COMBINE1D table extension is read,
+    its flux column (``column``, default FLUX) converted to mJy from whatever
+    unit the table declares, and drawn as a mid-point step plot over
+    wavelength -- all extensions of one file share a figure, labelled per
+    slit/source when a file carries several spectra (e.g. NIRSpec MOS).
+    Inputs without such an extension are skipped with a warning. One figure
+    per input file, named after it, following the jwstflow QA figure
+    standard (``docs/qa_figures.md``).
+    """
 
     level = "qa"
     version = "2"   # 1 -> 2: jwstflow QA figure standard (qafig)
@@ -82,7 +92,17 @@ class PlotSpectrum(Step):
 
 
 class QuicklookImage(Step):
-    """PNG of the SCI extension (2-D images; 3-D cubes are nan-median collapsed)."""
+    """PNG of the SCI extension (2-D images; 3-D cubes are nan-median collapsed).
+
+    For each input file, the SCI array is rendered as one image panel: cubes
+    are first collapsed along the spectral axis with a nan-aware statistic
+    (``collapse``: median/mean/sum/max), then shown in detector/sky pixels
+    with robust percentile limits (``percentiles``), an optional non-linear
+    ``stretch``, and a height-matched colorbar labelled with the data's
+    BUNIT (surface brightness is converted to mJy/arcsec^2). Inputs without
+    a SCI extension are skipped with a warning. One PNG per input file,
+    named after it.
+    """
 
     level = "qa"
     version = "2"   # 1 -> 2: qafig standard; cubes nan-collapsed instead of the middle slice
@@ -209,7 +229,17 @@ def _read_segment(path: Path) -> tuple[np.ndarray, np.ndarray, str | None]:
 
 
 class HeaderSummary(Step):
-    """One JSON/CSV table with the key header values of all inputs (batch step)."""
+    """One JSON/CSV table with the key header values of all inputs (batch step).
+
+    Runs once over the whole input set (``batch=all``): for every file the
+    primary-header keywords in ``keys`` (default: exposure type, detector,
+    optical elements, target and exposure time -- EXP_TYPE, DETECTOR,
+    GRATING, FILTER, CHANNEL, BAND, TARGPROP, BKGDTARG, IS_IMPRT, EFFEXPTM)
+    are collected into one row, and the resulting table is written twice:
+    ``<name>.json`` and ``<name>.csv``. Handy as a run overview -- which
+    exposure is which grating/band, which are backgrounds or imprints --
+    without opening any FITS file.
+    """
 
     level = "qa"
 
