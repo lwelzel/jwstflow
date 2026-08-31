@@ -17,8 +17,10 @@ implements the generic mechanics once:
   metadata) and a comparison plot.
 
 Contributed packages subclass it to add mode-specific behaviour -- override
-:meth:`segment_label` for naming, or :meth:`run` wrappers for validation --
-while different plugins keep producing byte-compatible stitched products.
+:meth:`segment_label` for naming, :meth:`overlap_ratio` for the measurement
+(e.g. masking emission lines out of it), or wrap :meth:`run` for validation
+and grouping -- while different plugins keep producing byte-compatible
+stitched products.
 """
 
 from __future__ import annotations
@@ -48,8 +50,8 @@ class StitchSegments(Step):
         crossovers: list[float] | None = Field(None, description="wavelengths [um] where the combination switches "
                                                "segments (one fewer than segments); default: overlap midpoints")
         rescale: bool = Field(False, description="chain-scale segments onto the reference using the overlap ratios")
-        reference: str | None = Field(None, description="label of the segment kept fixed when rescaling "
-                                      "(default: the reddest segment)")
+        reference: str | None = Field(None, description="segment kept fixed when rescaling: a label, "
+                                      "'shortest' or 'longest' (default: the reddest segment)")
         min_overlap_points: int = Field(5, ge=1, description="overlap samples needed to measure a ratio")
 
     def segment_label(self, path: Path) -> str:
@@ -87,17 +89,8 @@ class StitchSegments(Step):
             raise ValueError(f"segment labels are not unique: {labels}")
 
         # overlap ratios between neighbours (always measured, applied only with rescale)
-        ratios: list[float] = []
-        for a, b in zip(segments, segments[1:]):
-            lo, hi = float(b["WAVELENGTH"].min()), float(a["WAVELENGTH"].max())
-            inside = (a["WAVELENGTH"] > lo) & (a["WAVELENGTH"] < hi)
-            if hi > lo and int(inside.sum()) >= min_overlap_points:
-                b_on_a = np.interp(a["WAVELENGTH"][inside], b["WAVELENGTH"], b["FLUX"])
-                with np.errstate(all="ignore"):
-                    ratios.append(float(np.nanmedian(b_on_a / a["FLUX"][inside])))
-            else:
-                ratios.append(np.nan)
-                log.warning("no usable overlap between %s and %s (%.3f-%.3f um)", a["label"], b["label"], lo, hi)
+        ratios = [self.overlap_ratio(a, b, min_overlap_points=min_overlap_points)
+                  for a, b in zip(segments, segments[1:])]
         scales = self._scales(labels, ratios, reference) if rescale else [1.0] * len(segments)
 
         if crossovers is not None:
@@ -134,6 +127,23 @@ class StitchSegments(Step):
         return outputs
 
     # ------------------------------------------------------------------ hooks / helpers
+    def overlap_ratio(self, a: dict[str, Any], b: dict[str, Any], *, min_overlap_points: int = 5) -> float:
+        """Median flux ratio ``b/a`` where the two segments overlap (NaN when not measurable).
+
+        ``a`` and ``b`` are segment dicts (``label`` plus finite, wavelength-ordered
+        ``WAVELENGTH``/``FLUX``/``FLUX_ERROR`` arrays), ``a`` the bluer one. Subclasses
+        override this to mask mode-specific wavelength ranges (emission lines, band
+        edges) out of the measurement.
+        """
+        lo, hi = float(b["WAVELENGTH"].min()), float(a["WAVELENGTH"].max())
+        inside = (a["WAVELENGTH"] > lo) & (a["WAVELENGTH"] < hi)
+        if hi <= lo or int(inside.sum()) < min_overlap_points:
+            log.warning("no usable overlap between %s and %s (%.3f-%.3f um)", a["label"], b["label"], lo, hi)
+            return float("nan")
+        b_on_a = np.interp(a["WAVELENGTH"][inside], b["WAVELENGTH"], b["FLUX"])
+        with np.errstate(all="ignore"):
+            return float(np.nanmedian(b_on_a / a["FLUX"][inside]))
+
     @staticmethod
     def _table_hdu(path: Path) -> str:
         from astropy.io import fits
@@ -147,7 +157,14 @@ class StitchSegments(Step):
     @staticmethod
     def _scales(labels: list[str], ratios: list[float], reference: str | None) -> list[float]:
         """Chain the neighbour ratios so the reference segment keeps scale 1."""
-        ref = len(labels) - 1 if reference is None else labels.index(reference)
+        if reference in (None, "longest"):
+            ref = len(labels) - 1
+        elif reference == "shortest":
+            ref = 0
+        elif reference in labels:
+            ref = labels.index(reference)
+        else:
+            raise ValueError(f"reference segment {reference!r} is not among {labels} (nor 'shortest'/'longest')")
         scales = [1.0] * len(labels)
         for i in range(ref - 1, -1, -1):  # bluewards of the reference
             r = ratios[i]

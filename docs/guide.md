@@ -143,7 +143,14 @@ fixed in core and plugins build on them instead of inventing variants:
   `stitch_segments`): splice N overlapping 1-D segments (NIRSpec gratings,
   MRS bands) with measured overlap ratios, optional rescaling onto a
   reference segment, and configurable crossovers. Usable directly from YAML;
-  contributed packages subclass it for mode-specific behaviour.
+  contributed packages subclass it for mode-specific behaviour (naming via
+  `segment_label`, the ratio measurement via `overlap_ratio`, grouping via a
+  `run` wrapper -- jwstflow-joys' `stitch_bands` does all three).
+
+Extraction steps additionally share `jwstflow.apcorr`: the CRDS
+aperture-correction reference (MIRI MRS and NIRSpec IFU layouts) normalised
+to one plain-array table and evaluated per plane, so contributed extraction
+steps do not each carry their own loader.
 
 Stage names are **derived from the step**, never chosen in the YAML: the stpipe
 `class_alias` (`calwebb_spec3`, `extract_1d`; a subclass inherits it unless it
