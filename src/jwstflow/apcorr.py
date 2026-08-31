@@ -2,8 +2,10 @@
 
 Extraction steps that integrate a source over a finite aperture use the CRDS
 ``apcorr`` reference to account for the PSF flux falling outside the aperture.
-The reference layouts differ per instrument; this module normalises both to
-one plain-array table
+Both instruments store a single ``apcorr_table`` object node per reference
+file -- scalars naming the one configuration the file serves (MIRI
+CHANNEL/BAND, NIRSpec FILTER/GRATING; CRDS selects the file by them) plus the
+correction arrays; this module normalises it to one plain-array table
 
     {"wavelength": (nw,), "radius": (nr, nw), "apcorr": (nr, nw), "radius_units": str}
 
@@ -30,9 +32,11 @@ log = logging.getLogger(__name__)
 def load_apcorr(cube: Any, apcorr_file: str | None = None) -> dict[str, np.ndarray]:
     """Aperture-correction table for this cube, via CRDS unless a file is given.
 
-    ``cube`` is an opened IFU cube datamodel; the instrument decides the layout:
-    MIRI (``MirMrsApcorrModel``) stores one table per band as an object node,
-    NIRSpec (``NrsIfuApcorrModel``) one row per FILTER/GRATING combination.
+    ``cube`` is an opened IFU cube datamodel; the instrument picks the model
+    (MIRI ``MirMrsApcorrModel``, NIRSpec ``NrsIfuApcorrModel``). Both store a
+    single ``apcorr_table`` object node -- one CHANNEL/BAND resp.
+    FILTER/GRATING configuration per reference file, which CRDS selects on --
+    so the cube's configuration is checked against the node, never searched.
     """
     path = apcorr_file
     if path is None:
@@ -61,36 +65,37 @@ def load_apcorr(cube: Any, apcorr_file: str | None = None) -> dict[str, np.ndarr
 def mrs_apcorr_table(node: Any) -> dict[str, np.ndarray]:
     """Normalise a MIRI MRS ``apcorr_table`` node: ``wavelength`` (nw,), ``radius`` and
     ``apcorr`` (nradius x nwave; a transposed layout is tolerated) and ``radius_units``."""
+    return _node_table(node)
+
+
+def nrs_apcorr_table(node: Any, filt: str, grat: str, *, sizeunit: str | None = None,
+                     origin: str = "apcorr reference") -> dict[str, np.ndarray]:
+    """A NIRSpec-IFU ``apcorr_table`` node as a plain-array table, checked against FILTER/GRATING.
+
+    ``NrsIfuApcorrModel.apcorr_table`` has the same object layout as the MIRI
+    one (it is *not* a row-per-configuration FITS table like the NIRSpec
+    FS/MOS apcorr references): scalar ``filter``/``grating`` naming the one
+    configuration the file serves, plus the ``wavelength``/``radius``/
+    ``apcorr`` arrays. CRDS selects the file by FILTER/GRATING, so the
+    scalars are only checked -- a mismatch (possible with an explicit
+    ``apcorr_file``) would silently apply the wrong correction and raises.
+    """
+    ref_filt = str(getattr(node, "filter", "") or "").upper()
+    ref_grat = str(getattr(node, "grating", "") or "").upper()
+    if (ref_filt and ref_filt != filt.upper()) or (ref_grat and ref_grat != grat.upper()):
+        raise ValueError(f"{origin} is for {ref_grat}/{ref_filt}, not {grat.upper()}/{filt.upper()}")
+    return _node_table(node, sizeunit=sizeunit)
+
+
+def _node_table(node: Any, *, sizeunit: str | None = None) -> dict[str, np.ndarray]:
+    """The plain-array table of an ``apcorr_table`` object node (both instrument layouts)."""
     wavelength = np.asarray(node.wavelength, dtype=float).ravel()
     radius = np.atleast_2d(np.asarray(node.radius, dtype=float))
     apcorr = np.atleast_2d(np.asarray(node.apcorr, dtype=float))
-    units = str(getattr(node, "radius_units", "arcsec") or "arcsec")
+    units = str(getattr(node, "radius_units", None) or sizeunit or "arcsec")
     if radius.shape[-1] != wavelength.size:  # tolerate a transposed (nwave x nradius) layout
         radius, apcorr = radius.T, apcorr.T
     return {"wavelength": wavelength, "radius": radius, "apcorr": apcorr, "radius_units": units}
-
-
-def nrs_apcorr_table(rows: Any, filt: str, grat: str, *, sizeunit: str | None = None,
-                     origin: str = "apcorr reference") -> dict[str, np.ndarray]:
-    """The NIRSpec-IFU apcorr row matching FILTER/GRATING as a plain-array table.
-
-    ``rows`` iterates mappings with ``filter``, ``grating``, ``nelem_wl``,
-    ``wavelength`` (nelem_wl), ``radius`` and ``apcorr`` (nradius x nelem_wl) --
-    the ``NrsIfuApcorrModel.apcorr_table`` layout.
-    """
-    seen = []
-    for row in rows:
-        row_filt, row_grat = str(row["filter"]).upper(), str(row["grating"]).upper()
-        seen.append(f"{row_grat}/{row_filt}")
-        if (row_filt, row_grat) != (filt.upper(), grat.upper()):
-            continue
-        n = int(row["nelem_wl"])
-        wavelength = np.asarray(row["wavelength"], dtype=float).ravel()[:n]
-        radius = np.atleast_2d(np.asarray(row["radius"], dtype=float))[:, :n]
-        apcorr = np.atleast_2d(np.asarray(row["apcorr"], dtype=float))[:, :n]
-        units = str(sizeunit or "arcsec")
-        return {"wavelength": wavelength, "radius": radius, "apcorr": apcorr, "radius_units": units}
-    raise ValueError(f"{origin} has no row for {grat}/{filt} (rows: {sorted(set(seen))})")
 
 
 def apcorr_factor(table: dict[str, np.ndarray], wave: np.ndarray, radius_arcsec: np.ndarray,
