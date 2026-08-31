@@ -40,6 +40,7 @@ from ..data.discovery import FileRecord, HeaderCache, discover, fingerprint
 from ..steps.base import (
     ALIAS_ASN_TYPE,
     BUILTIN_ALIASES,
+    LEVEL_DIRS,
     Step,
     activate_plugins,
     default_thread_env,
