@@ -1,0 +1,13 @@
+# Copy to .github/workflows/test.yml -- pushing workflow files needs a
+# credential with the `workflow` scope, which automation tokens may lack.
+name: tests
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run python -m pytest

@@ -3,7 +3,7 @@
 <p align="center">
   <a href="https://github.com/spacetelescope/jwst"><img alt="jwst" src="https://img.shields.io/badge/jwst-3.x-blue"></a>
   <img alt="python" src="https://img.shields.io/badge/python-%E2%89%A53.12-blue">
-  <img alt="tests" src="https://img.shields.io/badge/tests-19%20passing-brightgreen">
+  <img alt="tests" src="https://img.shields.io/badge/tests-86%20passing-brightgreen">
   <img alt="status" src="https://img.shields.io/badge/status-alpha-orange">
 </p>
 
@@ -154,6 +154,10 @@ will change to the reference -- check back before submitting.
 
 Lukas Welzel (<welzel@strw.leidenuniv.nl>), Leiden Observatory.
 Issues and contributions are welcome; run `python -m pytest` before a PR
-(contributed packages carry their own test suites in their own repositories).
+(contributed packages carry their own test suites in their own repositories;
+`scripts/test-all.sh` runs every sibling repo's suite from a flat checkout).
+The testing strategy -- unit steps, engine semantics, and complete mock
+ESO-Ha 569 workflows through the real engine with stubbed official pipelines
+(`jwstflow.testing.mock`) -- is described in [docs/testing.md](docs/testing.md).
 
 License: BSD 3-Clause (see [LICENSE](LICENSE)).

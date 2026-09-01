@@ -20,7 +20,7 @@ from typing import Any
 
 import numpy as np
 
-from .steps.base import (
+from ..steps.base import (
     FunctionStep,
     RunContext,
     Step,
@@ -124,8 +124,8 @@ def synthetic_cube(path: Path, *, instrument: str = "MIRI", nwave: int = 50, siz
         w.cdelt1, w.cdelt2, w.cdelt3 = -pix_arcsec / 3600, pix_arcsec / 3600, wave_step
         w.cunit1 = w.cunit2 = "deg"
         cube.meta.photometry.pixelarea_steradians, cube.meta.photometry.pixelarea_arcsecsq = area_sr, pix_arcsec**2
-        for k, v in keys.items():
-            cube.extra_fits.PRIMARY.header.append((k, v))  # type: ignore[attr-defined]
+        if keys:  # extra_fits must be assigned whole: appending to a fresh model raises
+            cube.extra_fits = {"PRIMARY": {"header": [[k, v, ""] for k, v in keys.items()]}}
         cube.save(str(path))
         return Path(path)
     from astropy.io import fits
@@ -142,7 +142,7 @@ def synthetic_cube(path: Path, *, instrument: str = "MIRI", nwave: int = 50, siz
 def synthetic_x1d(path: Path, *, wave: np.ndarray | None = None, flux: np.ndarray | None = None,
                   instrument: str = "MIRI", **keys: Any) -> Path:
     """An extracted spectrum in the jwst x1d table layout."""
-    from .spectra import Spectrum1D, write_x1d
+    from ..spectra import Spectrum1D, write_x1d
 
     w = np.linspace(4.9, 5.7, 200) if wave is None else np.asarray(wave, float)
     f = np.ones_like(w) if flux is None else np.asarray(flux, float)

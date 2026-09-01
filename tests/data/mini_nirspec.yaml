@@ -1,0 +1,43 @@
+# Mini NIRSpec-IFU workflow over the stub pipelines, addressed by dotted path so it
+# also runs on the process backend (spawned workers import the stubs themselves).
+# Used by tests/test_mock_workflow.py; overrides point workspace/crds at a tmp dir.
+version: 1
+target: ESO-Ha 569
+run: mini_nirspec
+description: mock detector1 -> spec2 -> spec3 -> QA, end to end
+
+crds: {context: jwst_1364.pmap, prefetch: false}
+parallel: {backend: process, workers: 2}
+
+stages:
+  - step: jwstflow.testing.mock:StubDetector1
+    inputs:
+      - {stage: raw, pattern: "*_uncal.fits", filters: {EXP_TYPE: NRS_IFU}}
+
+  - step: jwstflow.testing.mock:StubSpec2
+    inputs:
+      - {stage: calwebb_detector1, pattern: "*_rate.fits"}
+    association: {mode: per_exposure, level: 2, asn_type: spec2}
+
+  - step: jwstflow.testing.mock:StubSpec3
+    inputs:
+      - {stage: calwebb_spec2, pattern: "*_cal.fits"}
+    association:
+      mode: group
+      level: 3
+      asn_type: spec3
+      group_by: [PROGRAM, OBSERVTN, GRATING, FILTER]
+      product_name: "jw{PROGRAM}-o{OBSERVTN}_{TARGID}_nirspec_{GRATING}"
+    parameters:
+      steps:
+        extract_1d: {skip: false}
+
+  - step: quicklook_image
+    inputs:
+      - {stage: calwebb_spec3, pattern: "*_s3d.fits"}
+    tags: [qa]
+
+  - step: plot_spectrum
+    inputs:
+      - {stage: calwebb_spec3, pattern: "*_x1d.fits"}
+    tags: [qa]

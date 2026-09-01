@@ -60,6 +60,9 @@ link-mode = "copy"
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "examples"]   # the migration/ staging repos carry their own suites
+markers = [
+    "integration: complete mock-observation workflow through the engine (seconds, offline; deselect with -m 'not integration')",
+]
 
 [dependency-groups]
 dev = [
