@@ -92,11 +92,13 @@ sibling checkouts, editable) and runs every repo's suite with it:
 ./jwstflow/scripts/test-all.sh -m "not integration"   # fast lane, args go to pytest
 ```
 
-CI (`.github/workflows/test.yml` in each repo) reproduces the flat layout by
-checking out the sibling repositories next to the repo under test, then runs
-the same suite. For the private packages the checkout needs a token that can
-read the siblings (`SIBLING_REPOS_TOKEN` secret, falling back to the
-workflow token).
+CI is provided as a `ci/test.yml` template in each repo: it reproduces the
+flat layout by checking out the sibling repositories next to the repo under
+test, then runs the same suite. Copy it to `.github/workflows/test.yml` from
+a clone whose credential has the `workflow` scope (automation tokens often
+lack it, and GitHub rejects pushes of workflow files without it). For the
+private packages the checkout needs a token that can read the siblings
+(`SIBLING_REPOS_TOKEN` secret, falling back to the workflow token).
 
 ## Adding a test
 
