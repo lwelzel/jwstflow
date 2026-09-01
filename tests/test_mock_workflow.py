@@ -148,6 +148,7 @@ def test_mini_workflow_end_to_end(tmp_path: Path):
         "stage3/calwebb_spec3/jw01751-o006_t005_nirspec_g395h-f290lp_x1d.fits",
         "qa/quicklook_image/jw01751-o006_t005_nirspec_g235h-f170lp_s3d.png",
         "qa/plot_spectrum/jw01751-o006_t005_nirspec_g235h-f170lp_x1d.png",
+        "qa/plot_spectrum/plot_spectrum_all.png",   # >= 2 spectra: the combined log-log overview
     ]:
         assert (run / product).is_file(), product
     asns = sorted((run / "associations" / "calwebb_spec3").glob("*_asn.json"))
