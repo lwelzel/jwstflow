@@ -41,9 +41,11 @@ X1D_UNITS: dict[str, str] = {
     "WAVELENGTH": "um", "FLUX": "Jy", "FLUX_ERROR": "Jy",
     "FLUX_VAR_POISSON": "Jy^2", "FLUX_VAR_RNOISE": "Jy^2", "FLUX_VAR_FLAT": "Jy^2",
     "SURF_BRIGHT": "MJy/sr", "SB_ERROR": "MJy/sr",
-    "SB_VAR_POISSON": "(MJy/sr)^2", "SB_VAR_RNOISE": "(MJy/sr)^2", "SB_VAR_FLAT": "(MJy/sr)^2",
-    "BACKGROUND": "MJy/sr", "BKGD_ERROR": "MJy/sr",
-    "BKGD_VAR_POISSON": "(MJy/sr)^2", "BKGD_VAR_RNOISE": "(MJy/sr)^2", "BKGD_VAR_FLAT": "(MJy/sr)^2",
+    "SB_VAR_POISSON": "MJy2/sr2", "SB_VAR_RNOISE": "MJy2/sr2", "SB_VAR_FLAT": "MJy2/sr2",
+    # the x1d convention: BACKGROUND is in the same units as FLUX (the level subtracted
+    # from the aperture), not a surface brightness
+    "BACKGROUND": "Jy", "BKGD_ERROR": "Jy",
+    "BKGD_VAR_POISSON": "Jy^2", "BKGD_VAR_RNOISE": "Jy^2", "BKGD_VAR_FLAT": "Jy^2",
 }
 
 

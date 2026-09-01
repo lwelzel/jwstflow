@@ -42,6 +42,10 @@ directly.
 8. **Axis labels always carry their unit in square brackets**:
    `wavelength [um]`, `flux density [mJy]`, `dRA [arcsec]`, `x [pix]`.
    `qafig` provides the common ones (`WAVE_LABEL`, `FLUX_LABEL`, `SB_LABEL`).
+9. **Spectra use a logarithmic wavelength axis by default**
+   (`qafig.set_wave_scale(ax)` -- plain numbers as tick labels, not powers of
+   ten). Steps that plot spectra expose an `xscale` parameter so a single
+   figure can be switched back to `linear` in the workflow.
 
 ## Writing a QA step
 

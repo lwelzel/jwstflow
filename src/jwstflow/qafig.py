@@ -29,6 +29,9 @@ built through this module, so all of them share one look. The rules
     names the step that made it.
 8.  **Axis labels always carry their unit in square brackets**:
     ``wavelength [um]``, ``flux density [mJy]``, ``x [pix]``.
+9.  **Spectra use a logarithmic wavelength axis by default**
+    (:func:`set_wave_scale`, plain numbers as tick labels); steps expose an
+    ``xscale`` parameter to switch a figure back to linear.
 
 Matplotlib is imported lazily (through :func:`use_agg`), so importing this
 module stays cheap in the scheduler process.
@@ -122,6 +125,22 @@ def step(ax: Any, x: Any, y: Any, **kwargs: Any) -> Any:
     """The standard line plot: ``ax.step(..., where="mid")`` (rule 3)."""
     kwargs.setdefault("lw", 0.8)
     return ax.step(np.asarray(x), np.asarray(y), where="mid", **kwargs)
+
+
+def set_wave_scale(ax: Any, scale: str = "log") -> None:
+    """The standard wavelength axis of a spectrum: logarithmic by default (rule 9),
+    with plain numbers (not powers of ten) on both major and minor ticks."""
+    from matplotlib.ticker import ScalarFormatter
+
+    ax.set_xscale(scale)
+    if scale == "log":
+        formatter = ScalarFormatter()
+        formatter.set_scientific(False)
+        ax.xaxis.set_major_formatter(formatter)
+        minor = ScalarFormatter(useOffset=False)
+        minor.set_scientific(False)
+        ax.xaxis.set_minor_formatter(minor)
+        ax.tick_params(axis="x", which="minor", labelsize=7)
 
 
 # --------------------------------------------------------------------------- images (rules 4-6)
