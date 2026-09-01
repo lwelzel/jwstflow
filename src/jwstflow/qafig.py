@@ -285,6 +285,91 @@ def figlegend(fig: Any, *, ncol: int | None = None, **kwargs: Any) -> Any:
     return fig.legend(handles, labels, **kwargs)
 
 
+#: Colors of the spectral-feature annotation (:func:`annotate_features`): gas-line
+#: ticks, the emission-band lane (PAH and other emission bands) and the ice-band
+#: lane. Muted, colorblind-safe, distinct from the data palette.
+FEATURE_COLORS: dict[str, str] = {"line": "0.35", "emission": "#d95f02", "ice": "#7570b3"}
+#: Axes-fraction y layout of the annotation lanes (tick/fill bottom, top). All
+#: labels hang from :data:`FEATURE_LABEL_Y`, below the lowest lane, so rotated
+#: label text never crosses a lane; the class color ties a label to its lane.
+FEATURE_LANES: dict[str, tuple[float, float]] = {
+    "line": (0.958, 0.990), "emission": (0.915, 0.945), "ice": (0.872, 0.902),
+}
+FEATURE_LABEL_Y = 0.862
+
+
+def annotate_features(ax: Any, features: Any, *, wave_min: float, wave_max: float,
+                      line_width_um: float = 0.02, resolving_power: float | None = None,
+                      max_line_labels: int = 150) -> None:
+    """Mark the selected spectral features on a spectrum axes (x = wavelength [um]).
+
+    ``features`` is a jwstflow feature selection (the ``features:`` grammar of
+    :mod:`jwstflow.features`; ``"all"`` takes every bundled dataset), restricted
+    to ``wave_min``-``wave_max`` (the plotted wavelength range). Three
+    annotation classes, each in its own axes-fraction lane near the top so the
+    spectrum below stays readable:
+
+    * **gas lines** (``kind == "line"``): a short vertical tick with the line
+      label rotated below it (labels are dropped, ticks kept, when more than
+      ``max_line_labels`` lines are in range);
+    * **emission bands** (``kind == "band"`` outside the ice dataset -- PAH
+      bands, hydrocarbon quasi-continua, ...): a shaded wavelength span in the
+      lane below the line ticks;
+    * **ice bands** (the ``ice_bands`` dataset): a shaded span in a third lane.
+
+    Empty selections draw nothing. One legend proxy per non-empty class is
+    added, so :func:`figlegend` names the lanes. Spans crossing the plotted
+    range are clipped to it, never widening the axes.
+    """
+    from .features import select_features
+
+    if features in (None, False) or not np.isfinite([wave_min, wave_max]).all() or wave_max <= wave_min:
+        return
+    selected = select_features(features, wave_min=wave_min, wave_max=wave_max)
+    lines = [f for f in selected if f.kind == "line"]
+    bands = [f for f in selected if f.kind != "line"]
+    ice = [f for f in bands if f.dataset == "ice_bands"]
+    emission = [f for f in bands if f.dataset != "ice_bands"]
+    trans = ax.get_xaxis_transform()  # x in data, y in axes fraction
+    log_axis = ax.get_xscale() == "log"
+
+    def centre(lo: float, hi: float) -> float:
+        return float(np.sqrt(lo * hi)) if log_axis and lo > 0 else 0.5 * (lo + hi)
+
+    def label_text(x: float, text: str, color: str) -> None:
+        ax.text(x, FEATURE_LABEL_Y, text, transform=trans, rotation=90, ha="center", va="top",
+                fontsize=4.5, color=color, clip_on=True, zorder=5)
+
+    y0, y1 = FEATURE_LANES["line"]
+    with_labels = len(lines) <= max_line_labels
+    for f in lines:
+        w = f.wavelength if f.wavelength is not None else centre(*f.window(line_width_um, resolving_power))
+        if not wave_min <= w <= wave_max:
+            continue
+        ax.plot([w, w], [y0, y1], transform=trans, color=FEATURE_COLORS["line"], lw=0.5, zorder=5)
+        if with_labels:
+            label_text(w, f.label, FEATURE_COLORS["line"])
+    if lines and not with_labels:
+        log.info("%d gas lines in range (> %d): ticks drawn without labels", len(lines), max_line_labels)
+    for group, kind in ((emission, "emission"), (ice, "ice")):
+        y0, y1 = FEATURE_LANES[kind]
+        color = FEATURE_COLORS[kind]
+        for f in group:
+            lo, hi = f.window(line_width_um, resolving_power)
+            lo, hi = max(lo, wave_min), min(hi, wave_max)
+            if hi <= lo:
+                continue
+            ax.fill_betweenx([y0, y1], lo, hi, transform=trans, color=color, alpha=0.30, lw=0, zorder=4)
+            label_text(centre(lo, hi), f.label, color)
+    for group, kind, name in ((lines, "line", "gas lines"), (emission, "emission", "emission bands"),
+                              (ice, "ice", "ice bands")):
+        if group:
+            if kind == "line":
+                ax.plot([], [], color=FEATURE_COLORS[kind], lw=0.8, label=name)
+            else:
+                ax.fill_between([], [], [], color=FEATURE_COLORS[kind], alpha=0.30, label=name)
+
+
 def contour_proxy(ax: Any, color: str, *, ls: str = "solid", label: str | None = None) -> Any:
     """A legend handle for a contour set (matplotlib's own contours make poor handles);
     added to ``ax`` so :func:`figlegend` picks it up."""

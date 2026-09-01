@@ -47,12 +47,16 @@ class PlotSpectrum(Step):
     unless ``xscale: linear``, the flux axis linear unless ``yscale: log``
     (mid-infrared spectra span decades). With two or more spectra a combined
     overview figure (``<stage>_all.png``) draws every spectrum on one
-    log-log axis, coloured from the standard colormap.
+    log-log axis, coloured from the standard colormap. With ``features`` the
+    selected spectral features (jwstflow ``features:`` grammar; ``all`` takes
+    every bundled dataset in range) are marked on every figure -- gas lines
+    as labelled ticks, emission bands and ice bands as shaded wavelength
+    lanes (``qafig.annotate_features``).
     """
 
     level = "qa"
     batch = "all"   # all inputs in one task, so the combined overview sees every spectrum
-    version = "4"   # 3 -> 4: yscale parameter; combined all-spectra overview figure
+    version = "5"   # 4 -> 5: optional spectral-feature annotation (features parameter)
 
     def run(
         self,
@@ -63,6 +67,7 @@ class PlotSpectrum(Step):
         column: str = "FLUX",
         xscale: str = "log",
         yscale: str = "linear",
+        features: Any = None,
         dpi: int = 150,
         fmt: str = "png",
         **_: Any,
@@ -80,6 +85,7 @@ class PlotSpectrum(Step):
                 fig, ax = qafig.subplots(figsize=(9, 4))
                 colors = qafig.line_colors(len(tables))
                 ylabel = ""
+                waves: list[np.ndarray] = []
                 for i, (h, color) in enumerate(zip(tables, colors)):
                     tab = h.data
                     if "WAVELENGTH" not in tab.names or column not in tab.names:
@@ -89,7 +95,8 @@ class PlotSpectrum(Step):
                     if len(tables) > 1 and len(tables) <= 12:
                         label = str(h.header.get("SLTNAME") or h.header.get("SRCNAME") or f"ext {i + 1}")
                     qafig.step(ax, tab["WAVELENGTH"], values, color=color, label=label)
-                    combined.append((np.asarray(tab["WAVELENGTH"], float), values,
+                    waves.append(np.asarray(tab["WAVELENGTH"], float))
+                    combined.append((waves[-1], values,
                                      inp.stem + (f":{label}" if label else ""), ylabel))
                 ax.set_xlabel(qafig.WAVE_LABEL)
                 ax.set_ylabel(ylabel or f"{column}")
@@ -97,11 +104,12 @@ class PlotSpectrum(Step):
                 ax.set_yscale(yscale)
                 if ylim:
                     ax.set_ylim(*ylim)
+                _annotate_features_in_range(ax, features, waves)
                 qafig.annotate(ax, inp.name)
                 qafig.figlegend(fig)
                 out.append(qafig.save(fig, ctx.output_dir / f"{inp.stem}.{fmt}", dpi=dpi))
         overview = _all_spectra_figure(combined, ctx.output_dir / f"{ctx.stage}_all.{fmt}",
-                                       what="spectra", dpi=dpi)
+                                       what="spectra", dpi=dpi, features=features)
         if overview is not None:
             out.append(overview)
         return out
@@ -174,17 +182,21 @@ class PlotStitch(Step):
     The wavelength axis is logarithmic unless ``xscale: linear``, the flux
     axis linear unless ``yscale: log``. With two or more stitched spectra a
     combined overview figure (``<stage>_all.png``) draws every one on a
-    single log-log axis, coloured from the standard colormap.
+    single log-log axis, coloured from the standard colormap. With
+    ``features`` the selected spectral features (jwstflow ``features:``
+    grammar; ``all`` takes every bundled dataset in range) are marked on
+    every figure -- gas lines as labelled ticks, emission bands and ice
+    bands as shaded wavelength lanes (``qafig.annotate_features``).
     """
 
     level = "qa"
     batch = "all"   # all inputs in one task, so the combined overview sees every spectrum
     inputs = ("*_s1dcomb.ecsv",)
-    version = "4"   # 3 -> 4: second figure of the segments before rescaling (*_unscaled.png)
+    version = "5"   # 4 -> 5: optional spectral-feature annotation (features parameter)
 
     def run(self, inputs: list[Path], ctx: RunContext, *, segments_stage: str | None = None,
             unscaled: bool = True, xscale: str = "log", yscale: str = "linear",
-            dpi: int = 150, **_: Any) -> Iterable[Path]:
+            features: Any = None, dpi: int = 150, **_: Any) -> Iterable[Path]:
         from astropy.table import Table
 
         out: list[Path] = []
@@ -221,6 +233,7 @@ class PlotStitch(Step):
             ax.set(xlabel=qafig.WAVE_LABEL, ylabel=ylabel)
             qafig.set_wave_scale(ax, xscale)
             ax.set_yscale(yscale)
+            _annotate_features_in_range(ax, features, [wave])
             qafig.annotate(ax, inp.name)
             qafig.figlegend(fig)
             out.append(qafig.save(fig, ctx.output_dir / f"{inp.stem}.png", dpi=dpi))
@@ -236,14 +249,147 @@ class PlotStitch(Step):
                 ax.set(xlabel=qafig.WAVE_LABEL, ylabel=ylabel)
                 qafig.set_wave_scale(ax, xscale)
                 ax.set_yscale(yscale)
+                _annotate_features_in_range(ax, features, [wave])
                 qafig.annotate(ax, f"{inp.name}: segments as extracted (before rescaling)")
                 qafig.figlegend(fig)
                 out.append(qafig.save(fig, ctx.output_dir / f"{inp.stem}_unscaled.png", dpi=dpi))
         overview = _all_spectra_figure(combined, ctx.output_dir / f"{ctx.stage}_all.png",
-                                       what="stitched spectra", dpi=dpi)
+                                       what="stitched spectra", dpi=dpi, features=features)
         if overview is not None:
             out.append(overview)
         return out
+
+
+class PlotStitchBackground(Step):
+    """Source / background / difference comparison of every stitched spectrum.
+
+    For each ``*_s1dcomb.ecsv`` the background that was removed from the
+    combination is reassembled segment by segment: every segment file named
+    in the ECSV metadata is looked up (like ``plot_stitch``), its
+    BACKGROUND/BKGD_ERROR columns -- the background the extraction measured
+    and subtracted (``mrs_extract``'s on/off annulus; ``extract_extended``'s
+    in-field background), carried through 1-D processing steps -- are
+    interpolated onto the stitched samples owned by that segment and scaled
+    by the segment's applied stitch scale, so all three curves share the
+    stitch's flux scale. One figure per stitched spectrum
+    (``*_bkgcomp.png``): the source *without* background subtraction
+    (stitched flux + background), the background estimate (with its error
+    band), and the background-subtracted combination itself (black); the
+    identity ``source = background + subtracted`` holds sample by sample.
+    Crossovers are marked and the selected spectral ``features`` (default:
+    every bundled dataset in range) are annotated -- gas lines as labelled
+    ticks, emission bands and ice bands as shaded wavelength lanes.
+
+    Segments whose files are gone or carry no background record (SKYSUB not
+    set -- extraction without background estimation, or products from before
+    the columns travelled through defringing/cleaning) leave a gap in the
+    background curves and are named in the legend annotation; a spectrum
+    with no background record at all still gets its figure, showing only the
+    combination. The wavelength axis is logarithmic unless ``xscale:
+    linear``, the flux axis linear unless ``yscale: log`` (backgrounds and
+    mid-infrared fluxes span decades; negative excursions of a noisy
+    background disappear on a log axis).
+    """
+
+    level = "qa"
+    batch = "all"
+    inputs = ("*_s1dcomb.ecsv",)
+    version = "1"
+
+    def run(self, inputs: list[Path], ctx: RunContext, *, segments_stage: str | None = None,
+            xscale: str = "log", yscale: str = "linear", features: Any = "all",
+            line_width_um: float = 0.02, dpi: int = 150, **_: Any) -> Iterable[Path]:
+        from astropy.table import Table
+
+        out: list[Path] = []
+        for inp in sorted(inputs):
+            tab = Table.read(inp)
+            wave = np.asarray(tab["WAVELENGTH"], dtype=float)
+            flux, ylabel = qafig.to_mjy(np.asarray(tab["FLUX"], dtype=float),
+                                        str(tab["FLUX"].unit or "Jy"))
+            segment_of = np.asarray(tab["SEGMENT"], dtype=str) if "SEGMENT" in tab.colnames else \
+                np.full(len(wave), "", dtype=object)
+            meta = tab.meta
+            names = [str(n) for n in meta.get("inputs", [])]
+            labels = [str(s) for s in meta.get("segments", names)]
+            scales = [float(s) for s in meta.get("scales_applied", [1.0] * len(names))]
+            crossovers = [float(b) for b in meta.get("crossovers_um", [])]
+            background = np.full(len(wave), np.nan)
+            bkg_error = np.full(len(wave), np.nan)
+            missing: list[str] = []
+            for name, label, scale in zip(names, labels, scales):
+                rows = segment_of == label
+                if not rows.any():
+                    continue
+                segment = _find_file(name, ctx, segments_stage, inp.parent)
+                if segment is None:
+                    log.warning("%s: segment %s not found in any stage directory; "
+                                "background left out", inp.name, name)
+                    missing.append(label)
+                    continue
+                record = _read_background(segment)
+                if record is None:
+                    log.warning("%s: %s carries no background record (SKYSUB not set); "
+                                "was its extraction run without background estimation, or its "
+                                "1-D processing rerun since the columns travel through?",
+                                inp.name, segment.name)
+                    missing.append(label)
+                    continue
+                w, b, be = record
+                background[rows] = np.interp(wave[rows], w, b, left=np.nan, right=np.nan) * scale
+                bkg_error[rows] = np.interp(wave[rows], w, be, left=np.nan, right=np.nan) * scale
+
+            fig, ax = qafig.subplots(figsize=(11, 4))
+            src_color, bkg_color = qafig.line_colors(2)
+            if np.isfinite(background).any():
+                qafig.step(ax, wave, flux + background, color=src_color, lw=0.7,
+                           label="source (background not subtracted)")
+                qafig.step(ax, wave, background, color=bkg_color, lw=0.7, label="background estimate")
+                finite_err = np.isfinite(bkg_error)
+                if finite_err.any():
+                    ax.fill_between(wave, background - bkg_error, background + bkg_error,
+                                    step="mid", color=bkg_color, alpha=0.25, lw=0)
+            else:
+                log.warning("%s: no segment carries a background record; drawing the "
+                            "combination only", inp.name)
+            qafig.step(ax, wave, flux, color=qafig.MAIN_COLOR, label="source - background (stitched)")
+            _mark_crossovers(ax, crossovers)
+            ax.set(xlabel=qafig.WAVE_LABEL, ylabel=ylabel)
+            qafig.set_wave_scale(ax, xscale)
+            ax.set_yscale(yscale)
+            qafig.annotate_features(ax, features, wave_min=float(np.nanmin(wave)),
+                                    wave_max=float(np.nanmax(wave)), line_width_um=line_width_um)
+            qafig.annotate(ax, inp.name,
+                           f"no background for: {', '.join(missing)}" if missing else "")
+            qafig.figlegend(fig)
+            out.append(qafig.save(fig, ctx.output_dir / f"{inp.stem}_bkgcomp.png", dpi=dpi))
+        return out
+
+
+def _read_background(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """Finite ``(wavelength, background, bkgd_error)`` [um, mJy, mJy] of a segment's
+    background record, or None when the file carries none (no SKYSUB header, no
+    BACKGROUND column, or no finite samples)."""
+    from astropy.io import fits
+
+    with fits.open(path) as hdul:
+        if not hdul[0].header.get("SKYSUB"):
+            return None
+        exts = [h for h in hdul if h.name in ("EXTRACT1D", "COMBINE1D")]
+        if not exts or "BACKGROUND" not in exts[0].data.names:
+            return None
+        tab = exts[0].data
+        wave = np.asarray(tab["WAVELENGTH"], dtype=float)
+        bkg, _ = qafig.to_mjy(np.asarray(tab["BACKGROUND"], dtype=float),
+                              _column_unit(exts[0], "BACKGROUND"))
+        err_raw = np.asarray(tab["BKGD_ERROR"], dtype=float) if "BKGD_ERROR" in tab.names \
+            else np.zeros(len(wave))
+        err, _ = qafig.to_mjy(err_raw, _column_unit(exts[0], "BKGD_ERROR"))
+    ok = np.isfinite(wave) & np.isfinite(bkg)
+    if not ok.any():
+        return None
+    order = np.argsort(wave[ok])
+    return wave[ok][order], bkg[ok][order], np.where(np.isfinite(err[ok]), err[ok], 0.0)[order]
 
 
 def _mark_crossovers(ax: Any, crossovers: list[float]) -> None:
@@ -254,8 +400,17 @@ def _mark_crossovers(ax: Any, crossovers: list[float]) -> None:
         ax.plot([], [], color="0.6", lw=0.6, ls=":", label="crossover")
 
 
+def _annotate_features_in_range(ax: Any, features: Any, waves: list[np.ndarray]) -> None:
+    """``qafig.annotate_features`` over the common wavelength range of ``waves`` (no-op without either)."""
+    finite = [w[np.isfinite(w)] for w in waves if np.isfinite(w).any()]
+    if features in (None, False) or not finite:
+        return
+    qafig.annotate_features(ax, features, wave_min=float(min(w.min() for w in finite)),
+                            wave_max=float(max(w.max() for w in finite)))
+
+
 def _all_spectra_figure(series: list[tuple[np.ndarray, np.ndarray, str, str]], path: Path, *,
-                        what: str, dpi: int) -> Path | None:
+                        what: str, dpi: int, features: Any = None) -> Path | None:
     """The combined overview: every spectrum of the stage on one log-log axis.
 
     ``series`` is ``(wavelength, values_mjy, name, ylabel)`` per spectrum;
@@ -278,6 +433,7 @@ def _all_spectra_figure(series: list[tuple[np.ndarray, np.ndarray, str, str]], p
     ax.set(xlabel=qafig.WAVE_LABEL, ylabel=ylabel)
     qafig.set_wave_scale(ax, "log")
     ax.set_yscale("log")
+    _annotate_features_in_range(ax, features, [w for w, *_ in series])
     qafig.annotate(ax, f"all {what} of this stage ({len(series)})")
     qafig.figlegend(fig)
     return qafig.save(fig, path, dpi=dpi)

@@ -138,3 +138,52 @@ def test_plot_stitch_also_draws_the_segments_before_rescaling(tmp_path: Path):
     pngs = run_step(PlotStitch, [o for o in outputs if o.suffix == ".ecsv"], tmp_path, ctx=ctx,
                     params={"unscaled": False})
     assert [p.name for p in pngs] == ["jw001_nirspec_s1dcomb.png"]
+
+
+def segments_with_background(tmp_path: Path) -> list[Path]:
+    """Two overlapping segments whose extraction recorded a background."""
+    from jwstflow.spectra import Spectrum1D, write_x1d
+
+    out = []
+    for name, lo, hi, flux, bkg, grating, filt in (
+            ("jw001_nirspec_g235h-f170lp_s1d.fits", 1.0, 2.0, 1.0, 0.5, "G235H", "F170LP"),
+            ("jw001_nirspec_g395h-f290lp_s1d.fits", 1.8, 3.0, 1.0, 0.7, "G395H", "F290LP")):
+        w = np.linspace(lo, hi, 200)
+        out.append(write_x1d(
+            tmp_path / name, Spectrum1D(w, np.full(200, flux), np.full(200, 0.01)),
+            header={"INSTRUME": "NIRSPEC", "GRATING": grating, "FILTER": filt,
+                    "SKYSUB": (True, "background subtracted"), "TARGPROP": "TEST"},
+            columns={"background": np.full(200, bkg), "bkgd_error": np.full(200, 0.02)}))
+    return out
+
+
+def test_plot_stitch_background_reassembles_the_background(tmp_path: Path):
+    pytest.importorskip("matplotlib")
+    from jwstflow.contrib.qa import PlotStitchBackground
+
+    segments = segments_with_background(tmp_path)
+    outputs = run_step(StitchSegments, segments, tmp_path, params={"rescale": True})
+    ctx = make_context(tmp_path, stage="plot_stitch_background")
+    ctx.stage_dirs["segments"] = tmp_path
+    pngs = run_step(PlotStitchBackground, [o for o in outputs if o.suffix == ".ecsv"], tmp_path,
+                    ctx=ctx, params={"segments_stage": "segments"})
+    assert [p.name for p in pngs] == ["jw001_nirspec_s1dcomb_bkgcomp.png"]
+
+
+def test_plot_stitch_background_tolerates_missing_records(tmp_path: Path, caplog):
+    """A segment without a background record leaves a gap and a note, never a crash."""
+    pytest.importorskip("matplotlib")
+    from jwstflow.contrib.qa import PlotStitchBackground
+
+    segments = segments_with_background(tmp_path)
+    # strip the record off the red segment: without SKYSUB the columns mean nothing
+    from astropy.io import fits
+
+    with fits.open(segments[1], mode="update") as hdul:
+        del hdul[0].header["SKYSUB"]
+    outputs = run_step(StitchSegments, segments, tmp_path)
+    ctx = make_context(tmp_path, stage="plot_stitch_background")
+    ctx.stage_dirs["segments"] = tmp_path
+    pngs = run_step(PlotStitchBackground, [o for o in outputs if o.suffix == ".ecsv"], tmp_path,
+                    ctx=ctx, params={"segments_stage": "segments"})
+    assert len(pngs) == 1 and pngs[0].name.endswith("_bkgcomp.png")

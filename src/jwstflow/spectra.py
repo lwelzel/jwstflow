@@ -33,7 +33,17 @@ X1D_DTYPE = [(n, "u4" if n == "DQ" else "f8") for n in X1D_COLUMNS]
 X1D_PROVENANCE_KEYS: tuple[str, ...] = (
     "SRCNAME", "SRC_RA", "SRC_DEC", "APERTYPE", "APERSIZE", "APERUNIT", "APERKEY",
     "EXTRMETH", "APCORR", "APCORMED", "JWFCUBE",
+    # background provenance: how (and that) a background was removed from this
+    # spectrum -- travels with the BACKGROUND/BKGD_ERROR columns (see
+    # :data:`X1D_PASSTHROUGH_COLUMNS`) so QA steps downstream (e.g.
+    # plot_stitch_background) can tell a subtracted spectrum from a raw one
+    "SKYSUB", "SKYANNIN", "SKYANNOU", "SKYNPIX", "BKGFILE",
 )
+
+#: EXTRACT1D columns that 1-D processing steps (defringing, cleaning, ...) carry
+#: through unchanged: they describe the extraction, not the flux the step edits,
+#: and are only valid while the wavelength grid stays the same.
+X1D_PASSTHROUGH_COLUMNS: tuple[str, ...] = ("BACKGROUND", "BKGD_ERROR", "NPIXELS")
 
 #: Units of the EXTRACT1D columns (the jwst x1d contract); stamped as TUNITs by
 #: :func:`write_x1d` and the fallback consumers use when a table carries none.
@@ -131,6 +141,28 @@ def write_x1d(path: Path, spectrum: Spectrum1D, *, like: Any = None, surf_bright
             if unit and not hdr.get(f"TUNIT{i}"):
                 hdr[f"TUNIT{i}"] = unit
     return Path(path)
+
+
+def passthrough_columns(path: Path, names: tuple[str, ...] = X1D_PASSTHROUGH_COLUMNS) -> dict[str, Any]:
+    """The :data:`X1D_PASSTHROUGH_COLUMNS` of an x1d file, for re-writing.
+
+    1-D processing steps that edit the flux on an unchanged wavelength grid
+    (defringing, spike cleaning) pass the result to :func:`write_x1d` as its
+    ``columns`` so the extraction's background record (BACKGROUND/BKGD_ERROR)
+    and per-plane coverage (NPIXELS) survive the step -- otherwise the x1d
+    contract zero-fills them and the on/off background of an extraction is
+    lost to every consumer downstream. Only columns present in the table are
+    returned; a file without an EXTRACT1D table returns ``{}``.
+    """
+    from astropy.io import fits
+
+    with fits.open(path) as hdul:
+        exts = [h for h in hdul if h.name == "EXTRACT1D"]
+        if not exts:
+            return {}
+        tab = exts[0].data
+        cols = {c.upper() for c in tab.columns.names}
+        return {n.lower(): np.asarray(tab[n]) for n in names if n.upper() in cols}
 
 
 def read_x1d(path: Path, index: int = 0) -> Spectrum1D:
