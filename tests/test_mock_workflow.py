@@ -115,12 +115,13 @@ def test_mini_workflow_end_to_end(tmp_path: Path):
     ]:
         assert (run / product).is_file(), product
 
-    # the PSF product matches its cube's wavelength span on the model grid
+    # the PSF library samples the cube's spaxels at oversample 2, on an odd grid
     from jwstflow.psf import PsfCubeProduct
 
     psf = PsfCubeProduct.read(run / "stage4/psf_cube/jw01751-o006_t005_nirspec_g235h-f170lp_psfcube.fits")
-    assert psf.data.shape == (5, 24, 24)
-    assert psf.pixelscale_arcsec == pytest.approx(600.0 / 24 / 190.0)
+    assert psf.data.shape == (5, 33, 33)                       # ceil(1.6" / 0.05") -> odd
+    assert psf.pixelscale_arcsec == pytest.approx(0.1 / 2)     # mock spaxels are 0.1"
+    assert psf.frame == "ideal"
     assert psf.header["GRATING"] == "G235H"
     asns = sorted((run / "associations" / "calwebb_spec3").glob("*_asn.json"))
     assert [a.name for a in asns] == ["jw01751-o006_t005_nirspec_g235h_spec3_asn.json",

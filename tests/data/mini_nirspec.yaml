@@ -36,7 +36,7 @@ stages:
   - step: psf_cube
     inputs:
       - {stage: calwebb_spec3, pattern: "*_s3d.fits"}
-    parameters: {engine: gaussian, distance_pc: 190.0, npix: 24, n_wavelengths: 5}
+    parameters: {engine: gaussian, oversample: 2, fov_arcsec: 1.6, n_wavelengths: 5}
 
   - step: qa_psf_cube
     inputs:

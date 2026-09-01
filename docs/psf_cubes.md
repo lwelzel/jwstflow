@@ -1,31 +1,48 @@
 # PSF cubes
 
-`psf_cube` generates, per observed IFU cube, the instrument PSF your model of
-the target must be convolved with before it can be compared to that cube:
-one `*_psfcube.fits` per `*_s3d.fits`, spectrally sub-sampled, on the model's
-own pixel grid, oriented like the cube. `qa_psf_cube` plots every product.
-Supported today: **NIRSpec IFU** and **MIRI MRS**.
+`psf_cube` generates, per observed IFU cube, a **distance-independent library
+of the instrument PSF** your models of the target are convolved with before
+they can be compared to that cube: one `*_psfcube.fits` per `*_s3d.fits`,
+spectrally sub-sampled, on a fixed fine angular grid, in the instrument's own
+frame. `qa_psf_cube` plots every product. Supported today: **NIRSpec IFU**
+and **MIRI MRS**.
 
 ```yaml
-  - step: psf_cube                       # -> stage4/psf_cube
+  - step: psf_cube                       # -> stage4/psf_cube; the defaults just work
     inputs: [{stage: calwebb_spec3, pattern: "*_s3d.fits"}]
-    parameters:
-      distance_pc: 190.0                 # the only required knob: your target's distance
 
   - step: qa_psf_cube                    # -> qa/qa_psf_cube
     inputs: [{stage: psf_cube, pattern: "*_psfcube.fits"}]
     tags: [qa]
 ```
 
-Downstream, in your modeling code:
+Downstream, in your modeling code -- the library is generated once, and each
+model (at each trial distance) resamples it onto its own grid in one step:
 
 ```python
-from jwstflow.psf import PsfCubeProduct
+from jwstflow.psf import PsfCubeProduct, model_pixel_scale
 
-psf = PsfCubeProduct.read("jw01751-o010_t005_miri_ch1-short_psfcube.fits")
-convolved = psf.convolve(model_cube, model_wavelengths_um)   # (nw, 256, 256) in, same out
-kernel = psf.at(5.3)                                         # one interpolated slice
+library = PsfCubeProduct.read("jw01751-o010_t005_miri_ch1-short_psfcube.fits")
+for d in trial_distances_pc:                        # e.g. your 256 px / +-300 AU rendering
+    psf = library.resampled(model_pixel_scale(d), 256, to_sky=True)
+    convolved = psf.convolve(model_cube_at(d), model_wavelengths_um)
 ```
+
+`resampled()` performs the scale change and the rotation to the sky frame in
+a *single* interpolation; `convolve()` then matches kernels to your model
+wavelengths. `at()` gives one interpolated slice when that is all you need.
+
+## Why a library, not a per-model product
+
+The observation fixes the PSF (instrument configuration, wavelengths,
+wavefront, orientation); the model fixes the grid (its distance and pixel
+convention). Baking a model's distance into the PSF product would conflate
+the two -- every trial distance would need its own generation run. So the
+step knows nothing about your models: it emits the instrument PSF at a fixed
+fine angular sampling, and distance scaling lives in the one resampling the
+consumer does anyway. `model_pixel_scale(d)` (the `(600 AU / 256 px) / d`
+arcsec convention of this ecosystem) stays available as a modeling-side
+convenience for picking the target grid.
 
 ## Why it lives where it lives
 
@@ -40,9 +57,9 @@ ecosystem (the mask contract in `jwstflow.masks`, stitching in
 guide). So the split follows the graduation ladder:
 
 * **the contract and every consumer** (`jwstflow.psf`: product I/O,
-  wavelength interpolation, convolution, the offline Gaussian engine, and
-  `qa_psf_cube`) ship with the core and add **no dependencies** -- the base
-  install is unchanged;
+  resampling, wavelength interpolation, convolution, the offline Gaussian
+  engine, and `qa_psf_cube`) ship with the core and add **no dependencies**
+  -- the base install is unchanged;
 * **the stpsf engine** hides behind the `psf` extra and a lazy import:
 
   ```bash
@@ -64,9 +81,11 @@ the product contract and the consumers all stay in place.
 <cube base>_psfcube.fits
   PRIMARY               copied from the source cube (instrument keys travel along)
                         + JWFPSF* provenance: engine, stpsf version, method, OPD,
-                        broadening, grid, pixel scale, applied PA, distance
+                        broadening, sampling (oversample / native spaxel scale /
+                        pixel scale / field), frame, recorded PA
   PSF   f4 (nw, ny, nx) PSF slices; each centred on the geometric array centre
-                        ((n-1)/2 -- a half-pixel for even n, matching stpsf/poppy)
+                        ((n-1)/2 -- an integer pixel: the grid is rounded up to
+                        odd, matching stpsf/poppy centring)
   WAVETAB               wavelength_um, psf_sum (in-field energy fraction),
                         fwhm_arcsec (measured) per slice
 ```
@@ -77,8 +96,10 @@ QA-relevant, and the wing loss an extended-source aperture correction cares
 about). `PsfCubeProduct.at()/.convolve()` renormalize each slice to unit sum
 by default, so convolution conserves surface brightness; pass
 `normalized=False` to keep the absolute normalization. `convolve()` shifts
-the kernel centre to the origin analytically (Fourier shift theorem), so even
-grids introduce **no half-pixel displacement** -- pinned by a test.
+the kernel centre to the origin analytically (Fourier shift theorem), so no
+half-pixel displacement ever enters -- pinned by a test. `resampled()`
+conserves each slice's total flux (values scaled by the pixel-area ratio;
+cubic-spline undershoot clipped to zero).
 
 `find_psf_product` / `psf_from_stage` locate the product matching a cube's
 instrument configuration (same `INSTRUMENT_KEYS` matching as the mask
@@ -105,27 +126,23 @@ itself. Endpoints are included, so interpolation never extrapolates.
 `n_wavelengths` overrides the count (a PRISM cube at 2% would want
 `max_fractional_step: 0.05` or `method: fast`).
 
-## The spatial grid
+## The library grid
 
-Model slices in this ecosystem are rendered at 1 pc with 256x256 pixels
-spanning -300..+300 AU. At 1 pc, 1 AU subtends exactly 1 arcsec, so for a
-target at distance d the rendered pixel is
+The sampling is the cube's own spaxel scale divided by `oversample`
+(default 4): 26 mas for NIRSpec, 33/43/61/87 mas for MRS ch1-ch4 -- read
+from the s3d WCS, so per-band scales come out right automatically. Is /4
+fine enough? The *optical* PSF is band-limited at lambda/2D (15 mas at
+NIRSpec's shortest wavelengths), but the stored slices are the *broadened*
+cube-frame PSF: NIRSpec's 50 mas-sigma Gaussian leaves ~1e-8 of the power at
+the 26 mas Nyquist frequency, and every MRS scale sits below even the
+optical lambda/2D of its band. Interpolating this library onto a much finer
+model grid (12 mas at 190 pc for the 256 px / +-300 AU convention) is
+therefore lossless in practice, while the library stays small and cheap.
 
-    (600 AU / 256 px) / d  =  2.34375 / d  arcsec
-
--- at the ~190 pc of Cha I: 12.3 mas pixels, a 3.2" field. That is a lucky
-(or not so lucky) match to the NIRSpec IFU field (3.0") and MRS ch1 (~3.4"),
-and 4-10x finer than any PSF FWHM in range, so **the PSF is generated
-directly on that grid** (`grid: model`, the default; `distance_pc` sets it)
-and convolution needs no resampling step -- resampling kernels is where flux
-conservation quietly dies. In stpsf terms the model grid *is* the detector
-plane (`oversample=1`); at >=4 px per FWHM the difference between
-pixel-integrated and point-sampled kernels is negligible next to the
-IFU broadening.
-
-`grid: native` uses the cube's own spaxel scale instead (PSF photometry on
-the cube itself), and an explicit `pixelscale_arcsec` overrides both.
-`npix`/`fov_au` reshape the model convention if yours differs.
+The angular field is `fov_arcsec` (default 6", generous for the PSF wings
+that matter in convolution); the pixel count follows, rounded up to odd so
+the kernel centre is an integer pixel. An explicit `pixelscale_arcsec`
+overrides the oversample rule.
 
 ## What the slices contain, and orientation
 
@@ -134,23 +151,30 @@ MRS the empirical model tuned to commissioning cubes (Argyriou et al. 2023;
 Law et al. 2023: FWHM = 0.033 lambda + 0.106") -- a Gaussian along the
 along-slice axis plus a **slice-width boxcar across slices**, so the kernel
 is anisotropic -- and for NIRSpec a 0.05"-sigma Gaussian. The slices
-therefore approximate the PSF **as realised in drizzled s3d cubes**, which is
-what a model compared against s3d planes must be convolved with; the bare
-optical PSF is available with `broadening: none`.
+therefore approximate the PSF **as realised in reconstructed s3d cubes**;
+the bare optical PSF is available with `broadening: none`.
 
-Because the MRS kernel is anisotropic, orientation matters. stpsf computes in
-the instrument frame; the step rotates every slice to the **sky frame of
-`skyalign` cubes (north up, east left)** using the aperture position angle
-from the cube header (`PA_APER`, else `ROLL_REF + V3I_YANG`;
-`position_angle_deg` overrides, and the angle used is recorded in
-`JWFPSFPA`). NIRSpec's IFU-align output rotation is disabled so both
-instruments share the "array +y = aperture ideal +y" convention that the
-rotation assumes. Fidelity notes: the MRS aperture ideal frame is itself an
-approximation (stpsf averages the skewed slice geometry), and parity of the
-faint speckle pattern is not guaranteed -- treat sub-degree PA effects and
-speckle-level structure as beyond this product's fidelity. If your model is
-rendered in a frame other than sky (e.g. disk major axis along x), rotate
-the *model* to sky before convolving, as you would for the data comparison.
+stpsf computes (and its docs recommend comparing) in the instrument-aligned
+frame, and the default `frame: ideal` keeps exactly that: **array +y along
+the aperture ideal +y axis** for both instruments (for NIRSpec, stpsf's
+extra 90-degree IFU-align display rotation is disabled so the two
+instruments share one convention), and *nothing is ever interpolated at
+generation*. The sky position angle of that axis -- `PA_APER`, else
+`ROLL_REF + V3I_YANG`, overridable via `position_angle_deg` -- is recorded
+in `JWFPSFPA`, and `resampled(to_sky=True)` folds the rotation to the
+north-up/east-left frame of `skyalign` cubes into the same interpolation as
+the scale change. `frame: sky` instead rotates the slices once at
+generation, for direct overlay on skyalign cubes (PSF photometry, quick
+looks).
+
+Fidelity notes: the MRS aperture ideal frame is itself an approximation
+(stpsf averages the skewed slice geometry), parity of the faint speckle
+pattern is not guaranteed, and a NIRSpec `ifualign` *cube* may be rotated by
+a further +-90 degrees relative to the library frame (use
+`resampled(rotation_deg=...)` if you compare in that frame). Treat
+sub-degree PA effects and speckle-level structure as beyond this product's
+fidelity. If your model is rendered in a frame other than sky (e.g. disk
+major axis along x), compose that angle into `rotation_deg` yourself.
 
 ## Engines, methods, OPD
 
@@ -163,15 +187,17 @@ the *model* to sky before convolving, as you would for the data comparison.
 
 Generation cost with `exact` is minutes per band product (and band products
 run in parallel like any other per-file stage); results are checkpointed
-like every jwstflow task, so reruns are free.
+like every jwstflow task, so reruns are free -- and because the library is
+distance-independent, model iteration never triggers regeneration.
 
 ## Testing
 
 `tests/test_psf.py` runs entirely offline: the Gaussian engine exercises the
-full product path (generation -> write -> read -> interpolate -> convolve ->
-QA), the geometry/rotation/centring conventions are pinned numerically
-(rotation sign, the (n-1)/2 kernel centre, flux conservation, zero
-displacement), and a stub of the verified stpsf 2.x IFU API pins how
-`StpsfEngine` must drive the real package -- in particular that the pixel
-scale is applied *after* band selection (stpsf resets it on any IFU aperture
-change) and that the broadened `DET_DIST` plane is the one stored.
+full product path (generation -> write -> read -> resample -> interpolate ->
+convolve -> QA), the geometry/rotation/centring conventions are pinned
+numerically (rotation sign, the (n-1)/2 kernel centre, flux conservation,
+zero displacement, resampling that preserves angular FWHM and flux), and a
+stub of the verified stpsf 2.x IFU API pins how `StpsfEngine` must drive the
+real package -- in particular that the pixel scale is applied *after* band
+selection (stpsf resets it on any IFU aperture change) and that the broadened
+`DET_DIST` plane is the one stored.

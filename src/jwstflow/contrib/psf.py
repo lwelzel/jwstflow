@@ -1,10 +1,10 @@
-"""PSF-cube steps: per-observation instrument PSFs for IFU model comparison.
+"""PSF-cube steps: per-observation instrument PSF libraries for IFU model comparison.
 
 ``psf_cube`` generates one ``*_psfcube.fits`` per input ``*_s3d.fits`` (the
 psfcube-product contract, :mod:`jwstflow.psf`); ``qa_psf_cube`` plots it.
 The stpsf engine needs the ``jwstflow[psf]`` extra and the stpsf data files;
-everything else in the product path (reading, interpolation, convolution, QA)
-stays dependency-light.
+everything else in the product path (reading, resampling, interpolation,
+convolution, QA) stays dependency-light.
 """
 
 from __future__ import annotations
@@ -14,14 +14,13 @@ from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from .. import qafig
 from ..psf import (
-    MODEL_FOV_AU,
-    MODEL_NPIX,
     PSFCUBE_SUFFIX,
     GaussianPsfEngine,
+    IfuConfig,
     PsfCubeProduct,
     PsfGrid,
     StpsfEngine,
@@ -38,25 +37,29 @@ log = logging.getLogger(__name__)
 
 
 class PsfCube(Step):
-    """Spectrally sub-sampled PSF cube matching an IFU cube, for model convolution.
+    """Spectrally sub-sampled instrument PSF library matching an IFU cube.
 
     For each ``*_s3d.fits`` cube the instrument configuration (NIRSpec
-    grating/filter or MRS channel/band) is read from the header, the PSF is
-    computed with stpsf's IFU mode -- including its empirical broadening, so
-    the slices describe the PSF as realised in reconstructed cubes -- at
+    grating/filter or MRS channel/band) is read from the header and the PSF
+    is computed with stpsf's IFU mode -- including its empirical broadening,
+    so the slices describe the PSF as realised in reconstructed cubes -- at
     log-spaced wavelengths spanning the cube (adjacent wavelengths within
-    ``max_fractional_step``, default 2%), rotated to the sky frame of
-    skyalign cubes (north up, east left) using the header position angle, and
-    written as a ``*_psfcube.fits`` product (contract: ``jwstflow.psf``).
+    ``max_fractional_step``, default 2%), and written as a ``*_psfcube.fits``
+    product (contract: ``jwstflow.psf``).
 
-    The spatial grid defaults to the ecosystem's model-rendering convention:
-    ``npix`` (256) pixels spanning ``fov_au`` (600 AU, i.e. +-300 AU) at the
-    target, so ``distance_pc`` is required and the pixel scale becomes
-    ``(fov_au/npix)/distance`` arcsec -- model slices then convolve without
-    resampling (``PsfCubeProduct.read(...).convolve(model, waves)``).
-    ``grid: native`` uses the cube's own spaxel scale instead (e.g. for PSF
-    photometry on the cube itself), and an explicit ``pixelscale_arcsec``
-    overrides both.
+    The product is a **distance-independent library**: slices live on a
+    fixed, fine angular grid -- the cube's own spaxel scale divided by
+    ``oversample`` (default 4: 26 mas for NIRSpec, 87-33 mas for MRS ch4-ch1,
+    comfortably Nyquist for the broadened PSF) over ``fov_arcsec`` (default
+    6") -- and, with the default ``frame: ideal``, stay in the aperture-ideal
+    frame stpsf computes in, so nothing is ever interpolated at generation.
+    The sky position angle of the ideal +y axis is recorded (``JWFPSFPA``,
+    from ``PA_APER`` else ``ROLL_REF+V3I_YANG``); modeling code then scales
+    *and* orients the library onto each model grid in one interpolation:
+    ``PsfCubeProduct.read(f).resampled(model_pixel_scale(d), 256,
+    to_sky=True).convolve(model, waves)`` -- one library serves every trial
+    distance. ``frame: sky`` instead rotates the slices at generation
+    (north up, east left), for direct overlay on skyalign cubes.
 
     Engines: ``stpsf`` (science grade; needs ``pip install 'jwstflow[psf]'``
     and the stpsf data files via ``$STPSF_PATH``) or ``gaussian`` (offline
@@ -69,16 +72,15 @@ class PsfCube(Step):
 
     inputs = ("*_s3d.fits",)
     outputs = (PSFCUBE_SUFFIX,)
-    version = "1"
+    version = "2"   # 1 -> 2: distance-independent library (spaxel/oversample grid, ideal frame)
 
     class Params(StepParams):
-        distance_pc: float | None = Field(None, gt=0, description="target distance [pc]; sets the model-grid pixel "
-                                          "scale (fov_au/npix)/distance (required for grid: model)")
-        grid: Literal["model", "native"] = Field("model", description="spatial grid: the +-300 AU model convention, "
-                                                 "or the cube's own spaxel scale")
-        fov_au: float = Field(MODEL_FOV_AU, gt=0, description="model-grid field of view [AU] (grid: model)")
-        npix: int = Field(MODEL_NPIX, ge=16, le=2048, description="spatial size of the PSF slices [pixels]")
-        pixelscale_arcsec: float | None = Field(None, gt=0, description="explicit pixel scale [arcsec]; overrides grid")
+        oversample: int = Field(4, ge=1, le=16, description="library sampling: the cube's spaxel scale divided "
+                                "by this (1 = the spaxel grid itself)")
+        fov_arcsec: float = Field(6.0, gt=0, le=60, description="angular field of the PSF slices [arcsec] "
+                                  "(the pixel count follows from the sampling, rounded up to odd)")
+        pixelscale_arcsec: float | None = Field(None, gt=0, description="explicit library pixel scale [arcsec]; "
+                                                "overrides oversample")
         max_fractional_step: float = Field(0.02, gt=0, le=0.5, description="wavelength sub-sampling: adjacent PSF "
                                            "wavelengths differ by at most this fraction")
         n_wavelengths: int | None = Field(None, ge=2, description="fixed number of PSF wavelengths instead of "
@@ -91,33 +93,27 @@ class PsfCube(Step):
                          "queries MAST) or an OPD file path")
         broadening: str = Field("default", description="stpsf ifu_broadening: default (empirical MRS / Gaussian "
                                 "NIRSpec), 'gaussian', or 'none' (bare optical PSF)")
-        rotate_to_sky: bool = Field(True, description="rotate slices to north-up/east-left (skyalign cubes)")
-        position_angle_deg: float | None = Field(None, description="aperture +y position angle [deg E of N]; "
-                                                 "overrides the header (PA_APER)")
+        frame: Literal["ideal", "sky"] = Field("ideal", description="slice orientation: the aperture-ideal frame "
+                                               "(no interpolation; PA recorded for consumers) or rotated to "
+                                               "north-up/east-left at generation")
+        position_angle_deg: float | None = Field(None, description="sky PA [deg E of N] of the aperture ideal +y "
+                                                 "axis; overrides the header (PA_APER)")
 
-        @model_validator(mode="after")
-        def _needs_a_scale(self) -> PsfCube.Params:
-            if self.grid == "model" and self.pixelscale_arcsec is None and self.distance_pc is None:
-                raise ValueError("grid 'model' needs distance_pc (pixel scale = (fov_au/npix)/distance arcsec); "
-                                 "alternatively give pixelscale_arcsec or grid: native")
-            return self
-
-    def run(self, inputs: list[Path], ctx: RunContext, *, distance_pc: float | None = None,
-            grid: str = "model", fov_au: float = MODEL_FOV_AU, npix: int = MODEL_NPIX,
+    def run(self, inputs: list[Path], ctx: RunContext, *, oversample: int = 4, fov_arcsec: float = 6.0,
             pixelscale_arcsec: float | None = None, max_fractional_step: float = 0.02,
             n_wavelengths: int | None = None, engine: str = "stpsf", method: str = "exact",
-            opd: str = "default", broadening: str = "default", rotate_to_sky: bool = True,
+            opd: str = "default", broadening: str = "default", frame: str = "ideal",
             position_angle_deg: float | None = None, **params: Any) -> list[Path]:
         (cube_path,) = inputs
         geom = read_cube_geometry(cube_path)
         if pixelscale_arcsec is not None:
-            psf_grid = PsfGrid(float(pixelscale_arcsec), int(npix))
-        elif grid == "native":
+            scale = float(pixelscale_arcsec)
+        else:
             if geom.pixelscale_arcsec is None:
                 raise ValueError(f"{cube_path.name} carries no spatial WCS scale; give pixelscale_arcsec")
-            psf_grid = PsfGrid(geom.pixelscale_arcsec, int(npix))
-        else:
-            psf_grid = PsfGrid.for_model(float(distance_pc), fov_au=fov_au, npix=int(npix))
+            scale = geom.pixelscale_arcsec / int(oversample)
+        npix = int(np.ceil(fov_arcsec / scale)) | 1        # odd: pixel-centred kernels resample cleanly
+        psf_grid = PsfGrid(scale, npix)
         waves = subsample_wavelengths(float(geom.wavelengths.min()), float(geom.wavelengths.max()),
                                       max_fractional_step=max_fractional_step, n=n_wavelengths)
         eng = GaussianPsfEngine() if engine == "gaussian" else StpsfEngine(opd=opd, broadening=broadening,
@@ -128,12 +124,17 @@ class PsfCube(Step):
         stack = eng.compute(geom.config, waves, psf_grid, date_obs=geom.date_obs)
 
         pa = position_angle_deg if position_angle_deg is not None else geom.position_angle_deg
-        rotated = rotate_to_sky and pa is not None
-        if rotated:
-            stack = rotate_cube_to_sky(stack, float(pa))
-        elif rotate_to_sky:
-            ctx.log.warning("%s: no PA_APER/ROLL_REF+V3I_YANG in the header and no position_angle_deg given; "
-                            "slices stay in the instrument frame (matters for the anisotropic MRS broadening)",
+        frame_used = frame
+        if frame == "sky":
+            if pa is None:
+                ctx.log.warning("%s: frame 'sky' but no PA_APER/ROLL_REF+V3I_YANG in the header and no "
+                                "position_angle_deg given; slices stay in the ideal frame", cube_path.name)
+                frame_used = "ideal"
+            else:
+                stack = rotate_cube_to_sky(stack, float(pa))
+        elif pa is None:
+            ctx.log.warning("%s: no PA_APER/ROLL_REF+V3I_YANG in the header; the library carries no sky "
+                            "orientation -- resampled(to_sky=True) will need an explicit rotation_deg",
                             cube_path.name)
 
         meta: dict[str, Any] = {
@@ -145,14 +146,17 @@ class PsfCube(Step):
             "JWFPSFBR": (broadening, "IFU broadening model"),
             "JWFPSFNW": (len(waves), "number of PSF wavelengths"),
             "JWFPSFFS": (max_fractional_step, "max fractional wavelength step"),
-            "JWFPSFGR": (grid if pixelscale_arcsec is None else "explicit", "grid choice"),
+            "JWFPSFOV": (int(oversample) if pixelscale_arcsec is None else "none",
+                         "library sampling: spaxel/this"),
+            "JWFPSFNS": (geom.pixelscale_arcsec if geom.pixelscale_arcsec is not None else "none",
+                         "[arcsec/pix] native spaxel scale"),
+            "JWFPSFFV": (float(fov_arcsec), "[arcsec] requested angular field"),
             "JWFPSFNP": (psf_grid.npix, "spatial size [pix]"),
             "JWFPSFPS": (psf_grid.pixelscale_arcsec, "[arcsec/pix] PSF sampling"),
-            "JWFPSFPA": (float(pa) if rotated else "none", "[deg E of N] aperture +y PA applied"),
+            "JWFPSFFR": (frame_used, "slice orientation: ideal | sky"),
+            "JWFPSFPA": (float(pa) if pa is not None else "none",
+                         "[deg E of N] sky PA of ideal +y axis"),
         }
-        if grid == "model" and pixelscale_arcsec is None:
-            meta["JWFPSFDS"] = (float(distance_pc), "[pc] target distance of the model grid")
-            meta["JWFPSFFA"] = (float(fov_au), "[AU] model-grid field of view")
         product = PsfCubeProduct(stack, waves, psf_grid.pixelscale_arcsec, meta=meta)
         out = ctx.derived_path(cube_path, PSFCUBE_SUFFIX)
         product.write(out, like=cube_path)
@@ -177,12 +181,10 @@ class QaPsfCube(Step):
 
     level = "qa"
     inputs = (f"*_{PSFCUBE_SUFFIX}.fits",)
-    version = "1"
+    version = "2"   # 1 -> 2: frame/PA annotation of the library products
 
     def run(self, inputs: list[Path], ctx: RunContext, *, n_slices: int = 4, dpi: int = 150,
             fmt: str = "png", xscale: str = "log", **params: Any) -> list[Path]:
-        from ..psf import IfuConfig
-
         out: list[Path] = []
         for inp in inputs:
             product = PsfCubeProduct.read(inp)
@@ -226,10 +228,12 @@ class QaPsfCube(Step):
             ax_sum.set_ylabel("in-field energy fraction")
             ax_sum.set_ylim(0, 1.05)
             qafig.set_wave_scale(ax_sum, xscale)
-            pa = product.meta.get("JWFPSFPA", "?")
+            pa = product.position_angle_deg
             qafig.annotate(ax_fwhm, inp.name,
-                           f"{product.data.shape[2]} px of {product.pixelscale_arcsec:.4f}\", PA {pa}",
-                           f"engine {product.meta.get('JWFPSFEN', '?')} ({product.meta.get('JWFPSFMD', '?')})")
+                           f"{product.data.shape[2]} px of {product.pixelscale_arcsec:.4f}\", "
+                           f"frame {product.frame or '?'}, PA {f'{pa:.1f}' if pa is not None else 'n/a'}",
+                           f"engine {product.meta_value('JWFPSFEN') or '?'} "
+                           f"({product.meta_value('JWFPSFMD') or '?'})")
             qafig.figlegend(fig)
             out.append(qafig.save(fig, ctx.output_dir / f"{inp.stem}.{fmt}", dpi=dpi))
         return out

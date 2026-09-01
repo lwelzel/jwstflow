@@ -171,6 +171,60 @@ def test_convolution_handles_nans_and_2d():
     assert out.shape == (8, 8) and np.isfinite(out).all()
 
 
+# --------------------------------------------------------------------------- resampling the library
+def test_resampled_scale_change_conserves_shape_and_flux():
+    product = _gaussian_product(65, [4.0, 6.0], [4.0, 5.0], scale=0.1)   # library at 0.1"
+    fine = product.resampled(0.02, 257)                                  # a 5x finer model grid
+    assert fine.data.shape == (2, 257, 257)
+    assert fine.pixelscale_arcsec == pytest.approx(0.02)
+    for k in (0, 1):
+        assert measure_fwhm_arcsec(fine.data[k], 0.02) == pytest.approx(
+            measure_fwhm_arcsec(product.data[k], 0.1), rel=0.03)         # angular FWHM unchanged
+        assert fine.data[k].sum() == pytest.approx(product.data[k].sum(), rel=0.01)  # flux conserved
+        y, x = np.indices(fine.data[k].shape)
+        w = fine.data[k] / fine.data[k].sum()
+        assert (w * y).sum() == pytest.approx(128.0, abs=0.02)           # still kernel-centred
+        assert (w * x).sum() == pytest.approx(128.0, abs=0.02)
+    assert fine.wavelengths.tolist() == [4.0, 5.0]
+
+
+def _elongated_product(pa_key: object = None, frame_key: str | None = "ideal") -> PsfCubeProduct:
+    n, c = 65, 32.0
+    yy, xx = np.indices((n, n))
+    plane = np.exp(-(((yy - c) / 8.0) ** 2 + ((xx - c) / 3.0) ** 2) / 2)   # elongated along +y
+    meta: dict = {}
+    if frame_key is not None:
+        meta["JWFPSFFR"] = (frame_key, "slice orientation")
+    if pa_key is not None:
+        meta["JWFPSFPA"] = (pa_key, "PA")
+    return PsfCubeProduct(plane[None], np.array([5.0]), 0.1, meta=meta)
+
+
+def test_resampled_rotation_matches_the_sky_convention():
+    product = _elongated_product()
+    rotated = product.resampled(0.1, 65, rotation_deg=30.0)
+    assert _sky_pa_of_elongation(rotated.data[0]) == pytest.approx(30.0, abs=0.5)
+    finer = product.resampled(0.05, 129, rotation_deg=120.0)             # rotation + zoom in one pass
+    assert _sky_pa_of_elongation(finer.data[0]) == pytest.approx(120.0, abs=0.5)
+    assert finer.data[0].sum() == pytest.approx(product.data[0].sum(), rel=0.01)
+
+
+def test_resampled_to_sky_uses_the_recorded_pa():
+    product = _elongated_product(pa_key=40.0)
+    sky = product.resampled(0.05, 129, to_sky=True)
+    assert _sky_pa_of_elongation(sky.data[0]) == pytest.approx(40.0, abs=0.5)
+    assert sky.frame == "sky"
+    # already-sky products pass through unrotated
+    again = sky.resampled(0.05, 129, to_sky=True)
+    assert _sky_pa_of_elongation(again.data[0]) == pytest.approx(40.0, abs=0.5)
+    with pytest.raises(ValueError, match="rotation_deg"):
+        _elongated_product(pa_key="none").resampled(0.05, 65, to_sky=True)     # PA unknown
+    with pytest.raises(ValueError, match="rotation_deg"):
+        _elongated_product(frame_key=None).resampled(0.05, 65, to_sky=True)    # frame unknown
+    with pytest.raises(ValueError, match="not both"):
+        product.resampled(0.05, 65, to_sky=True, rotation_deg=10.0)
+
+
 # --------------------------------------------------------------------------- cube geometry
 def test_read_cube_geometry_from_synthetic(tmp_path: Path):
     path = synthetic_cube(tmp_path / "jw001_nirspec_g235h-f170lp_s3d.fits", instrument="NIRSPEC",
@@ -209,25 +263,29 @@ def test_step_declarations():
         assert problems == []
 
 
-def test_psf_cube_step_requires_a_scale():
+def test_psf_cube_step_runs_with_defaults_validated():
     from jwstflow.contrib.psf import PsfCube
 
-    with pytest.raises(ValueError, match="distance_pc"):
-        PsfCube.validate_params({"engine": "gaussian"})
-    assert PsfCube.validate_params({"grid": "native", "engine": "gaussian"})["grid"] == "native"
+    assert PsfCube.validate_params({}) == {}                       # a library needs no target knowledge
+    assert PsfCube.validate_params({"pixelscale_arcsec": 0.02})["pixelscale_arcsec"] == 0.02
+    with pytest.raises(ValueError):
+        PsfCube.validate_params({"distance_pc": 190.0})            # the model grid left the step
 
 
 def test_psf_cube_step_on_synthetic_miri(tmp_path: Path):
     src = synthetic_cube(tmp_path / "jw01751-o010_t005_miri_ch1-short_s3d.fits", instrument="MIRI",
                          nwave=40, wave_min=4.9, wave_step=0.02, PA_APER=30.0)
     outputs = run_step("jwstflow.contrib.psf:PsfCube", [src], tmp_path,
-                       params={"engine": "gaussian", "distance_pc": 190.0, "npix": 64})
+                       params={"engine": "gaussian", "fov_arcsec": 3.2})
     assert [o.name for o in outputs] == ["jw01751-o010_t005_miri_ch1-short_psfcube.fits"]
     product = PsfCubeProduct.read(outputs[0])
-    assert product.pixelscale_arcsec == pytest.approx(600.0 / 64 / 190.0)
+    assert product.pixelscale_arcsec == pytest.approx(0.13 / 4, rel=1e-3)   # spaxel / oversample
+    npix = product.data.shape[1]
+    assert npix % 2 == 1 and npix * product.pixelscale_arcsec >= 3.2        # odd, covers the field
     assert product.wavelengths[0] == pytest.approx(4.9) and product.wavelengths[-1] == pytest.approx(4.9 + 39 * 0.02)
     assert len(product.wavelengths) >= 5 and np.all(np.diff(product.wavelengths) > 0)
-    assert product.meta["JWFPSFPA"] == pytest.approx(30.0)
+    assert product.frame == "ideal"                # library frame: nothing was interpolated
+    assert product.position_angle_deg == pytest.approx(30.0)                # ... but the PA is recorded
     assert product.meta["JWFPSFEN"] == "gaussian"
     assert product.header["CHANNEL"] == "1"
     assert np.all(product.sums() > 0.9)
@@ -237,13 +295,15 @@ def test_psf_cube_step_on_synthetic_miri(tmp_path: Path):
     assert fwhm[0] == pytest.approx(float(approx_fwhm_arcsec(MIRI_1A, 4.9)), rel=0.1)
 
 
-def test_psf_cube_step_native_grid_and_qa(tmp_path: Path):
+def test_psf_cube_step_sky_frame_and_qa(tmp_path: Path):
     src = synthetic_cube(tmp_path / "jw01751-o006_t005_nirspec_g235h-f170lp_s3d.fits", instrument="NIRSPEC",
                          nwave=25, wave_min=1.66, wave_step=0.05, PA_APER=110.0)
     outputs = run_step("jwstflow.contrib.psf:PsfCube", [src], tmp_path,
-                       params={"engine": "gaussian", "grid": "native", "npix": 48, "n_wavelengths": 6})
+                       params={"engine": "gaussian", "oversample": 1, "fov_arcsec": 3.0,
+                               "n_wavelengths": 6, "frame": "sky"})
     product = PsfCubeProduct.read(outputs[0])
-    assert product.pixelscale_arcsec == pytest.approx(0.13, rel=1e-3)   # the cube's own spaxel scale
+    assert product.pixelscale_arcsec == pytest.approx(0.13, rel=1e-3)   # oversample 1 = the spaxel grid
+    assert product.frame == "sky" and product.position_angle_deg == pytest.approx(110.0)
     assert len(product.wavelengths) == 6
     figures = run_step("jwstflow.contrib.psf:QaPsfCube", outputs, tmp_path)
     assert len(figures) == 1 and figures[0].suffix == ".png" and figures[0].stat().st_size > 0
@@ -253,10 +313,10 @@ def test_psf_from_stage(tmp_path: Path):
     src = synthetic_cube(tmp_path / "jw001_miri_ch1-short_s3d.fits", instrument="MIRI", PA_APER=0.0)
     ctx = make_context(tmp_path, stage="downstream")
     outputs = run_step("jwstflow.contrib.psf:PsfCube", [src], tmp_path,
-                       params={"engine": "gaussian", "distance_pc": 100.0, "npix": 32})
+                       params={"engine": "gaussian", "fov_arcsec": 1.0})
     ctx.stage_dirs["psf_cube"] = outputs[0].parent
     product = psf_from_stage(src, ctx, "psf_cube")
-    assert product is not None and product.data.shape[1:] == (32, 32)
+    assert product is not None and product.data.shape[1:] == (31, 31)   # ceil(1.0 / 0.0325) -> odd
     assert psf_from_stage(src, ctx, "") is None
     assert psf_from_stage(src, ctx, "not_in_workflow") is None
     other = synthetic_cube(tmp_path / "jw001_nirspec_g395h_s3d.fits", instrument="NIRSPEC")

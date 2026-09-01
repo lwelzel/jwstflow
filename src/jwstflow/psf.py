@@ -29,15 +29,23 @@ The design choices (docs/psf_cubes.md carries the full rationale):
   (FWHM ~ lambda/D), so slices at log-spaced wavelengths whose adjacent ratio
   is at most ``1 + max_fractional_step`` (default 2%) bound the FWHM error of
   the nearest slice to ~1% and of linear interpolation to O(step^2/8) ~ 1e-4.
-* **The spatial grid defaults to the modeling convention of this ecosystem**:
-  a 256x256 grid spanning +-300 AU at the target. At 1 pc, 1 AU subtends
-  exactly 1 arcsec, so the pixel scale is (600 AU / 256 px) / d[pc] arcsec
-  and model slices convolve without any resampling.
-* **Orientation**: slices are stored rotated to the sky frame of ``skyalign``
-  cubes (north up, east left) using the aperture position angle from the cube
-  header (``PA_APER``, else ``ROLL_REF + V3I_YANG``); the angle used is
-  recorded in ``JWFPSFPA``. This matters most for MIRI MRS, whose empirical
-  broadening is anisotropic (a slice-width box along the beta axis).
+* **The product is a distance-independent instrument library.** Slices live
+  on a fixed, fine angular grid -- the cube's native spaxel scale divided by
+  ``oversample`` (default 4), over a fixed angular field -- and know nothing
+  about any particular model of the target. Scaling onto a model's angular
+  grid (e.g. the 256 px / +-300 AU rendering convention,
+  :func:`model_pixel_scale`) is the *consumer's* single resampling step,
+  :meth:`PsfCubeProduct.resampled`, so many models at many trial distances
+  reuse one library.
+* **Orientation stays instrument-native** (``frame='ideal'``: array +y along
+  the aperture ideal +y axis, the frame both engines produce), so no rotation
+  ever resamples the stored slices; the sky position angle of that axis
+  (``PA_APER``, else ``ROLL_REF + V3I_YANG``) is recorded in ``JWFPSFPA`` and
+  :meth:`PsfCubeProduct.resampled` folds the rotation to the sky frame of
+  ``skyalign`` cubes (north up, east left) into the same interpolation as the
+  scale change. ``frame='sky'`` rotates at generation instead, for direct
+  overlay on skyalign cubes. Orientation matters most for MIRI MRS, whose
+  empirical broadening is anisotropic (a slice-width box along beta).
 * **Engines are pluggable**: :class:`StpsfEngine` drives stpsf's IFU mode
   (``pip install 'jwstflow[psf]'`` plus the stpsf data files) and
   :class:`GaussianPsfEngine` is an analytic, offline approximation that also
@@ -52,7 +60,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 
@@ -83,9 +91,11 @@ _ARCSEC_PER_RAD = 180.0 / np.pi * 3600.0
 def model_pixel_scale(distance_pc: float, *, fov_au: float = MODEL_FOV_AU, npix: int = MODEL_NPIX) -> float:
     """Pixel scale [arcsec] of the model grid for a target at ``distance_pc``.
 
-    The convention renders ``npix`` pixels over ``fov_au``; at 1 pc, 1 AU
-    subtends 1 arcsec (the definition of the parsec), so the angular pixel
-    scale is ``(fov_au / npix) / distance_pc``.
+    A modeling-side convenience (the PSF library itself is
+    distance-independent): the convention renders ``npix`` pixels over
+    ``fov_au``; at 1 pc, 1 AU subtends 1 arcsec (the definition of the
+    parsec), so the angular pixel scale is ``(fov_au / npix) / distance_pc``
+    -- the natural target for :meth:`PsfCubeProduct.resampled`.
     """
     if distance_pc <= 0:
         raise ValueError(f"distance_pc must be positive, not {distance_pc}")
@@ -328,7 +338,7 @@ class StpsfEngine:
 
     #: MRS across-slice widths [arcsec] per channel (Argyriou et al. 2023), the
     #: fallback when stpsf's private attribute moves.
-    MRS_SLICE_WIDTH = {"1": 0.177, "2": 0.280, "3": 0.390, "4": 0.656}
+    MRS_SLICE_WIDTH: ClassVar[dict[str, float]] = {"1": 0.177, "2": 0.280, "3": 0.390, "4": 0.656}
 
     def compute(self, config: IfuConfig, wavelengths_um: np.ndarray, grid: PsfGrid, *,
                 date_obs: str | None = None) -> np.ndarray:
@@ -522,6 +532,24 @@ class PsfCubeProduct:
         """Kernel centre in (y, x) pixels: the geometric array centre."""
         return ((self.data.shape[1] - 1) / 2.0, (self.data.shape[2] - 1) / 2.0)
 
+    def meta_value(self, key: str) -> Any:
+        value = self.meta.get(key)
+        return value[0] if isinstance(value, tuple) else value
+
+    @property
+    def frame(self) -> str | None:
+        """Orientation of the slices: 'ideal' (aperture ideal frame) or 'sky', from JWFPSFFR."""
+        value = self.meta_value("JWFPSFFR")
+        return str(value) if value is not None else None
+
+    @property
+    def position_angle_deg(self) -> float | None:
+        """Recorded sky PA [deg E of N] of the aperture ideal +y axis (JWFPSFPA), if known."""
+        try:
+            return float(self.meta_value("JWFPSFPA"))
+        except (TypeError, ValueError):
+            return None
+
     def sums(self) -> np.ndarray:
         """Per-slice sums: the fraction of the source flux landing inside the grid."""
         return np.nansum(self.data, axis=(1, 2))
@@ -552,6 +580,66 @@ class PsfCubeProduct:
         if normalized:
             planes = tuple(p / s if (s := float(np.nansum(p))) > 0 else p for p in planes)
         return a * planes[0] + b * planes[1]
+
+    def resampled(self, pixelscale_arcsec: float, npix: int, *, to_sky: bool = False,
+                  rotation_deg: float | None = None, order: int = 3) -> PsfCubeProduct:
+        """This library on another grid: scale change and rotation in *one* interpolation.
+
+        The intended consumer path for model comparison: generate the library
+        once (distance-independent), then resample it onto each model's
+        angular grid -- e.g. ``psf.resampled(model_pixel_scale(d), 256,
+        to_sky=True)`` for a trial distance ``d`` -- and convolve. ``to_sky``
+        rotates slices stored in the aperture ideal frame to north-up/
+        east-left using the recorded position angle (products already in the
+        'sky' frame pass through unrotated; without a recorded frame/PA, pass
+        ``rotation_deg`` explicitly). ``rotation_deg`` applies the same
+        convention as :func:`rotate_cube_to_sky`: the array +y axis ends up
+        at that sky position angle.
+
+        Sampling is a cubic spline by default (``order``); small spline
+        undershoots are clipped to zero and values are scaled by the
+        pixel-area ratio, so each slice's total flux is conserved (up to
+        field truncation). Wavelengths, sums bookkeeping and provenance
+        travel along; ``JWFPSFPS``/``JWFPSFNP``/``JWFPSFFR`` are updated.
+        """
+        from scipy.ndimage import map_coordinates
+
+        if to_sky and rotation_deg is not None:
+            raise ValueError("give either to_sky or rotation_deg, not both")
+        if to_sky:
+            if self.frame == "sky":
+                theta = 0.0
+            elif self.frame == "ideal":
+                pa = self.position_angle_deg
+                if pa is None:
+                    raise ValueError("no recorded position angle (JWFPSFPA); pass rotation_deg explicitly")
+                theta = pa
+            else:
+                raise ValueError("no recorded frame (JWFPSFFR); pass rotation_deg explicitly")
+        else:
+            theta = float(rotation_deg or 0.0)
+        s = float(pixelscale_arcsec) / self.pixelscale_arcsec       # output pixel in input pixels
+        cy_in, cx_in = self.centre
+        c_out = (int(npix) - 1) / 2.0
+        yy, xx = np.indices((int(npix), int(npix)), dtype=float)
+        dx, dy = (xx - c_out) * s, (yy - c_out) * s
+        # inverse mapping of "rotate array +y to PA theta" (see rotate_cube_to_sky; pinned by a test)
+        rad = np.deg2rad(theta)
+        ct, st = np.cos(rad), np.sin(rad)
+        in_x = cx_in + ct * dx + st * dy
+        in_y = cy_in - st * dx + ct * dy
+        out = np.empty((len(self.data), int(npix), int(npix)), dtype=float)
+        for i, plane in enumerate(self.data):
+            resampled = map_coordinates(np.where(np.isfinite(plane), plane, 0.0), [in_y, in_x],
+                                        order=order, mode="constant", cval=0.0)
+            out[i] = np.clip(resampled, 0.0, None) * s**2           # conserve the integral
+        meta = dict(self.meta)
+        meta["JWFPSFPS"] = (float(pixelscale_arcsec), "[arcsec/pix] PSF sampling")
+        meta["JWFPSFNP"] = (int(npix), "spatial size [pix]")
+        if to_sky or rotation_deg is not None:
+            meta["JWFPSFFR"] = ("sky" if to_sky else "custom", "orientation after resampling")
+        return PsfCubeProduct(out, self.wavelengths.copy(), float(pixelscale_arcsec),
+                              meta=meta, header=self.header)
 
     def convolve(self, cube: np.ndarray, wavelengths_um: np.ndarray, *, normalized: bool = True) -> np.ndarray:
         """Convolve a model cube (nw, my, mx) with the wavelength-matched PSF.
