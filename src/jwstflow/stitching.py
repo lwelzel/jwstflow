@@ -7,8 +7,9 @@ implements the generic mechanics once:
 
 * segments are read from the EXTRACT1D/COMBINE1D table of each input and
   ordered by wavelength;
-* in each overlap the median flux ratio between neighbours is measured (and
-  recorded in the output metadata, whether or not it is applied);
+* in each overlap the flux ratio between neighbours is measured as the ratio
+  of the two overlap medians, and only when both are significantly positive
+  (and recorded in the output metadata, whether or not it is applied);
 * with ``rescale``, segments are multiplicatively chained onto a ``reference``
   segment (default: the reddest);
 * the spectrum switches segments at ``crossovers`` (default: the midpoint of
@@ -48,10 +49,14 @@ class StitchSegments(Step):
     1. each input's EXTRACT1D/COMBINE1D table is read and sorted by
        wavelength; segments are labelled from their headers (grating-filter /
        channel-band) and ordered blue to red;
-    2. in every overlap between neighbours the median flux ratio is measured
-       (always recorded in the output metadata; applied only with
+    2. in every overlap between neighbours the flux ratio is measured -- the
+       ratio of the two segments' overlap medians, and only when both stand
+       significantly above zero (``min_overlap_snr``), because an overlap
+       whose flux is consistent with zero cannot anchor a multiplicative
+       rescaling (always recorded in the output metadata; applied only with
        ``rescale``, which multiplicatively chains all segments onto the
-       ``reference`` segment -- default the reddest);
+       ``reference`` segment -- default the reddest; an unmeasurable ratio
+       leaves its link unscaled instead of amplifying noise down the chain);
     3. the combination switches from one segment to the next at the
        ``crossovers`` wavelengths (default: the midpoint of each overlap, or
        of the gap when neighbours do not overlap) -- no averaging across
@@ -67,7 +72,7 @@ class StitchSegments(Step):
     inputs = ("*_s1d.fits", "*_x1d.fits", "*_c1d.fits")
     outputs = ("s1dcomb",)
     batch = "all"
-    version = "2"   # 1 -> 2: the comparison figure moved to the plot_stitch QA step
+    version = "3"   # 2 -> 3: overlap ratio = ratio of overlap medians, guarded by min_overlap_snr
 
     class Params(StepParams):
         crossovers: list[float] | None = Field(None, description="wavelengths [um] where the combination switches "
@@ -76,6 +81,9 @@ class StitchSegments(Step):
         reference: str | None = Field(None, description="segment kept fixed when rescaling: a label, "
                                       "'shortest' or 'longest' (default: the reddest segment)")
         min_overlap_points: int = Field(5, ge=1, description="overlap samples needed to measure a ratio")
+        min_overlap_snr: float = Field(3.0, ge=0, description="both overlap medians must sit this many robust "
+                                       "sigmas above zero for the ratio to count (a near-zero overlap cannot "
+                                       "anchor a rescaling; its link stays at 1). 0 disables the guard")
 
     def segment_label(self, path: Path) -> str:
         """Short label of a segment (override for mode-specific naming)."""
@@ -90,7 +98,7 @@ class StitchSegments(Step):
 
     def run(self, inputs: list[Path], ctx: RunContext, *, crossovers: list[float] | None = None,
             rescale: bool = False, reference: str | None = None, min_overlap_points: int = 5,
-            **params) -> list[Path]:
+            min_overlap_snr: float = 3.0, **params) -> list[Path]:
         from astropy.table import Table
 
         if len(inputs) < 2:
@@ -112,7 +120,8 @@ class StitchSegments(Step):
             raise ValueError(f"segment labels are not unique: {labels}")
 
         # overlap ratios between neighbours (always measured, applied only with rescale)
-        ratios = [self.overlap_ratio(a, b, min_overlap_points=min_overlap_points)
+        ratios = [self.overlap_ratio(a, b, min_overlap_points=min_overlap_points,
+                                     min_overlap_snr=min_overlap_snr)
                   for a, b in zip(segments, segments[1:])]
         scales = self._scales(labels, ratios, reference) if rescale else [1.0] * len(segments)
 
@@ -146,8 +155,18 @@ class StitchSegments(Step):
         return [out]
 
     # ------------------------------------------------------------------ hooks / helpers
-    def overlap_ratio(self, a: dict[str, Any], b: dict[str, Any], *, min_overlap_points: int = 5) -> float:
-        """Median flux ratio ``b/a`` where the two segments overlap (NaN when not measurable).
+    def overlap_ratio(self, a: dict[str, Any], b: dict[str, Any], *, min_overlap_points: int = 5,
+                      min_overlap_snr: float = 3.0) -> float:
+        """Flux ratio ``b/a`` where the two segments overlap (NaN when not measurable).
+
+        The ratio of the two segments' median fluxes over the shared overlap
+        samples -- robust against spikes and, unlike a median of per-sample
+        ratios, against noise crossing zero. With ``min_overlap_snr`` both
+        medians must also sit that many robust sigmas above zero: an overlap
+        whose flux is consistent with zero cannot anchor a multiplicative
+        rescaling (dividing by it amplifies the redder segments by huge or
+        even negative factors), so such a ratio comes back NaN -- the chain
+        then leaves that link unscaled, with a warning here.
 
         ``a`` and ``b`` are segment dicts (``label`` plus finite, wavelength-ordered
         ``WAVELENGTH``/``FLUX``/``FLUX_ERROR`` arrays), ``a`` the bluer one. Subclasses
@@ -160,8 +179,21 @@ class StitchSegments(Step):
             log.warning("no usable overlap between %s and %s (%.3f-%.3f um)", a["label"], b["label"], lo, hi)
             return float("nan")
         b_on_a = np.interp(a["WAVELENGTH"][inside], b["WAVELENGTH"], b["FLUX"])
+        a_flux = a["FLUX"][inside]
+        ok = np.isfinite(a_flux) & np.isfinite(b_on_a)
+        if int(ok.sum()) < min_overlap_points:
+            log.warning("overlap between %s and %s holds %d finite sample(s) (< %d); ratio not measured",
+                        a["label"], b["label"], int(ok.sum()), min_overlap_points)
+            return float("nan")
+        med_a, err_a = _median_and_error(a_flux[ok])
+        med_b, err_b = _median_and_error(b_on_a[ok])
+        if min_overlap_snr > 0 and not (med_a > min_overlap_snr * err_a and med_b > min_overlap_snr * err_b):
+            log.warning("overlap between %s and %s (%.3f-%.3f um): flux consistent with zero "
+                        "(%.3g +- %.3g vs %.3g +- %.3g); ratio not measurable, that link is not rescaled",
+                        a["label"], b["label"], lo, hi, med_a, err_a, med_b, err_b)
+            return float("nan")
         with np.errstate(all="ignore"):
-            return float(np.nanmedian(b_on_a / a["FLUX"][inside]))
+            return med_b / med_a
 
     @staticmethod
     def _table_hdu(path: Path) -> str:
@@ -204,3 +236,10 @@ class StitchSegments(Step):
             prefix = prefix.rsplit("_", 1)[0]  # drop the partial token (g235h... vs g395h... -> ..._nirspec)
         prefix = prefix.rstrip("-_")
         return (prefix or stems[0]) + ".fits"  # derived_name strips the extension again
+
+
+def _median_and_error(values: np.ndarray) -> tuple[float, float]:
+    """Median of ``values`` and the robust (MAD-based) uncertainty of that median."""
+    med = float(np.median(values))
+    mad_sigma = 1.4826 * float(np.median(np.abs(values - med)))
+    return med, 1.2533 * mad_sigma / np.sqrt(len(values))
