@@ -68,4 +68,21 @@ def test_stitching_never_plots_and_plot_stitch_does(tmp_path: Path):
     ctx = make_context(tmp_path, stage="plot_stitch")
     ctx.stage_dirs["extract"] = segments[0].parent   # where the segment files live
     pngs = run_step(PlotStitch, [o for o in outputs if o.suffix == ".ecsv"], tmp_path, ctx=ctx)
+    # no rescaling happened -> the pre-rescale figure would repeat this one, so only one PNG
     assert [o.suffix for o in pngs] == [".png"]
+
+
+def test_plot_stitch_also_draws_the_segments_before_rescaling(tmp_path: Path):
+    pytest.importorskip("matplotlib")
+    from jwstflow.contrib.qa import PlotStitch
+
+    segments = two_segments(tmp_path)
+    outputs = run_step(StitchSegments, segments, tmp_path, params={"rescale": True})
+    ctx = make_context(tmp_path, stage="plot_stitch")
+    ctx.stage_dirs["extract"] = segments[0].parent
+    pngs = run_step(PlotStitch, [o for o in outputs if o.suffix == ".ecsv"], tmp_path, ctx=ctx)
+    assert sorted(p.name for p in pngs) == ["jw001_nirspec_s1dcomb.png",
+                                            "jw001_nirspec_s1dcomb_unscaled.png"]
+    pngs = run_step(PlotStitch, [o for o in outputs if o.suffix == ".ecsv"], tmp_path, ctx=ctx,
+                    params={"unscaled": False})
+    assert [p.name for p in pngs] == ["jw001_nirspec_s1dcomb.png"]

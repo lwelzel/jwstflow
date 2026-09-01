@@ -157,8 +157,11 @@ class QuicklookImage(Step):
 
 
 class PlotStitch(Step):
-    """Comparison figure of a stitched spectrum (``*_s1dcomb.ecsv``): the combination
-    in black over its rescaled input segments.
+    """Comparison figures of a stitched spectrum (``*_s1dcomb.ecsv``): the combination
+    in black over its rescaled input segments -- and, whenever the stitch rescaled
+    anything, a second figure of the segments *as extracted* (``*_unscaled.png``),
+    before the multiplicative scales were applied, so the raw flux offsets between
+    neighbouring segments stay visible (``unscaled: false`` turns it off).
 
     The segment files named in the ECSV metadata are searched in
     ``segments_stage`` (when given), in every stage directory of the run,
@@ -174,10 +177,11 @@ class PlotStitch(Step):
     level = "qa"
     batch = "all"   # all inputs in one task, so the combined overview sees every spectrum
     inputs = ("*_s1dcomb.ecsv",)
-    version = "3"   # 2 -> 3: yscale parameter; combined all-spectra overview figure
+    version = "4"   # 3 -> 4: second figure of the segments before rescaling (*_unscaled.png)
 
     def run(self, inputs: list[Path], ctx: RunContext, *, segments_stage: str | None = None,
-            xscale: str = "log", yscale: str = "linear", dpi: int = 150, **_: Any) -> Iterable[Path]:
+            unscaled: bool = True, xscale: str = "log", yscale: str = "linear",
+            dpi: int = 150, **_: Any) -> Iterable[Path]:
         from astropy.table import Table
 
         out: list[Path] = []
@@ -192,34 +196,59 @@ class PlotStitch(Step):
             names = [str(n) for n in meta.get("inputs", [])]
             labels = [str(s) for s in meta.get("segments", names)]
             scales = [float(s) for s in meta.get("scales_applied", [1.0] * len(names))]
-            fig, ax = qafig.subplots(figsize=(11, 4))
             colors = qafig.line_colors(len(names)) if len(names) > 1 else qafig.line_colors(2)
+            crossovers = [float(b) for b in meta.get("crossovers_um", [])]
+            segments = []   # (label, scale, color, wavelength, flux, unit) of every segment still on disk
             for name, label, scale, color in zip(names, labels, scales, colors):
                 segment = _find_file(name, ctx, segments_stage, inp.parent)
                 if segment is None:
                     log.warning("%s: segment %s not found in any stage directory; left out", inp.name, name)
                     continue
                 w, f, unit = _read_segment(segment)
+                segments.append((label, scale, color, w, f, unit))
+
+            # the combination over its rescaled segments
+            fig, ax = qafig.subplots(figsize=(11, 4))
+            for label, scale, color, w, f, unit in segments:
                 f, _ = qafig.to_mjy(f * scale, unit)
                 qafig.step(ax, w, f, color=color, alpha=0.6, lw=0.7,
                            label=label + (f" x {scale:.3f}" if scale != 1.0 else ""))
             qafig.step(ax, wave, flux, color=qafig.MAIN_COLOR, label="stitched")
-            crossovers = [float(b) for b in meta.get("crossovers_um", [])]
-            for b in crossovers:
-                ax.axvline(b, color="0.6", lw=0.6, ls=":")
-            if crossovers:
-                ax.plot([], [], color="0.6", lw=0.6, ls=":", label="crossover")
+            _mark_crossovers(ax, crossovers)
             ax.set(xlabel=qafig.WAVE_LABEL, ylabel=ylabel)
             qafig.set_wave_scale(ax, xscale)
             ax.set_yscale(yscale)
             qafig.annotate(ax, inp.name)
             qafig.figlegend(fig)
             out.append(qafig.save(fig, ctx.output_dir / f"{inp.stem}.png", dpi=dpi))
+
+            # the segments as extracted, before the multiplicative rescaling -- only
+            # when a scale was actually applied (otherwise it repeats the figure above)
+            if unscaled and any(scale != 1.0 for _, scale, *_ in segments):
+                fig, ax = qafig.subplots(figsize=(11, 4))
+                for label, _, color, w, f, unit in segments:
+                    f, ylabel = qafig.to_mjy(f, unit)
+                    qafig.step(ax, w, f, color=color, alpha=0.8, lw=0.9, label=label)
+                _mark_crossovers(ax, crossovers)
+                ax.set(xlabel=qafig.WAVE_LABEL, ylabel=ylabel)
+                qafig.set_wave_scale(ax, xscale)
+                ax.set_yscale(yscale)
+                qafig.annotate(ax, f"{inp.name}: segments as extracted (before rescaling)")
+                qafig.figlegend(fig)
+                out.append(qafig.save(fig, ctx.output_dir / f"{inp.stem}_unscaled.png", dpi=dpi))
         overview = _all_spectra_figure(combined, ctx.output_dir / f"{ctx.stage}_all.png",
                                        what="stitched spectra", dpi=dpi)
         if overview is not None:
             out.append(overview)
         return out
+
+
+def _mark_crossovers(ax: Any, crossovers: list[float]) -> None:
+    """Dotted vertical line (plus one legend handle) per crossover wavelength."""
+    for b in crossovers:
+        ax.axvline(b, color="0.6", lw=0.6, ls=":")
+    if crossovers:
+        ax.plot([], [], color="0.6", lw=0.6, ls=":", label="crossover")
 
 
 def _all_spectra_figure(series: list[tuple[np.ndarray, np.ndarray, str, str]], path: Path, *,
