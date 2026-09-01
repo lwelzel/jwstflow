@@ -139,6 +139,7 @@ def test_mini_workflow_end_to_end(tmp_path: Path):
     assert by_stage["calwebb_detector1"].success == 8   # 2 gratings x 2 dithers x 2 detectors
     assert by_stage["calwebb_spec2"].success == 8
     assert by_stage["calwebb_spec3"].success == 2       # one association per grating
+    assert by_stage["psf_cube"].success == 2            # one PSF cube per grating cube
 
     run = cfg.run_dir
     for product in [
@@ -146,10 +147,21 @@ def test_mini_workflow_end_to_end(tmp_path: Path):
         "stage2/calwebb_spec2/jw01751006001_02101_00001_nrs1_cal.fits",
         "stage3/calwebb_spec3/jw01751-o006_t005_nirspec_g235h-f170lp_s3d.fits",
         "stage3/calwebb_spec3/jw01751-o006_t005_nirspec_g395h-f290lp_x1d.fits",
+        "stage4/psf_cube/jw01751-o006_t005_nirspec_g235h-f170lp_psfcube.fits",
+        "qa/qa_psf_cube/jw01751-o006_t005_nirspec_g235h-f170lp_psfcube.png",
         "qa/quicklook_image/jw01751-o006_t005_nirspec_g235h-f170lp_s3d.png",
         "qa/plot_spectrum/jw01751-o006_t005_nirspec_g235h-f170lp_x1d.png",
     ]:
         assert (run / product).is_file(), product
+
+    # the PSF library samples the cube's spaxels at oversample 2, on an odd grid
+    from jwstflow.psf import PsfCubeProduct
+
+    psf = PsfCubeProduct.read(run / "stage4/psf_cube/jw01751-o006_t005_nirspec_g235h-f170lp_psfcube.fits")
+    assert psf.data.shape == (5, 33, 33)                       # ceil(1.6" / 0.05") -> odd
+    assert psf.pixelscale_arcsec == pytest.approx(0.1 / 2)     # mock spaxels are 0.1"
+    assert psf.frame == "ideal"
+    assert psf.header["GRATING"] == "G235H"
     asns = sorted((run / "associations" / "calwebb_spec3").glob("*_asn.json"))
     assert [a.name for a in asns] == ["jw01751-o006_t005_nirspec_g235h_spec3_asn.json",
                                       "jw01751-o006_t005_nirspec_g395h_spec3_asn.json"]

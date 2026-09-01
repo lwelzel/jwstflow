@@ -38,6 +38,12 @@ dependencies = [
 #   uv pip install git+ssh://git@github.com/<org>/jwstflow-joys  # private
 # `jwstflow steps` lists whatever is installed.
 
+# The stpsf engine of the psf_cube step (docs/psf_cubes.md). The step and the
+# psfcube-product contract ship with the core; only generation needs the extra
+# (plus the stpsf data files: $STPSF_PATH, or stpsf downloads them on first use).
+[project.optional-dependencies]
+psf = ["stpsf>=2.0"]
+
 [project.scripts]
 jwstflow = "jwstflow.cli:app"
 
@@ -50,6 +56,8 @@ header_summary = "jwstflow.contrib.qa:HeaderSummary"
 fix_msa_metafile = "jwstflow.contrib.nirspec:fix_msa_metafile"
 mast_compare = "jwstflow.contrib.mast_compare:MastCompare"
 stitch_segments = "jwstflow.stitching:StitchSegments"
+psf_cube = "jwstflow.contrib.psf:PsfCube"
+qa_psf_cube = "jwstflow.contrib.psf:QaPsfCube"
 
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]

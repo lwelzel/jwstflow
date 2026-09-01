@@ -41,6 +41,9 @@ so you can inspect what a workflow does before and after it runs.
 ```bash
 uv pip install git+https://github.com/lwelzel/jwstflow   # core: jwstflow + the official jwst pipeline
 ```
+The `psf` extra (`"jwstflow[psf]"`) adds [stpsf](https://stpsf.readthedocs.io)
+for the `psf_cube` step -- per-observation PSF cubes for model comparison
+(see [docs/psf_cubes.md](docs/psf_cubes.md)).
 Contributed step packages are separate distributions that register their steps
 with jwstflow on install -- add the ones you have access to:
 ```bash

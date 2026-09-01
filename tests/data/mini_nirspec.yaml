@@ -32,6 +32,17 @@ stages:
       steps:
         extract_1d: {skip: false}
 
+  # offline engine: the analytic Gaussian PSF exercises the psfcube contract end to end
+  - step: psf_cube
+    inputs:
+      - {stage: calwebb_spec3, pattern: "*_s3d.fits"}
+    parameters: {engine: gaussian, oversample: 2, fov_arcsec: 1.6, n_wavelengths: 5}
+
+  - step: qa_psf_cube
+    inputs:
+      - {stage: psf_cube, pattern: "*_psfcube.fits"}
+    tags: [qa]
+
   - step: quicklook_image
     inputs:
       - {stage: calwebb_spec3, pattern: "*_s3d.fits"}
