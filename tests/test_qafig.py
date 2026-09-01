@@ -95,3 +95,25 @@ def test_collapse_min_coverage_blanks_edge_spaxels():
     assert out[0, 2] == 1.0 and out[5, 5] == 1.0
     full = qafig.collapse(cube)  # default: nothing blanked beyond all-NaN
     assert full[0, 1] == 1.0
+
+
+def test_annotate_features_draws_the_three_lanes(tmp_path):
+    fig, ax = qafig.subplots()
+    ax.plot([3.0, 12.0], [1.0, 1.0])
+    ax.set_xscale("log")
+    qafig.annotate_features(ax, "all", wave_min=3.0, wave_max=12.0)
+    _, labels = ax.get_legend_handles_labels()
+    assert {"gas lines", "emission bands", "ice bands"} <= set(labels)
+    assert len(ax.texts) > 10        # rotated line/band labels
+    assert len(ax.collections) > 2   # the shaded band lanes
+    qafig.save(fig, tmp_path / "annot.png")
+
+
+def test_annotate_features_respects_the_range_and_none(tmp_path):
+    fig, ax = qafig.subplots()
+    ax.plot([0.5, 0.9], [1.0, 1.0])
+    qafig.annotate_features(ax, "all", wave_min=0.5, wave_max=0.9)  # nothing lives here
+    assert not ax.texts
+    qafig.annotate_features(ax, None, wave_min=1.0, wave_max=30.0)  # no selection: no-op
+    assert not ax.texts
+    qafig.save(fig, tmp_path / "annot_empty.png")

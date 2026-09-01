@@ -51,6 +51,15 @@ directly.
    (`qafig.set_wave_scale(ax)` -- plain numbers as tick labels, not powers of
    ten). Steps that plot spectra expose an `xscale` parameter so a single
    figure can be switched back to `linear` in the workflow.
+10. **Spectral features are annotated through one helper**
+    (`qafig.annotate_features(ax, features, wave_min=..., wave_max=...)`),
+    driven by the same `features:` grammar the data steps use
+    (`jwstflow.features`): gas lines become short labelled ticks in a lane at
+    the top of the axes, emission bands (PAH & co.) and ice bands become
+    shaded wavelength spans in two lanes below, every label hanging from a
+    common line beneath the lanes, color-coded by class
+    (`qafig.FEATURE_COLORS`). Steps that plot spectra expose a `features`
+    parameter (default off; `all` = every bundled dataset in range).
 
 ## Writing a QA step
 
@@ -102,4 +111,5 @@ Guidelines that follow from the rules:
 | `plot_spectrum` | `*_x1d` / `*_c1d` / `*_s1d(comb)` | every EXTRACT1D/COMBINE1D spectrum, in mJy; with 2+ spectra also a combined log-log overview (`<stage>_all.png`) |
 | `quicklook_image` | anything with a SCI extension | nan-median collapsed image with colorbar |
 | `plot_stitch` | `*_s1dcomb.ecsv` | stitched spectrum (black) over its rescaled segments; when the stitch rescaled anything, also the segments as extracted (`*_unscaled.png`); with 2+ stitched spectra a combined log-log overview (`<stage>_all.png`) |
+| `plot_stitch_background` | `*_s1dcomb.ecsv` | source / background / difference: the background the extraction subtracted (BACKGROUND columns of the segment files), reassembled with the stitch's scales and crossovers, under the stitched spectrum with and without it (`*_bkgcomp.png`); feature lanes annotated by default |
 | `mast_compare` | `*_s3d` / `*_x1d` | jwstflow vs. MAST spectra and their ratio |
