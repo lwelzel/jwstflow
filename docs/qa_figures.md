@@ -111,5 +111,6 @@ Guidelines that follow from the rules:
 | `plot_spectrum` | `*_x1d` / `*_c1d` / `*_s1d(comb)` | every EXTRACT1D/COMBINE1D spectrum, in mJy; with 2+ spectra also a combined log-log overview (`<stage>_all.png`) |
 | `quicklook_image` | anything with a SCI extension | nan-median collapsed image with colorbar |
 | `plot_stitch` | `*_s1dcomb.ecsv` | stitched spectrum (black) over its rescaled segments; when the stitch rescaled anything, also the segments as extracted (`*_unscaled.png`); with 2+ stitched spectra a combined log-log overview (`<stage>_all.png`) |
+| `plot_stitch_overlaps` | `*_s1dcomb.ecsv` | one panel per neighbouring segment pair, zoomed into their overlap (`*_overlaps.png`): both segments with their error bands, the crossover wavelength (dotted), the shaded window around it from which the multiply factor was measured, the bluer segment times that factor (dashed), and the factor with its 1-sigma uncertainty in the legend |
 | `plot_stitch_background` | `*_s1dcomb.ecsv` | source / background / difference: the background the extraction subtracted (BACKGROUND columns of the segment files), reassembled with the stitch's scales and crossovers, under the stitched spectrum with and without it (`*_bkgcomp.png`); feature lanes annotated by default |
 | `mast_compare` | `*_s3d` / `*_x1d` | jwstflow vs. MAST spectra and their ratio |
