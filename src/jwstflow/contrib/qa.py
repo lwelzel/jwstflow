@@ -219,7 +219,7 @@ class PlotStitch(Step):
                 if segment is None:
                     log.warning("%s: segment %s not found in any stage directory; left out", inp.name, name)
                     continue
-                w, f, unit = _read_segment(segment)
+                w, f, _, unit = _read_segment(segment)
                 segments.append((label, scale, color, w, f, unit))
 
             # the combination over its rescaled segments
@@ -258,6 +258,144 @@ class PlotStitch(Step):
         if overview is not None:
             out.append(overview)
         return out
+
+
+class PlotStitchOverlaps(Step):
+    """Per-overlap figures of a stitched spectrum: where the multiply factors were measured.
+
+    For each ``*_s1dcomb.ecsv`` one figure (``*_overlaps.png``) with a panel
+    per neighbouring segment pair, zoomed into their overlap: both segments
+    *as extracted* (with their FLUX_ERROR bands), the crossover wavelength
+    where the combination switches segments (dotted), and -- shaded -- the
+    wavelength window around the crossover from which the stitch measured
+    the multiply factor (``ratio_window_frac`` of the crossover wavelength,
+    clipped to the overlap; ``ratio_windows_um`` in the ECSV metadata). The
+    bluer segment times the measured factor is overlaid dashed, so the
+    quality of the factor is visible exactly where it was measured, and each
+    panel's legend entry states the factor with its 1-sigma uncertainty.
+    Pairs whose ratio was not measurable (no overlap, too few samples, flux
+    consistent with zero) say so in their panel.
+
+    The segment files named in the ECSV metadata are located like
+    ``plot_stitch`` does (``segments_stage``, every stage directory, next to
+    the ECSV, sibling runs of the target); missing segments leave their
+    panel annotated instead of drawn. Panels are zoomed views of a narrow
+    wavelength range, so both axes default to linear (``xscale``/``yscale``
+    switch them).
+    """
+
+    level = "qa"
+    batch = "all"
+    inputs = ("*_s1dcomb.ecsv",)
+    version = "1"
+
+    #: Shading of the ratio-measurement window (muted orange, alpha applied at draw time).
+    WINDOW_COLOR = "#d95f02"
+
+    def run(self, inputs: list[Path], ctx: RunContext, *, segments_stage: str | None = None,
+            xscale: str = "linear", yscale: str = "linear", dpi: int = 150, **_: Any) -> Iterable[Path]:
+        from astropy.table import Table
+
+        out: list[Path] = []
+        for inp in sorted(inputs):
+            meta = Table.read(inp).meta
+            names = [str(n) for n in meta.get("inputs", [])]
+            labels = [str(s) for s in meta.get("segments", names)]
+            crossovers = [float(b) for b in meta.get("crossovers_um", [])]
+            ratios = meta.get("neighbour_ratios", [None] * len(crossovers))
+            ratio_errors = meta.get("neighbour_ratio_errors", [None] * len(crossovers))
+            windows = meta.get("ratio_windows_um", [None] * len(crossovers))
+            if len(names) < 2 or len(crossovers) != len(names) - 1:
+                log.warning("%s: no neighbour-pair metadata; skipped", inp.name)
+                continue
+            colors = qafig.line_colors(len(names)) if len(names) > 1 else qafig.line_colors(2)
+            segments: list[tuple[np.ndarray, np.ndarray, np.ndarray] | None] = []
+            for name in names:
+                path = _find_file(name, ctx, segments_stage, inp.parent)
+                if path is None:
+                    log.warning("%s: segment %s not found in any stage directory; its panels "
+                                "are annotated instead of drawn", inp.name, name)
+                    segments.append(None)
+                    continue
+                w, f, e, unit = _read_segment(path)
+                f, _ = qafig.to_mjy(f, unit)
+                e, _ = qafig.to_mjy(e, unit)
+                segments.append((w, f, e))
+
+            n_pairs = len(names) - 1
+            ncols = min(3, n_pairs)
+            nrows = (n_pairs + ncols - 1) // ncols
+            fig, axes = qafig.subplots(nrows, ncols, figsize=(4.6 * ncols, 3.4 * nrows), squeeze=False)
+            for i in range(n_pairs):
+                ax = axes[i // ncols][i % ncols]
+                self._overlap_panel(ax, i, labels, colors, segments, crossovers[i],
+                                    None if windows[i] is None else (float(windows[i][0]), float(windows[i][1])),
+                                    None if ratios[i] is None else float(ratios[i]),
+                                    None if ratio_errors[i] is None else float(ratio_errors[i]),
+                                    xscale=xscale, yscale=yscale)
+                if i % ncols == 0:
+                    ax.set_ylabel(qafig.FLUX_LABEL)
+                if i // ncols == nrows - 1 or i + ncols >= n_pairs:
+                    ax.set_xlabel(qafig.WAVE_LABEL)
+            for i in range(n_pairs, nrows * ncols):
+                axes[i // ncols][i % ncols].set_axis_off()
+            first = axes[0][0]
+            first.plot([], [], color="0.6", lw=0.6, ls=":", label="crossover")
+            first.fill_between([], [], [], color=self.WINDOW_COLOR, alpha=0.18, label="ratio window")
+            frac = meta.get("ratio_window_frac")
+            qafig.annotate(first, inp.name,
+                           f"window: {float(frac):g} x crossover wavelength, clipped to the overlap"
+                           if frac is not None else "")
+            qafig.figlegend(fig)
+            out.append(qafig.save(fig, ctx.output_dir / f"{inp.stem}_overlaps.png", dpi=dpi))
+        return out
+
+    def _overlap_panel(self, ax: Any, i: int, labels: list[str], colors: list[Any],
+                       segments: list[tuple[np.ndarray, np.ndarray, np.ndarray] | None],
+                       crossover: float, window: tuple[float, float] | None,
+                       ratio: float | None, ratio_error: float | None, *,
+                       xscale: str, yscale: str) -> None:
+        """One neighbour pair: both segments around their overlap, crossover and ratio window."""
+        seg_a, seg_b = segments[i], segments[i + 1]
+        # the region of interest: the overlap (or the gap), padded -- always
+        # containing the crossover and the measurement window
+        edges = [crossover]
+        if seg_a is not None and seg_b is not None:
+            edges += [float(seg_b[0].min()), float(seg_a[0].max())]
+        if window is not None:
+            edges += [window[0], window[1]]
+        lo, hi = min(edges), max(edges)
+        pad = 0.75 * (hi - lo) or 0.01 * crossover
+        view = (lo - pad, hi + pad)
+
+        for seg, label, color in ((seg_a, labels[i], colors[i]), (seg_b, labels[i + 1], colors[i + 1])):
+            if seg is None:
+                continue
+            w, f, e = seg
+            show = (w >= view[0]) & (w <= view[1])
+            qafig.step(ax, w[show], f[show], color=color, lw=0.9, label=label)
+            finite_err = show & np.isfinite(e)
+            if finite_err.any():
+                ax.fill_between(w[finite_err], (f - e)[finite_err], (f + e)[finite_err],
+                                step="mid", color=color, alpha=0.20, lw=0)
+        if ratio is not None and seg_a is not None and seg_b is not None:
+            w, f, _ = seg_a
+            inside = (w >= float(seg_b[0].min())) & (w <= float(seg_a[0].max()))
+            if inside.any():
+                qafig.step(ax, w[inside], f[inside] * ratio, color=colors[i], lw=0.9, ls="--",
+                           label=f"{labels[i]} x {ratio:.3f}")
+        ax.axvline(crossover, color="0.6", lw=0.6, ls=":")
+        if window is not None:
+            ax.axvspan(window[0], window[1], color=self.WINDOW_COLOR, alpha=0.18, lw=0)
+        measured = (f"x {ratio:.3f} ± {ratio_error:.2g}" if ratio is not None and ratio_error is not None
+                    else "ratio not measured" if ratio is None else f"x {ratio:.3f}")
+        missing = [labels[i + k] for k, seg in ((0, seg_a), (1, seg_b)) if seg is None]
+        qafig.annotate(ax, f"{labels[i]} | {labels[i + 1]}: {measured}",
+                       f"segment file missing: {', '.join(missing)}" if missing else "")
+        ax.set_xlim(*view)
+        if xscale != "linear":
+            qafig.set_wave_scale(ax, xscale)
+        ax.set_yscale(yscale)
 
 
 class PlotStitchBackground(Step):
@@ -482,16 +620,20 @@ def _column_unit(hdu: Any, column: str) -> str | None:
     return hdu.columns[column].unit or X1D_UNITS.get(column.upper())
 
 
-def _read_segment(path: Path) -> tuple[np.ndarray, np.ndarray, str | None]:
-    """(wavelength, flux, flux unit) of a segment file's EXTRACT1D/COMBINE1D table."""
+def _read_segment(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, str | None]:
+    """(wavelength, flux, flux error, flux unit) of a segment file's EXTRACT1D/COMBINE1D
+    table (the error all-NaN when the table carries no FLUX_ERROR column)."""
     from astropy.io import fits
 
     with fits.open(path) as hdul:
         for name in ("EXTRACT1D", "COMBINE1D"):
             if name in hdul:
                 tab = hdul[name].data
-                return (np.asarray(tab["WAVELENGTH"], dtype=float),
-                        np.asarray(tab["FLUX"], dtype=float), _column_unit(hdul[name], "FLUX"))
+                wave = np.asarray(tab["WAVELENGTH"], dtype=float)
+                error = np.asarray(tab["FLUX_ERROR"], dtype=float) if "FLUX_ERROR" in tab.names \
+                    else np.full(len(wave), np.nan)
+                return (wave, np.asarray(tab["FLUX"], dtype=float), error,
+                        _column_unit(hdul[name], "FLUX"))
     raise ValueError(f"{path}: no EXTRACT1D/COMBINE1D extension")
 
 

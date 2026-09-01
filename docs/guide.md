@@ -143,8 +143,11 @@ fixed in core and plugins build on them instead of inventing variants:
   cleanup) such steps share. Any step can consume any other step's mask.
 * **Stitching** (`jwstflow.stitching.StitchSegments`, YAML name
   `stitch_segments`): splice N overlapping 1-D segments (NIRSpec gratings,
-  MRS bands) with measured overlap ratios, optional rescaling onto a
-  reference segment, and configurable crossovers. Usable directly from YAML;
+  MRS bands) with flux ratios measured in a small window around each
+  crossover (`ratio_window_frac` of the crossover wavelength) whose
+  uncertainty -- propagated from the flux errors in that window -- travels
+  into the stitched FLUX_ERROR, optional rescaling onto a reference
+  segment, and configurable crossovers. Usable directly from YAML;
   contributed packages subclass it for mode-specific behaviour (naming via
   `segment_label`, the ratio measurement via `overlap_ratio`, grouping via a
   `run` wrapper -- jwstflow-joys' `stitch_bands` does all three).
