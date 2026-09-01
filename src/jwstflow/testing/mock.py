@@ -68,7 +68,9 @@ from ..steps.base import _REGISTRY, RunContext, Step
 __all__ = [
     "MockScene", "MockExposure", "MockObservation",
     "nirspec_ifu_observation", "miri_mrs_observation", "write_observation",
+    "star_field", "write_gaia_catalog",
     "StubDetector1", "StubSpec2", "StubSpec3", "StubSpec3WithBackground",
+    "StubImage2", "StubImage3",
     "stub_pipelines", "offline_overrides", "run_mock_workflow",
     "NRS_GRATINGS", "MRS_BANDS",
 ]
@@ -93,6 +95,10 @@ MRS_BANDS: dict[tuple[str, str], tuple[float, float]] = {
 
 #: MRS detector -> the two channels it records simultaneously.
 MRS_DETECTOR_CHANNELS: dict[str, tuple[str, str]] = {"MIRIFUSHORT": ("1", "2"), "MIRIFULONG": ("3", "4")}
+
+#: MRS channel -> cube spaxel scale [arcsec] (the real cube_build defaults; the growing
+#: scale is what keeps sky annuli inside the FOV out to channel 4).
+MRS_PIX_ARCSEC: dict[str, float] = {"1": 0.13, "2": 0.17, "3": 0.20, "4": 0.35}
 
 
 # --------------------------------------------------------------------------- the scene
@@ -264,6 +270,8 @@ def _base_header(*, instrument: str, detector: str, exp_type: str, program: int,
         "TARGNAME": targprop,
         "TARG_RA": ra,
         "TARG_DEC": dec,
+        "RA_REF": ra,     # pointing reference: what wcs_offset shifts before assign_wcs
+        "DEC_REF": dec,
         "BKGDTARG": background,
         "IS_IMPRT": False,
         "TSOVISIT": False,
@@ -352,6 +360,12 @@ def miri_mrs_observation(
     size: int = 31,
     pix_arcsec: float = 0.13,
     ngroups: int = 3,
+    imager: bool = False,
+    pointing_error: tuple[float, float] = (0.35, -0.22),
+    n_stars: int = 12,
+    imager_size: int = 200,
+    imager_pix_arcsec: float = 0.11,
+    star_seed: int = 3,
 ) -> MockObservation:
     """A MIRI MRS observation modelled on ESO-Ha 569 (jw01751 obs 10 / 12).
 
@@ -359,10 +373,16 @@ def miri_mrs_observation(
     channels 1+2, MIRIFULONG 3+4), so all twelve ch1..ch4 SHORT/MEDIUM/LONG
     band cubes emerge like in the real reduction -- with ~120 planes each
     instead of ~1000+. ``background=True`` makes it a dedicated sky
-    observation (``BKGDTARG`` set, sources removed from the default scene) as
-    in obs 12. The default science scene is a compact source over a bright
-    mid-IR sky with two gas lines (H2 0-0 S(7) in ch1-short, [Ne II] in
-    ch3-short).
+    observation (``BKGDTARG`` set, sources removed from the default scene).
+    The default science scene is a compact source over a bright mid-IR sky
+    with two gas lines (H2 0-0 S(7) in ch1-short, [Ne II] in ch3-short).
+
+    ``imager=True`` adds the simultaneous MIRI imager frames (one per dither,
+    ``EXP_TYPE=MIR_IMAGE``) carrying a deterministic star field displaced by
+    ``pointing_error`` (dRA, dDec on the sky, arcsec) -- the astrometry loop's
+    input: image2/image3 stubs resample them into an ``_i2d``, ``gaia_offset``
+    measures the injected error against :func:`write_gaia_catalog`'s truth,
+    and ``wcs_offset`` applies the correction to the MRS rates.
     """
     if scene is None:
         base = MockScene(background=30.0, disk_peak=0.0, point_flux_jy=0.05, hot_pixel=(2, 2),
@@ -384,7 +404,73 @@ def miri_mrs_observation(
                 hdr["BAND"] = band
                 obs.exposures.append(MockExposure(
                     _dms_uncal_name(program, observation, visit, 2, 1, 1, exposure, detector), hdr))
+    if imager:
+        for dither in range(1, dithers + 1):
+            exposure += 1
+            hdr = _base_header(instrument="MIRI", detector="MIRIMAGE", exp_type="MIR_IMAGE",
+                               program=program, observation=observation, visit=visit, exposure=exposure,
+                               dither=dither, ndithers=dithers, targprop=targprop, ra=ra, dec=dec,
+                               background=background, scene=scene, nwave=1, size=imager_size,
+                               pix_arcsec=imager_pix_arcsec, ngroups=ngroups, date_obs="2024-02-01")
+            hdr["FILTER"] = "F770W"
+            hdr.update({
+                "JWFMKNST": (n_stars, "mock star field: number of stars"),
+                "JWFMKSSD": (star_seed, "mock star field: position seed"),
+                "JWFMKPRA": (pointing_error[0], "mock pointing error dRA [arcsec on sky]"),
+                "JWFMKPDE": (pointing_error[1], "mock pointing error dDec [arcsec]"),
+            })
+            obs.exposures.append(MockExposure(
+                _dms_uncal_name(program, observation, visit, 2, 1, 1, exposure, "MIRIMAGE"), hdr))
     return obs
+
+
+# --------------------------------------------------------------------------- the imager star field
+
+
+def _imager_wcs(hdr: Any):
+    """The TAN WCS of a mock imager frame / i2d (centred on the target)."""
+    from astropy.wcs import WCS
+
+    size = int(hdr["JWFMKSZ"])
+    pix = float(hdr["JWFMKPX"])
+    w = WCS(naxis=2)
+    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    w.wcs.crval = [float(hdr["TARG_RA"]), float(hdr["TARG_DEC"])]
+    w.wcs.crpix = [(size + 1) / 2.0, (size + 1) / 2.0]
+    w.wcs.cdelt = [-pix / 3600.0, pix / 3600.0]
+    return w
+
+
+def star_field(hdr: Any) -> tuple[Any, Any]:
+    """True (ra, dec) arrays of the mock star field an imager header describes."""
+    size = int(hdr["JWFMKSZ"])
+    rng = np.random.default_rng(int(hdr["JWFMKSSD"]))
+    margin = max(12, size // 10)
+    xs = rng.uniform(margin, size - margin, int(hdr["JWFMKNST"]))
+    ys = rng.uniform(margin, size - margin, int(hdr["JWFMKNST"]))
+    ra, dec = _imager_wcs(hdr).all_pix2world(xs, ys, 0)
+    return ra, dec
+
+
+def write_gaia_catalog(path: Path, observation: MockObservation) -> Path:
+    """The truth catalogue for the observation's imager star field (gaia_offset's
+    ``catalog:`` format: ra/dec/pmra/pmdec), so the astrometry loop runs offline."""
+    from astropy.table import Table
+
+    imagers = [e for e in observation.exposures if e.header.get("EXP_TYPE") == "MIR_IMAGE"]
+    if not imagers:
+        raise ValueError("observation has no imager exposures (pass imager=True)")
+    from astropy.io import fits
+
+    hdr = fits.Header()
+    for k, v in imagers[0].header.items():
+        hdr[k] = v
+    ra, dec = star_field(hdr)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Table({"ra": ra, "dec": dec, "pmra": np.zeros(len(ra)), "pmdec": np.zeros(len(ra))}).write(
+        path, format="ascii.ecsv", overwrite=True)
+    return path
 
 
 def write_observation(raw_dir: Path, *observations: MockObservation,
@@ -598,7 +684,11 @@ class StubSpec3(Step):
             for channel, band in sorted(covered):
                 lo, hi = MRS_BANDS[(channel, band)]
                 name = f"{product}_ch{channel}-{band.lower()}"
-                outputs += self._write_band(ctx, name, scene, first, nwave, size, pix, lo, hi,
+                # the header pix scale is the channel-1 value; later channels grow like
+                # the real cube_build grids (0.13 -> 0.35 arcsec), so PSF-scaled
+                # apertures and sky annuli stay inside the (small) mock FOV
+                pix_band = pix * MRS_PIX_ARCSEC[channel] / MRS_PIX_ARCSEC["1"]
+                outputs += self._write_band(ctx, name, scene, first, nwave, size, pix_band, lo, hi,
                                             instrument="MIRI", channel=channel, band=band,
                                             n_members=len(members), x1d=write_x1d)
         ctx.log.info("stub spec3: %s -> %d product(s)", asn.name, len(outputs))
@@ -685,12 +775,70 @@ class StubSpec3WithBackground(StubSpec3):
         return replace(scene, background=max(0.0, scene.background - measured))
 
 
+class StubImage2(StubSpec2):
+    """Stand-in for calwebb_image2: one ``_cal.fits`` per level-2 association.
+
+    Same behaviour as :class:`StubSpec2` (imager associations carry no
+    background members in the mock workflows), under the image2 identity.
+    """
+
+    name = "calwebb_image2"
+
+
+class StubImage3(StubSpec3):
+    """Stand-in for calwebb_image3: one star-field ``_i2d.fits`` per association.
+
+    The stars of the first science member's ``JWFMK*`` star-field spec are
+    rendered *displaced by the injected pointing error*, over a TAN WCS
+    centred on the (error-free) target position -- so ``gaia_offset``
+    measures exactly the injected error against
+    :func:`write_gaia_catalog`'s truth, and the astrometry loop closes
+    offline.
+    """
+
+    name = "calwebb_image3"
+
+    def run(self, inputs: list[Path], ctx: RunContext, **params: Any) -> list[Path]:
+        from astropy.io import fits
+
+        (asn,) = inputs
+        members = _member_paths(asn, "science")
+        if not members:
+            raise ValueError(f"association {asn.name} has no science members")
+        first = fits.getheader(members[0])
+        wcs = _imager_wcs(first)
+        size = int(first["JWFMKSZ"])
+        ra, dec = star_field(first)
+        dra = float(first["JWFMKPRA"]) / 3600.0 / np.cos(np.radians(dec))
+        ddec = float(first["JWFMKPDE"]) / 3600.0
+        xs, ys = wcs.all_world2pix(ra + dra, dec + ddec, 0)
+        rng = np.random.default_rng(int(first["JWFMKSSD"]) + 1)
+        image = 0.1 * rng.standard_normal((size, size))
+        yy, xx = np.mgrid[:size, :size]
+        for x, y in zip(xs, ys):
+            image += 50.0 * np.exp(-((xx - x) ** 2 + (yy - y) ** 2) / (2 * 1.5**2))
+        out = ctx.output_dir / f"{_product_name(asn)}_i2d.fits"
+        primary = fits.Header({"TELESCOP": "JWST", "INSTRUME": "MIRI", "DETECTOR": "MIRIMAGE",
+                               "EXP_TYPE": "MIR_IMAGE", "DATE-OBS": str(first["DATE-OBS"]),
+                               "PROGRAM": str(first["PROGRAM"]), "OBSERVTN": str(first["OBSERVTN"]),
+                               "TARGPROP": str(first["TARGPROP"]), "TARG_RA": float(first["TARG_RA"]),
+                               "TARG_DEC": float(first["TARG_DEC"]), "DATAMODL": "ImageModel"})
+        fits.HDUList([fits.PrimaryHDU(header=primary),
+                      fits.ImageHDU(image.astype("f4"), header=wcs.to_header(), name="SCI")]).writeto(
+            out, overwrite=True)
+        ctx.log.info("stub image3: %s -> %s (%d star(s), injected offset %.3f/%.3f arcsec)",
+                     asn.name, out.name, len(ra), float(first["JWFMKPRA"]), float(first["JWFMKPDE"]))
+        return [out]
+
+
 #: What :func:`stub_pipelines` registers, by the exact ``step:`` spec strings used in YAMLs.
 DEFAULT_STUBS: dict[str, type[Step]] = {
     "detector1": StubDetector1,
     "spec2": StubSpec2,
     "spec3": StubSpec3,
     "spec3_with_background": StubSpec3WithBackground,
+    "image2": StubImage2,
+    "image3": StubImage3,
 }
 
 
