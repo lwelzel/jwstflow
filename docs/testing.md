@@ -48,8 +48,15 @@ observations** — the heart of the strategy, built on
   agrees across gratings and excludes the hot pixel, the in-field
   background recovers the injected sky, extraction recovers the injected
   flux to a percent, the bands stitch at unit ratio.
+* The MIRI mock optionally carries the simultaneous imager frames
+  (`imager=True`): a deterministic star field displaced by an injected
+  pointing error, with `write_gaia_catalog()` providing the truth table so
+  the `gaia_offset`/`wcs_offset` astrometry loop closes offline. MRS band
+  cubes use the real per-channel spaxel scales (0.13–0.35 arcsec), so
+  PSF-scaled apertures and sky annuli behave as on real cubes.
 * The official pipelines are replaced by **scene-faithful stubs**
-  (`StubDetector1/StubSpec2/StubSpec3`) that keep the interfaces exact:
+  (`StubDetector1/StubSpec2/StubSpec3/StubImage2/StubImage3`) that keep the
+  interfaces exact:
   same stage names and directories, same DMS product names (`cube_build`'s
   band suffix included), consuming the same association files, honouring
   the parameters that shape the data flow (`steps.extract_1d.skip`,
@@ -69,7 +76,7 @@ Who tests what at level 3:
 |---|---|---|
 | jwstflow | `tests/data/mini_nirspec.yaml` | engine end to end: process pool, associations, DMS naming, resume, `--only`, graph rendering |
 | jwstflow-midas | `tests/data/nirspec_ifu_mock.yaml` (mirrors the production NIRSpec YAML) | the disk chain: flag_frames → pass-1 cubes → disk_mask → in_field_background → background-aware spec3 → extract_extended → stitch + QA |
-| jwstflow-joys | `tests/data/miri_mrs_mock.yaml` (mirrors the production MIRI YAML) | the MRS chain: sky-observation association wiring → band cubes → mrs_extract → defringe → clean → per-aperture stitch_bands → LSRK + QA |
+| jwstflow-joys | `tests/data/miri_mrs_mock.yaml` (mirrors the production MIRI YAML) | the MRS chain: the simultaneous-imager astrometry loop (image2/image3 stubs → gaia_offset on a local truth catalogue → wcs_offset on the rates, closing on an injected pointing error) → band cubes → on/off annulus extraction → defringe → clean → per-aperture stitch_bands → LSRK + QA |
 | jwstflow-reducer | **the production YAMLs themselves** | the dress rehearsal: `nirspec_ifu.yaml`, `miri_mrs.yaml` and `combine_nirspec_miri.yaml` unmodified (two mock-specific `--set`-style overrides), full product tree, flux recovery, cross-instrument 1.7–28 µm combine, cached reruns |
 
 The reducer additionally has `tests/test_workflows_validate.py` — a cheap

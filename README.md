@@ -3,7 +3,7 @@
 <p align="center">
   <a href="https://github.com/spacetelescope/jwst"><img alt="jwst" src="https://img.shields.io/badge/jwst-3.x-blue"></a>
   <img alt="python" src="https://img.shields.io/badge/python-%E2%89%A53.12-blue">
-  <img alt="tests" src="https://img.shields.io/badge/tests-86%20passing-brightgreen">
+  <img alt="tests" src="https://img.shields.io/badge/tests-87%20passing-brightgreen">
   <img alt="status" src="https://img.shields.io/badge/status-alpha-orange">
 </p>
 

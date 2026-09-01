@@ -67,6 +67,45 @@ def test_write_observation_creates_uncals_and_merges_the_mast_log(tmp_path: Path
     assert target_ids_from_log(raw) == {("01751", "006"): "t005", ("01751", "010"): "t005"}
 
 
+def test_imager_star_field_and_catalog_are_consistent(tmp_path: Path):
+    from astropy.io import fits
+    from astropy.table import Table
+
+    from jwstflow.testing.mock import write_gaia_catalog
+
+    obs = miri_mrs_observation(dithers=2, nwave=6, size=9, imager=True, n_stars=7,
+                               pointing_error=(0.4, -0.3))
+    imagers = [e for e in obs.exposures if e.header["EXP_TYPE"] == "MIR_IMAGE"]
+    assert len(imagers) == 2 and all(e.header["DETECTOR"] == "MIRIMAGE" for e in imagers)
+    assert imagers[0].header["JWFMKPRA"][0] == 0.4
+    # every mock exposure carries the pointing reference wcs_offset shifts
+    assert all(e.header["RA_REF"] == e.header["TARG_RA"] for e in obs.exposures)
+    cat = write_gaia_catalog(tmp_path / "gaia.ecsv", obs)
+    table = Table.read(cat)
+    assert len(table) == 7 and {"ra", "dec", "pmra", "pmdec"} <= set(table.colnames)
+    # the catalogue is the *truth*: identical for both dithers, independent of the error
+    obs2 = miri_mrs_observation(dithers=1, nwave=6, size=9, imager=True, n_stars=7,
+                                pointing_error=(0.0, 0.0))
+    table2 = Table.read(write_gaia_catalog(tmp_path / "gaia2.ecsv", obs2))
+    assert np.allclose(np.asarray(table["ra"]), np.asarray(table2["ra"]))
+
+    # the image3 stub renders the stars displaced by the injected error
+    raw = tmp_path / "raw"
+    write_observation(raw, obs)
+    from jwstflow.testing import run_step
+    from jwstflow.testing.mock import StubDetector1, StubImage3
+
+    uncal = sorted(raw.glob("*mirimage_uncal.fits"))[0]
+    (rate,) = run_step(StubDetector1, [uncal], tmp_path, stage="d1")
+    asn = tmp_path / "img3_asn.json"
+    asn.write_text('{"products": [{"name": "jw01751-o010_t005_mirimage", "members": '
+                   f'[{{"expname": "{rate}", "exptype": "science"}}]}}]}}')
+    (i2d,) = run_step(StubImage3, [asn], tmp_path, stage="img3")
+    assert i2d.name == "jw01751-o010_t005_mirimage_i2d.fits"
+    with fits.open(i2d) as hdul:
+        assert hdul[0].header["DATE-OBS"] and hdul["SCI"].data.max() > 10
+
+
 def test_scene_round_trips_through_headers():
     scene = MockScene(background=2.0, disk_peak=500.0, lines=((2.12, 100.0),), hot_pixel=None, seed=7)
     from astropy.io import fits
