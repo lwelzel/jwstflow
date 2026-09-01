@@ -53,7 +53,7 @@ class MastCompare(Step):
     """
 
     level = "qa"
-    version = "2"   # 1 -> 2: jwstflow QA figure standard (qafig)
+    version = "3"   # 2 -> 3: logarithmic wavelength axis on the spectrum figure
 
     def run(self, inputs: list[Path], ctx: RunContext, *, reference_dir: str | None = None,
             plot: bool = True, **params: Any) -> list[Path]:
@@ -194,6 +194,7 @@ def _plot(path: Path, w, fa, fb, ratio, name: str, prov: dict[str, Any]) -> Path
     qafig.step(ax2, w, ratio, color=qafig.MAIN_COLOR, lw=0.7)
     ax2.axhline(1, color="0.6", lw=0.5)
     ax2.set(xlabel=qafig.WAVE_LABEL, ylabel="jwstflow / MAST", ylim=(0.5, 1.5))
+    qafig.set_wave_scale(ax2)   # shared x: sets both panels
     qafig.annotate(ax1, name)
     qafig.figlegend(fig)
     return qafig.save(fig, path, dpi=150)

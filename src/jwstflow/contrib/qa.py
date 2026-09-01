@@ -43,11 +43,12 @@ class PlotSpectrum(Step):
     slit/source when a file carries several spectra (e.g. NIRSpec MOS).
     Inputs without such an extension are skipped with a warning. One figure
     per input file, named after it, following the jwstflow QA figure
-    standard (``docs/qa_figures.md``).
+    standard (``docs/qa_figures.md``); the wavelength axis is logarithmic
+    unless ``xscale: linear``.
     """
 
     level = "qa"
-    version = "2"   # 1 -> 2: jwstflow QA figure standard (qafig)
+    version = "3"   # 2 -> 3: logarithmic wavelength axis by default (xscale parameter)
 
     def run(
         self,
@@ -56,6 +57,7 @@ class PlotSpectrum(Step):
         *,
         ylim: tuple[float, float] | list[float] | None = None,
         column: str = "FLUX",
+        xscale: str = "log",
         dpi: int = 150,
         fmt: str = "png",
         **_: Any,
@@ -83,6 +85,7 @@ class PlotSpectrum(Step):
                     qafig.step(ax, tab["WAVELENGTH"], values, color=color, label=label)
                 ax.set_xlabel(qafig.WAVE_LABEL)
                 ax.set_ylabel(ylabel or f"{column}")
+                qafig.set_wave_scale(ax, xscale)
                 if ylim:
                     ax.set_ylim(*ylim)
                 qafig.annotate(ax, inp.name)
@@ -145,17 +148,19 @@ class PlotStitch(Step):
     in black over its rescaled input segments.
 
     The segment files named in the ECSV metadata are searched in
-    ``segments_stage`` (when given), in every stage directory of the run, and
-    next to the ECSV itself; segments that are not found any more are simply
-    left out of the figure.
+    ``segments_stage`` (when given), in every stage directory of the run,
+    next to the ECSV itself, and in the sibling runs of the target (so a
+    combination run stitching across runs still finds its segments);
+    segments that are not found any more are simply left out of the figure.
+    The wavelength axis is logarithmic unless ``xscale: linear``.
     """
 
     level = "qa"
     inputs = ("*_s1dcomb.ecsv",)
-    version = "1"
+    version = "2"   # 1 -> 2: log wavelength axis by default; segments found in sibling runs
 
     def run(self, inputs: list[Path], ctx: RunContext, *, segments_stage: str | None = None,
-            dpi: int = 150, **_: Any) -> Iterable[Path]:
+            xscale: str = "log", dpi: int = 150, **_: Any) -> Iterable[Path]:
         from astropy.table import Table
 
         out: list[Path] = []
@@ -186,6 +191,7 @@ class PlotStitch(Step):
             if crossovers:
                 ax.plot([], [], color="0.6", lw=0.6, ls=":", label="crossover")
             ax.set(xlabel=qafig.WAVE_LABEL, ylabel=ylabel)
+            qafig.set_wave_scale(ax, xscale)
             qafig.annotate(ax, inp.name)
             qafig.figlegend(fig)
             out.append(qafig.save(fig, ctx.output_dir / f"{inp.stem}.png", dpi=dpi))
@@ -193,7 +199,8 @@ class PlotStitch(Step):
 
 
 def _find_file(name: str, ctx: RunContext, stage: str | None, *extra: Path) -> Path | None:
-    """Locate ``name`` in a stage's directory, in any stage directory, or in ``extra``."""
+    """Locate ``name`` in a stage's directory, in any stage directory, in ``extra``,
+    or -- last -- in the sibling runs of the target (``<target>/<run>/<level>/<stage>/``)."""
     dirs: list[Path] = []
     if stage:
         try:
@@ -205,6 +212,10 @@ def _find_file(name: str, ctx: RunContext, stage: str | None, *extra: Path) -> P
         candidate = Path(d) / name
         if candidate.exists():
             return candidate
+    if ctx.target_dir is not None and Path(ctx.target_dir).is_dir():
+        hits = sorted(Path(ctx.target_dir).glob(f"*/*/*/{name}"))
+        if hits:
+            return hits[0]
     return None
 
 
