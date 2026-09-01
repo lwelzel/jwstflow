@@ -24,8 +24,13 @@ directly.
 4. **Every `imshow` panel has a colorbar**, its height matched *exactly* to
    the image axes (`qafig.imshow` / `qafig.colorbar` -- an inset axes glued
    to the parent, exact for any aspect ratio), labelled with the data unit.
+   Automatic display limits are robust: the upper percentile is capped at the
+   brightest 3x3 *neighbourhood* median, so isolated hot pixels never set
+   `vmax` (explicit `vmin`/`vmax`/`norm` override everything).
 5. **Collapsing a datacube along the spectral axis is always nan-aware**
-   (`qafig.collapse` uses `nanmedian`/`nanmean`, never `median`/`mean`).
+   (`qafig.collapse` uses `nanmedian`/`nanmean`, never `median`/`mean`;
+   `min_coverage` blanks spaxels finite in too few planes -- footprint-edge
+   medians of a handful of values would otherwise dominate the limits).
 6. **One palette everywhere.** Images use cmasher's `torch` colormap
    (`qafig.CMAP`). The only line of a plot -- or the main product among
    several (e.g. the stitched spectrum over its segments) -- is black

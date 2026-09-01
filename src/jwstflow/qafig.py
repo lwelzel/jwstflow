@@ -144,8 +144,14 @@ def set_wave_scale(ax: Any, scale: str = "log") -> None:
 
 
 # --------------------------------------------------------------------------- images (rules 4-6)
-def collapse(cube: np.ndarray, how: str = "median") -> np.ndarray:
-    """Nan-aware collapse of a (nwave, ny, nx) cube along the spectral axis (rule 5)."""
+def collapse(cube: np.ndarray, how: str = "median", *, min_coverage: float = 0.0) -> np.ndarray:
+    """Nan-aware collapse of a (nwave, ny, nx) cube along the spectral axis (rule 5).
+
+    ``min_coverage`` blanks spaxels whose fraction of finite planes is below
+    it: at the edges of an IFU footprint a nanmedian over a handful of planes
+    is noise, not signal, and such spaxels otherwise dominate the display
+    limits of the collapsed image.
+    """
     reducers = {"median": np.nanmedian, "mean": np.nanmean, "sum": np.nansum, "max": np.nanmax}
     data = np.asarray(cube, dtype=float)
     while data.ndim > 3:
@@ -157,7 +163,10 @@ def collapse(cube: np.ndarray, how: str = "median") -> np.ndarray:
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message=".*(empty slice|All-NaN).*")
-            return reducers[how](data, axis=0)
+            image = reducers[how](data, axis=0)
+    if min_coverage > 0:
+        image = np.where(np.isfinite(data).mean(axis=0) >= min_coverage, image, np.nan)
+    return image
 
 
 def imshow(ax: Any, image: np.ndarray, *, unit: str | None = None, stretch: str = "linear",
@@ -169,6 +178,13 @@ def imshow(ax: Any, image: np.ndarray, *, unit: str | None = None, stretch: str 
     ``unit`` converts the data via :func:`to_mjy` and labels the colorbar with
     the result (``cbar_label`` overrides). ``stretch="log"`` uses a ``LogNorm``
     over the positive pixels, so the colorbar still reads in data units.
+
+    The automatic limits are robust twice over: the upper percentile is
+    additionally capped at the brightest *neighbourhood* of the image (the
+    maximum of its 3x3 median filter), so isolated hot pixels never set
+    ``vmax`` -- on a small image even the 99.9th percentile is essentially
+    the single hottest pixel -- while real compact sources, several pixels
+    wide, still do. Explicit ``vmin``/``vmax``/``norm`` switch all of it off.
     """
     from matplotlib.colors import LogNorm
 
@@ -179,12 +195,20 @@ def imshow(ax: Any, image: np.ndarray, *, unit: str | None = None, stretch: str 
             positive = finite[finite > 0]
             if positive.size:
                 vmin, vmax = np.percentile(positive, percentiles)
+                cap = _robust_max(img)
+                if cap is not None and cap > 0:
+                    vmax = min(vmax, cap)
                 vmin = max(vmin, vmax * 1e-5)
+                if not vmax > vmin:
+                    vmax = vmin * 10  # (near-)constant image: keep the norm well-formed
             else:
                 vmin, vmax = 1e-3, 1.0
-            kwargs.setdefault("norm", LogNorm(vmin=vmin, vmax=max(vmax, vmin * 10)))
+            kwargs.setdefault("norm", LogNorm(vmin=vmin, vmax=vmax))
         elif "norm" not in kwargs:
             lo, hi = np.percentile(finite, percentiles) if finite.size else (0.0, 1.0)
+            cap = _robust_max(img)
+            if cap is not None:
+                hi = min(hi, cap)
             kwargs.setdefault("vmin", lo)
             kwargs.setdefault("vmax", hi if hi > lo else lo + 1.0)
     kwargs.setdefault("origin", "lower")
@@ -193,6 +217,29 @@ def imshow(ax: Any, image: np.ndarray, *, unit: str | None = None, stretch: str 
     if cbar:
         colorbar(im, label=cbar_label if cbar_label is not None else unit_label)
     return im
+
+
+def _robust_max(image: np.ndarray) -> float | None:
+    """The brightest 3x3 *neighbourhood* median of a 2-D image (None when unusable).
+
+    An isolated hot pixel cannot raise it, a real source -- bright over
+    several adjacent pixels -- keeps its near-peak value; :func:`imshow` caps
+    its automatic ``vmax`` here.
+    """
+    import warnings
+
+    image = np.asarray(image, dtype=float)
+    if image.ndim != 2 or image.size < 9:
+        return None
+    padded = np.pad(image, 1, constant_values=np.nan)
+    ny, nx = image.shape
+    stack = np.stack([padded[dy:dy + ny, dx:dx + nx] for dy in range(3) for dx in range(3)])
+    with warnings.catch_warnings(), np.errstate(all="ignore"):
+        warnings.filterwarnings("ignore", message=".*All-NaN.*")
+        filtered = np.nanmedian(stack, axis=0)
+        if not np.isfinite(filtered).any():
+            return None
+        return float(np.nanmax(filtered))
 
 
 def colorbar(im: Any, *, label: str | None = None, width: float = 0.045, pad: float = 0.02) -> Any:

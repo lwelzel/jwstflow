@@ -112,16 +112,18 @@ class QuicklookImage(Step):
 
     For each input file, the SCI array is rendered as one image panel: cubes
     are first collapsed along the spectral axis with a nan-aware statistic
-    (``collapse``: median/mean/sum/max), then shown in detector/sky pixels
-    with robust percentile limits (``percentiles``), an optional non-linear
-    ``stretch``, and a height-matched colorbar labelled with the data's
-    BUNIT (surface brightness is converted to mJy/arcsec^2). Inputs without
-    a SCI extension are skipped with a warning. One PNG per input file,
-    named after it.
+    (``collapse``: median/mean/sum/max; spaxels with less than
+    ``min_coverage`` finite planes are blanked -- at the footprint edges a
+    nanmedian over a handful of planes is noise that would otherwise stretch
+    the display limits), then shown in detector/sky pixels with robust
+    percentile limits (``percentiles``), an optional non-linear ``stretch``,
+    and a height-matched colorbar labelled with the data's BUNIT (surface
+    brightness is converted to mJy/arcsec^2). Inputs without a SCI extension
+    are skipped with a warning. One PNG per input file, named after it.
     """
 
     level = "qa"
-    version = "2"   # 1 -> 2: qafig standard; cubes nan-collapsed instead of the middle slice
+    version = "3"   # 2 -> 3: robust display limits (min_coverage; hot pixels cannot set vmax)
 
     def run(
         self,
@@ -130,6 +132,7 @@ class QuicklookImage(Step):
         *,
         percentiles: tuple[float, float] | list[float] = (1.0, 99.0),
         collapse: str = "median",
+        min_coverage: float = 0.5,
         stretch: str = "linear",
         cmap: str | None = None,
         dpi: int = 150,
@@ -145,7 +148,7 @@ class QuicklookImage(Step):
                     continue
                 data = np.asarray(hdul["SCI"].data, dtype=float)
                 unit = hdul["SCI"].header.get("BUNIT")
-            image = qafig.collapse(data, collapse)
+            image = qafig.collapse(data, collapse, min_coverage=min_coverage)
             fig, ax = qafig.subplots(figsize=(6.5, 6))
             qafig.imshow(ax, image, unit=unit, stretch=stretch,
                          percentiles=tuple(percentiles), cmap=cmap or qafig.CMAP)

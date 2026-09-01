@@ -52,6 +52,58 @@ def test_rescale_chains_onto_the_reference(tmp_path: Path):
     assert np.all(np.asarray(tab["FLUX"]) == pytest.approx(2.0))
 
 
+def test_overlap_ratio_ignores_noise_crossing_zero(tmp_path: Path):
+    # a noisy but significantly positive overlap: the ratio of overlap medians
+    # must come out right even when single samples of `a` sit at or below zero
+    rng = np.random.default_rng(5)
+    n = 400
+    blue = synthetic_x1d(tmp_path / "jw001_nirspec_g235h-f170lp_s1d.fits",
+                         wave=np.linspace(1.0, 2.0, n), flux=0.10 + 0.08 * rng.standard_normal(n),
+                         instrument="NIRSPEC", GRATING="G235H", FILTER="F170LP")
+    red = synthetic_x1d(tmp_path / "jw001_nirspec_g395h-f290lp_s1d.fits",
+                        wave=np.linspace(1.6, 3.0, n), flux=0.20 + 0.08 * rng.standard_normal(n),
+                        instrument="NIRSPEC", GRATING="G395H", FILTER="F290LP")
+    outputs = run_step(StitchSegments, [blue, red], tmp_path, params={"rescale": True})
+    from astropy.table import Table
+
+    tab = Table.read([o for o in outputs if o.suffix == ".ecsv"][0])
+    assert tab.meta["neighbour_ratios"][0] == pytest.approx(2.0, rel=0.25)
+    assert tab.meta["scales_applied"][0] == pytest.approx(2.0, rel=0.25)
+
+
+def test_near_zero_overlap_is_not_rescaled(tmp_path: Path, caplog):
+    # the chain regression: a segment whose flux is consistent with zero (an
+    # aperture that missed the source) cannot anchor a multiplicative
+    # rescaling -- its links stay at 1 instead of amplifying everything redder
+    # by huge (or negative) factors
+    rng = np.random.default_rng(6)
+    n = 300
+    seg = [synthetic_x1d(tmp_path / "jw001_miri_ch1-short_s1d.fits",
+                         wave=np.linspace(4.9, 5.8, n), flux=np.full(n, 1.0),
+                         CHANNEL="1", BAND="SHORT"),
+           synthetic_x1d(tmp_path / "jw001_miri_ch1-medium_s1d.fits",
+                         wave=np.linspace(5.65, 6.7, n), flux=0.002 * rng.standard_normal(n),
+                         CHANNEL="1", BAND="MEDIUM"),
+           synthetic_x1d(tmp_path / "jw001_miri_ch1-long_s1d.fits",
+                         wave=np.linspace(6.5, 7.7, n), flux=np.full(n, 4.0),
+                         CHANNEL="1", BAND="LONG")]
+    with caplog.at_level("WARNING"):
+        outputs = run_step(StitchSegments, seg, tmp_path,
+                           params={"rescale": True, "reference": "shortest"})
+    from astropy.table import Table
+
+    tab = Table.read([o for o in outputs if o.suffix == ".ecsv"][0])
+    assert tab.meta["neighbour_ratios"] == [None, None]      # both unmeasurable, recorded as such
+    assert tab.meta["scales_applied"] == [1.0, 1.0, 1.0]     # nothing blown up
+    assert "consistent with zero" in caplog.text
+    flux = np.asarray(tab["FLUX"])
+    assert np.nanmax(np.abs(flux)) == pytest.approx(4.0)     # the red segment kept its own scale
+    outputs = run_step(StitchSegments, seg, tmp_path, stage="unguarded",
+                       params={"rescale": True, "reference": "shortest", "min_overlap_snr": 0.0})
+    tab = Table.read([o for o in outputs if o.suffix == ".ecsv"][0])
+    assert tab.meta["neighbour_ratios"][0] is not None       # 0 disables the guard
+
+
 def test_single_segment_is_rejected(tmp_path: Path):
     (only,) = two_segments(tmp_path)[:1]
     with pytest.raises(ValueError, match="at least two"):
