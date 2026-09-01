@@ -44,11 +44,15 @@ class PlotSpectrum(Step):
     Inputs without such an extension are skipped with a warning. One figure
     per input file, named after it, following the jwstflow QA figure
     standard (``docs/qa_figures.md``); the wavelength axis is logarithmic
-    unless ``xscale: linear``.
+    unless ``xscale: linear``, the flux axis linear unless ``yscale: log``
+    (mid-infrared spectra span decades). With two or more spectra a combined
+    overview figure (``<stage>_all.png``) draws every spectrum on one
+    log-log axis, coloured from the standard colormap.
     """
 
     level = "qa"
-    version = "3"   # 2 -> 3: logarithmic wavelength axis by default (xscale parameter)
+    batch = "all"   # all inputs in one task, so the combined overview sees every spectrum
+    version = "4"   # 3 -> 4: yscale parameter; combined all-spectra overview figure
 
     def run(
         self,
@@ -58,6 +62,7 @@ class PlotSpectrum(Step):
         ylim: tuple[float, float] | list[float] | None = None,
         column: str = "FLUX",
         xscale: str = "log",
+        yscale: str = "linear",
         dpi: int = 150,
         fmt: str = "png",
         **_: Any,
@@ -65,7 +70,8 @@ class PlotSpectrum(Step):
         from astropy.io import fits
 
         out: list[Path] = []
-        for inp in inputs:
+        combined: list[tuple[np.ndarray, np.ndarray, str, str]] = []
+        for inp in sorted(inputs):
             with fits.open(inp) as hdul:
                 tables = [h for h in hdul if h.name in ("EXTRACT1D", "COMBINE1D")]
                 if not tables:
@@ -83,14 +89,21 @@ class PlotSpectrum(Step):
                     if len(tables) > 1 and len(tables) <= 12:
                         label = str(h.header.get("SLTNAME") or h.header.get("SRCNAME") or f"ext {i + 1}")
                     qafig.step(ax, tab["WAVELENGTH"], values, color=color, label=label)
+                    combined.append((np.asarray(tab["WAVELENGTH"], float), values,
+                                     inp.stem + (f":{label}" if label else ""), ylabel))
                 ax.set_xlabel(qafig.WAVE_LABEL)
                 ax.set_ylabel(ylabel or f"{column}")
                 qafig.set_wave_scale(ax, xscale)
+                ax.set_yscale(yscale)
                 if ylim:
                     ax.set_ylim(*ylim)
                 qafig.annotate(ax, inp.name)
                 qafig.figlegend(fig)
                 out.append(qafig.save(fig, ctx.output_dir / f"{inp.stem}.{fmt}", dpi=dpi))
+        overview = _all_spectra_figure(combined, ctx.output_dir / f"{ctx.stage}_all.{fmt}",
+                                       what="spectra", dpi=dpi)
+        if overview is not None:
+            out.append(overview)
         return out
 
 
@@ -152,23 +165,29 @@ class PlotStitch(Step):
     next to the ECSV itself, and in the sibling runs of the target (so a
     combination run stitching across runs still finds its segments);
     segments that are not found any more are simply left out of the figure.
-    The wavelength axis is logarithmic unless ``xscale: linear``.
+    The wavelength axis is logarithmic unless ``xscale: linear``, the flux
+    axis linear unless ``yscale: log``. With two or more stitched spectra a
+    combined overview figure (``<stage>_all.png``) draws every one on a
+    single log-log axis, coloured from the standard colormap.
     """
 
     level = "qa"
+    batch = "all"   # all inputs in one task, so the combined overview sees every spectrum
     inputs = ("*_s1dcomb.ecsv",)
-    version = "2"   # 1 -> 2: log wavelength axis by default; segments found in sibling runs
+    version = "3"   # 2 -> 3: yscale parameter; combined all-spectra overview figure
 
     def run(self, inputs: list[Path], ctx: RunContext, *, segments_stage: str | None = None,
-            xscale: str = "log", dpi: int = 150, **_: Any) -> Iterable[Path]:
+            xscale: str = "log", yscale: str = "linear", dpi: int = 150, **_: Any) -> Iterable[Path]:
         from astropy.table import Table
 
         out: list[Path] = []
-        for inp in inputs:
+        combined: list[tuple[np.ndarray, np.ndarray, str, str]] = []
+        for inp in sorted(inputs):
             tab = Table.read(inp)
             wave = np.asarray(tab["WAVELENGTH"], dtype=float)
             flux, ylabel = qafig.to_mjy(np.asarray(tab["FLUX"], dtype=float),
                                         str(tab["FLUX"].unit or "Jy"))
+            combined.append((wave, flux, inp.stem, ylabel))
             meta = tab.meta
             names = [str(n) for n in meta.get("inputs", [])]
             labels = [str(s) for s in meta.get("segments", names)]
@@ -192,10 +211,59 @@ class PlotStitch(Step):
                 ax.plot([], [], color="0.6", lw=0.6, ls=":", label="crossover")
             ax.set(xlabel=qafig.WAVE_LABEL, ylabel=ylabel)
             qafig.set_wave_scale(ax, xscale)
+            ax.set_yscale(yscale)
             qafig.annotate(ax, inp.name)
             qafig.figlegend(fig)
             out.append(qafig.save(fig, ctx.output_dir / f"{inp.stem}.png", dpi=dpi))
+        overview = _all_spectra_figure(combined, ctx.output_dir / f"{ctx.stage}_all.png",
+                                       what="stitched spectra", dpi=dpi)
+        if overview is not None:
+            out.append(overview)
         return out
+
+
+def _all_spectra_figure(series: list[tuple[np.ndarray, np.ndarray, str, str]], path: Path, *,
+                        what: str, dpi: int) -> Path | None:
+    """The combined overview: every spectrum of the stage on one log-log axis.
+
+    ``series`` is ``(wavelength, values_mjy, name, ylabel)`` per spectrum;
+    fewer than two spectra draw nothing (the per-file figure already shows
+    everything). Colors are sampled from the standard colormap in order of
+    increasing starting wavelength; labels are the file names with their
+    common prefix/suffix stripped.
+    """
+    if len(series) < 2:
+        return None
+    series = sorted(series, key=lambda s: float(np.nanmin(s[0])) if len(s[0]) else np.inf)
+    labels = _short_labels([name for _, _, name, _ in series])
+    fig, ax = qafig.subplots(figsize=(11, 4.5))
+    colors = qafig.line_colors(len(series))
+    ylabel = ""
+    for (wave, values, _, ylab), label, color in zip(series, labels, colors):
+        ylabel = ylab or ylabel
+        qafig.step(ax, wave, values, color=color, lw=0.7,
+                   label=label if len(series) <= 14 else None)
+    ax.set(xlabel=qafig.WAVE_LABEL, ylabel=ylabel)
+    qafig.set_wave_scale(ax, "log")
+    ax.set_yscale("log")
+    qafig.annotate(ax, f"all {what} of this stage ({len(series)})")
+    qafig.figlegend(fig)
+    return qafig.save(fig, path, dpi=dpi)
+
+
+def _short_labels(names: list[str]) -> list[str]:
+    """Distinct cores of a family of product names: the common prefix and suffix stripped."""
+    import os
+
+    if len(names) < 2:
+        return list(names)
+    prefix = os.path.commonprefix(names)
+    suffix = os.path.commonprefix([n[::-1] for n in names])[::-1]
+    out = []
+    for n in names:
+        core = n[len(prefix):len(n) - len(suffix) if suffix else None]
+        out.append(core.strip("_-.") or n)
+    return out
 
 
 def _find_file(name: str, ctx: RunContext, stage: str | None, *extra: Path) -> Path | None:
