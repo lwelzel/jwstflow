@@ -128,6 +128,10 @@ class MockScene:
     lines: tuple[tuple[float, float], ...] = ()
     line_width_um: float = 0.02
     line_halo_scale: float = 1.6    # halo sigmas = scale x disk sigmas
+    #: source position offset from the field centre [arcsec along +x / +y] -- emulates a
+    #: pointing error the aperture placement must absorb (hot pixel stays put)
+    offset_x_arcsec: float = 0.0
+    offset_y_arcsec: float = 0.0
     hot_pixel: tuple[int, int] | None = (3, 3)
     hot_value: float = 3000.0
     noise: float = 0.0
@@ -137,24 +141,25 @@ class MockScene:
     def plane(self, size: int, pix_arcsec: float, wave_um: float) -> np.ndarray:
         """One (size, size) surface-brightness image [MJy/sr] at ``wave_um``."""
         yy, xx = np.mgrid[:size, :size]
-        c = (size - 1) / 2.0
+        c_x = (size - 1) / 2.0 + self.offset_x_arcsec / pix_arcsec
+        c_y = (size - 1) / 2.0 + self.offset_y_arcsec / pix_arcsec
         img = np.full((size, size), float(self.background))
         boost = 0.0
         for wave0, amp in self.lines:
             if abs(wave_um - wave0) <= self.line_width_um:
                 boost += float(amp)
         if self.disk_peak > 0:
-            disk = np.exp(-((xx - c) ** 2 / (2 * self.disk_sigma_maj**2)
-                            + (yy - c) ** 2 / (2 * self.disk_sigma_min**2)))
+            disk = np.exp(-((xx - c_x) ** 2 / (2 * self.disk_sigma_maj**2)
+                            + (yy - c_y) ** 2 / (2 * self.disk_sigma_min**2)))
             img += self.disk_peak * disk
             if boost:
                 s_maj, s_min = self.line_halo_scale * self.disk_sigma_maj, self.line_halo_scale * self.disk_sigma_min
-                img += boost * np.exp(-((xx - c) ** 2 / (2 * s_maj**2) + (yy - c) ** 2 / (2 * s_min**2)))
+                img += boost * np.exp(-((xx - c_x) ** 2 / (2 * s_maj**2) + (yy - c_y) ** 2 / (2 * s_min**2)))
         if self.point_flux_jy > 0:
             sig = self.point_fwhm_pix / 2.3548
             area_sr = (pix_arcsec / 206265.0) ** 2
             peak = self.point_flux_jy / (2 * np.pi * sig**2) / area_sr / 1e6
-            psf = np.exp(-((xx - c) ** 2 + (yy - c) ** 2) / (2 * sig**2))
+            psf = np.exp(-((xx - c_x) ** 2 + (yy - c_y) ** 2) / (2 * sig**2))
             img += peak * (1.0 + boost) * psf
         if self.hot_pixel is not None:
             img[self.hot_pixel] += self.hot_value
@@ -180,6 +185,8 @@ class MockScene:
             "JWFMKLN": (lines, "mock scene: lines wave:amp,..."),
             "JWFMKLW": (self.line_width_um, "mock scene: line half-width [um]"),
             "JWFMKLS": (self.line_halo_scale, "mock scene: line halo scale"),
+            "JWFMKOX": (self.offset_x_arcsec, "mock scene: source offset +x [arcsec]"),
+            "JWFMKOY": (self.offset_y_arcsec, "mock scene: source offset +y [arcsec]"),
             "JWFMKHX": (-1 if self.hot_pixel is None else self.hot_pixel[0], "mock scene: hot pixel y (-1: none)"),
             "JWFMKHY": (-1 if self.hot_pixel is None else self.hot_pixel[1], "mock scene: hot pixel x"),
             "JWFMKHV": (self.hot_value, "mock scene: hot pixel value [MJy/sr]"),
@@ -204,6 +211,8 @@ class MockScene:
             lines=lines,
             line_width_um=float(hdr.get("JWFMKLW", 0.02)),
             line_halo_scale=float(hdr.get("JWFMKLS", 1.6)),
+            offset_x_arcsec=float(hdr.get("JWFMKOX", 0.0)),
+            offset_y_arcsec=float(hdr.get("JWFMKOY", 0.0)),
             hot_pixel=None if hx < 0 else (hx, hy),
             hot_value=float(hdr.get("JWFMKHV", 0.0)),
             noise=float(hdr.get("JWFMKNS", 0.0)),
@@ -366,6 +375,7 @@ def miri_mrs_observation(
     imager_size: int = 200,
     imager_pix_arcsec: float = 0.11,
     star_seed: int = 3,
+    scene_offset_arcsec: tuple[float, float] = (0.0, 0.0),
 ) -> MockObservation:
     """A MIRI MRS observation modelled on ESO-Ha 569 (jw01751 obs 10 / 12).
 
@@ -388,6 +398,11 @@ def miri_mrs_observation(
         base = MockScene(background=30.0, disk_peak=0.0, point_flux_jy=0.05, hot_pixel=(2, 2),
                          hot_value=20000.0, lines=((5.5112, 1.5), (12.8135, 1.0)), line_width_um=0.03)
         scene = replace(base, disk_peak=0.0, point_flux_jy=0.0, lines=(), hot_pixel=None) if background else base
+    if scene_offset_arcsec != (0.0, 0.0):
+        # emulate a pointing error in the cubes: the source sits off the position the
+        # WCS claims for it (what mrs_extract's refine_centroid must absorb)
+        scene = replace(scene, offset_x_arcsec=scene_offset_arcsec[0],
+                        offset_y_arcsec=scene_offset_arcsec[1])
     obs = MockObservation(program, observation, target_id, scene)
     exposure = 0
     for band in bands:
