@@ -96,5 +96,5 @@ Guidelines that follow from the rules:
 |---|---|---|
 | `plot_spectrum` | `*_x1d` / `*_c1d` / `*_s1d(comb)` | every EXTRACT1D/COMBINE1D spectrum, in mJy |
 | `quicklook_image` | anything with a SCI extension | nan-median collapsed image with colorbar |
-| `plot_stitch` | `*_s1dcomb.ecsv` | stitched spectrum (black) over its rescaled segments |
+| `plot_stitch` | `*_s1dcomb.ecsv` | stitched spectrum (black) over its rescaled segments; when the stitch rescaled anything, also the segments as extracted (`*_unscaled.png`) |
 | `mast_compare` | `*_s3d` / `*_x1d` | jwstflow vs. MAST spectra and their ratio |
