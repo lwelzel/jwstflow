@@ -154,6 +154,8 @@ CONTRIB_ALIASES: dict[str, str] = {
     "fix_msa_metafile": "jwstflow.contrib.nirspec:fix_msa_metafile",
     "mast_compare": "jwstflow.contrib.mast_compare:MastCompare",
     "stitch_segments": "jwstflow.stitching:StitchSegments",
+    "psf_cube": "jwstflow.contrib.psf:PsfCube",
+    "qa_psf_cube": "jwstflow.contrib.psf:QaPsfCube",
 }
 
 ALIAS_ASN_TYPE: dict[str, str] = {
