@@ -677,7 +677,7 @@ class StubSpec3(Step):
         headers = [fits.getheader(m) for m in members]
         first = headers[0]
         scene = MockScene.from_header(first)
-        scene = self._apply_background(scene, headers, ctx, **params)
+        scene, cal_steps = self._apply_background(scene, headers, ctx, **params)
         nwave = int(first["JWFMKNW"])
         size = int(first["JWFMKSZ"])
         pix = float(first["JWFMKPX"])
@@ -690,7 +690,7 @@ class StubSpec3(Step):
                 name = f"{product}-{filt.lower()}" if not product.endswith(filt.lower()) else product
                 outputs += self._write_band(ctx, name, scene, first, nwave, size, pix, lo, hi,
                                             instrument="NIRSPEC", grating=grating, filt=filt,
-                                            n_members=len(members), x1d=write_x1d)
+                                            n_members=len(members), x1d=write_x1d, cal_steps=cal_steps)
         else:
             covered: set[tuple[str, str]] = set()
             for h in headers:
@@ -705,18 +705,21 @@ class StubSpec3(Step):
                 pix_band = pix * MRS_PIX_ARCSEC[channel] / MRS_PIX_ARCSEC["1"]
                 outputs += self._write_band(ctx, name, scene, first, nwave, size, pix_band, lo, hi,
                                             instrument="MIRI", channel=channel, band=band,
-                                            n_members=len(members), x1d=write_x1d)
+                                            n_members=len(members), x1d=write_x1d, cal_steps=cal_steps)
         ctx.log.info("stub spec3: %s -> %d product(s)", asn.name, len(outputs))
         return outputs
 
     def _apply_background(self, scene: MockScene, headers: list[Any], ctx: RunContext,
-                          **params: Any) -> MockScene:
-        return scene  # plain spec3: master_background is skipped in the mock workflows
+                          **params: Any) -> tuple[MockScene, dict[str, str]]:
+        """The scene to render and the ``meta.cal_step`` entries to record on the products
+        (empty here: plain spec3, master_background is skipped in the mock workflows)."""
+        return scene, {}
 
     def _write_band(self, ctx: RunContext, name: str, scene: MockScene, first: Any, nwave: int,
                     size: int, pix: float, lo: float, hi: float, *, instrument: str,
                     grating: str | None = None, filt: str | None = None, channel: str | None = None,
-                    band: str | None = None, n_members: int, x1d: bool) -> list[Path]:
+                    band: str | None = None, n_members: int, x1d: bool,
+                    cal_steps: dict[str, str] | None = None) -> list[Path]:
         from stdatamodels.jwst import datamodels
 
         wave = np.linspace(lo, hi, nwave)
@@ -741,6 +744,8 @@ class StubSpec3(Step):
         w.cunit1 = w.cunit2 = "deg"
         cube.meta.photometry.pixelarea_steradians = area_sr
         cube.meta.photometry.pixelarea_arcsecsq = pix**2
+        for step, status in (cal_steps or {}).items():   # e.g. S_MSBSUB = COMPLETE, like the real pipeline
+            setattr(cube.meta.cal_step, step, status)
         cards: list[list[Any]] = [[key, first[key], ""] for key in ("PROGRAM", "OBSERVTN", "TARGPROP", "BKGDTARG")]
         cards.append(["JWFNMEMB", n_members, "stub spec3: science members combined"])
         cards += [[key, value[0], value[1]] for key, value in scene.to_header().items()]
@@ -770,14 +775,16 @@ class StubSpec3WithBackground(StubSpec3):
     Like the real step it locates the per-grating ``*_bkgspec.fits`` in
     ``background_dir`` (failing loudly when it is missing -- the test then
     catches a broken stage wiring) and, like ``master_background``, subtracts
-    the *measured* sky spectrum's median from the scene background.
+    the *measured* sky spectrum's median from the scene background and
+    records the subtraction on the cubes (S_MSBSUB = COMPLETE), which the
+    downstream extraction requires before it documents a background.
     """
 
     def _apply_background(self, scene: MockScene, headers: list[Any], ctx: RunContext,
-                          **params: Any) -> MockScene:
+                          **params: Any) -> tuple[MockScene, dict[str, str]]:
         background_dir = str(params.get("background_dir") or "")
         if not background_dir:
-            return scene
+            return scene, {}
         from astropy.table import Table
 
         grating = str(headers[0].get("GRATING", "")).lower()
@@ -787,7 +794,7 @@ class StubSpec3WithBackground(StubSpec3):
         table = Table.read(hits[0], hdu="EXTRACT1D")
         measured = float(np.nanmedian(np.asarray(table["SURF_BRIGHT"], dtype=float)))
         ctx.log.info("stub spec3_with_background: subtracting measured sky %.3f MJy/sr from %s", measured, hits[0].name)
-        return replace(scene, background=max(0.0, scene.background - measured))
+        return replace(scene, background=max(0.0, scene.background - measured)), {"master_background": "COMPLETE"}
 
 
 class StubImage2(StubSpec2):
