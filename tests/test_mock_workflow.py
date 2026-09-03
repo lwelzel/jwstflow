@@ -10,14 +10,17 @@ fully offline. The contributed-step repositories build their deeper chains
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
+from astropy.io import fits
 
 from jwstflow.config.loader import load_config
 from jwstflow.engine.runner import Runner
 from jwstflow.testing.mock import (
+    DEFAULT_NIRSPEC_SCENE,
     MockScene,
     miri_mrs_observation,
     nirspec_ifu_observation,
@@ -128,16 +131,25 @@ def test_scene_rendering_is_deterministic_and_scaled():
 # ------------------------------------------------------------------ the mini workflow
 
 
+#: the mini workflow's scene: the default disk plus a bad cluster in dither 2 of G395H, 4 px
+#: east/north of the field centre (what the YAML's flag_spaxel_clusters region points at)
+MINI_SCENE = replace(DEFAULT_NIRSPEC_SCENE, cluster_dither=2, cluster_center=(14, 6), cluster_radius=3.0,
+                     cluster_wave=(4.5, 4.65), cluster_value=500.0)
+
+
 @pytest.mark.integration
 def test_mini_workflow_end_to_end(tmp_path: Path):
     write_observation(tmp_path / "reductions" / "eso-ha-569" / "raw",
-                      nirspec_ifu_observation(dithers=2, nwave=30, size=21))
+                      nirspec_ifu_observation(dithers=3, nwave=30, size=21, scene=MINI_SCENE))
     cfg = load_config(YAML, overrides=offline_overrides(tmp_path, backend="process"))
     summary = Runner(cfg, skip_download=True).run()
     assert summary.ok and summary.failed == 0
     by_stage = {s.stage: s for s in summary.stages}
-    assert by_stage["calwebb_detector1"].success == 8   # 2 gratings x 2 dithers x 2 detectors
-    assert by_stage["calwebb_spec2"].success == 8
+    assert by_stage["calwebb_detector1"].success == 12  # 2 gratings x 3 dithers x 2 detectors
+    assert by_stage["calwebb_spec2"].success == 12
+    assert by_stage["cube_build-perdither"].success == 6  # one cube per grating and dither
+    assert by_stage["flag_spaxel_clusters"].success == 1  # batch=all
+    assert by_stage["propagate_cluster_flags"].success == 12
     assert by_stage["calwebb_spec3"].success == 2       # one association per grating
     assert by_stage["psf_cube"].success == 2            # one PSF cube per grating cube
 
@@ -145,6 +157,10 @@ def test_mini_workflow_end_to_end(tmp_path: Path):
     for product in [
         "stage1/calwebb_detector1/jw01751006001_02101_00001_nrs1_rate.fits",
         "stage2/calwebb_spec2/jw01751006001_02101_00001_nrs1_cal.fits",
+        "stage3/cube_build-perdither/jw01751-o006_t005_nirspec_dither2_g395h-f290lp_s3d.fits",
+        "stage4/flag_spaxel_clusters/jw01751-o006_t005_nirspec_dither2_g395h-f290lp_clustermask.fits",
+        "stage2/propagate_cluster_flags/jw01751006001_02101_00005_nrs2_cal.fits",
+        "qa/qa_spaxel_clusters/jw01751-o006_t005_nirspec_g395h-f290lp_mock-blob_clusters.png",
         "stage3/calwebb_spec3/jw01751-o006_t005_nirspec_g235h-f170lp_s3d.fits",
         "stage3/calwebb_spec3/jw01751-o006_t005_nirspec_g395h-f290lp_x1d.fits",
         "stage4/psf_cube/jw01751-o006_t005_nirspec_g235h-f170lp_psfcube.fits",
@@ -167,7 +183,12 @@ def test_mini_workflow_end_to_end(tmp_path: Path):
     assert [a.name for a in asns] == ["jw01751-o006_t005_nirspec_g235h_spec3_asn.json",
                                       "jw01751-o006_t005_nirspec_g395h_spec3_asn.json"]
     data = json.loads(asns[0].read_text())
-    assert data["asn_type"] == "spec3" and len(data["products"][0]["members"]) == 4
+    assert data["asn_type"] == "spec3" and len(data["products"][0]["members"]) == 6
+    # ... and the per-dither cubes' members are the two detectors of one dither each
+    perdither = json.loads((run / "associations" / "cube_build-perdither"
+                            / "jw01751-o006_t005_nirspec_dither2_g395h_spec3_asn.json").read_text())
+    assert sorted(Path(m["expname"]).name for m in perdither["products"][0]["members"]) == [
+        "jw01751006001_02101_00005_nrs1_cal.fits", "jw01751006001_02101_00005_nrs2_cal.fits"]
 
     # cubes carry the scene: centre plane = disk peak + background, hot pixel excluded
     from stdatamodels.jwst import datamodels
@@ -175,6 +196,29 @@ def test_mini_workflow_end_to_end(tmp_path: Path):
     with datamodels.open(run / "stage3/calwebb_spec3/jw01751-o006_t005_nirspec_g235h-f170lp_s3d.fits") as cube:
         assert cube.data.shape == (30, 21, 21)
         assert float(cube.data[0].max()) > 900.0  # disk peak ~1000 over sky 1
+
+    # -- the bad-cluster chain: dither 2 of G395H found, its NRS2 frame flagged, cluster gone
+    from jwstflow.clusters import read_cluster_product
+
+    masks = {d: read_cluster_product(run / "stage4/flag_spaxel_clusters"
+                                     / f"jw01751-o006_t005_nirspec_dither{d}_g395h-f290lp_clustermask.fits")
+             for d in (1, 2, 3)}
+    assert [bool(masks[d]["regions"]["included"][0]) for d in (1, 2, 3)] == [False, True, False]
+    flagged_planes = np.flatnonzero(masks[2]["mask"].any(axis=(1, 2)))
+    assert flagged_planes.tolist() == [20, 21] and masks[2]["mask"][20, 14, 6]
+    for d in (1, 3):
+        assert not masks[d]["mask"].any()
+    npx = {p.name: fits.getheader(p)["JWFCLNPX"] for p in (run / "stage2/propagate_cluster_flags").glob("*_cal.fits")}
+    # plane_pad (default 1) widens the two flagged planes to four: twice the spaxel-planes
+    assert len(npx) == 12 and npx["jw01751006001_02101_00005_nrs2_cal.fits"] == 2 * int(masks[2]["mask"].sum())
+    assert sum(npx.values()) == npx["jw01751006001_02101_00005_nrs2_cal.fits"]   # nothing else touched
+    with datamodels.open(run / "stage3/calwebb_spec3/jw01751-o006_t005_nirspec_g395h-f290lp_s3d.fits") as cube:
+        final = np.asarray(cube.data, float)
+    with datamodels.open(run / "stage3/cube_build-perdither/jw01751-o006_t005_nirspec_dither2_g395h-f290lp_s3d.fits") as cube:
+        dirty = np.asarray(cube.data, float)
+    truth = DEFAULT_NIRSPEC_SCENE.plane(21, 0.1, float(masks[2]["waves"][20]))
+    assert dirty[20, 14, 6] > truth[14, 6] + 400                    # the per-dither cube shows the cluster
+    assert np.allclose(final[20], truth, rtol=1e-5) and np.isfinite(final[20]).all()   # the final one does not
 
     # -- resume: a second run computes nothing ---------------------------------
     summary2 = Runner(cfg, skip_download=True).run()
@@ -191,7 +235,7 @@ def test_mini_workflow_end_to_end(tmp_path: Path):
     victim.touch()
     summary4 = Runner(cfg, skip_download=True).run()
     d1 = {s.stage: s for s in summary4.stages}["calwebb_detector1"]
-    assert d1.success == 1 and d1.cached == 7
+    assert d1.success == 1 and d1.cached == 11
 
 
 @pytest.mark.integration

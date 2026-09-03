@@ -162,6 +162,23 @@ fixed in core and plugins build on them instead of inventing variants:
   IFU + MIRI MRS), plotted by `qa_psf_cube`; the rationale and conventions
   live in [psf_cubes.md](psf_cubes.md).
 
+* **Bad spaxel clusters** (`jwstflow.clusters`): compact clusters of wildly
+  deviant spaxels over a few planes that survive the official pipeline
+  (IFU `outlier_detection` keeps the *minimum* neighbour difference over all
+  exposures, so anything confined to one dither passes; drizzle then averages
+  it in). Three steps go between stage 2 and stage 3 of any IFU workflow:
+  the official `cube_build` on one association per dither
+  (`group_by: [..., PATT_NUM]`, `variant: perdither` ->
+  `stage3/cube_build-perdither/`), `flag_spaxel_clusters` (regions from the
+  YAML -- sky position, search aperture, wavelength window -- compared
+  across the per-dither cubes: which dithers carry the cluster, which
+  spaxels, in one `*_clustermask.fits` product per dither cube) and
+  `propagate_cluster_flags` (the cal files' WCS evaluated to find the
+  detector pixels behind the flagged spaxels; DQ-flagged `_cal` copies that
+  every later stage consumes). `qa_spaxel_clusters` draws every dither at the
+  affected wavelengths. The product carries the mask contract plus the
+  per-region decisions and QA slices.
+
 Extraction steps additionally share `jwstflow.apcorr`: the CRDS
 aperture-correction reference (MIRI MRS and NIRSpec IFU layouts) normalised
 to one plain-array table and evaluated per plane, so contributed extraction
@@ -184,8 +201,8 @@ target id taken from MAST at download time, so cubes come out named exactly as
 in the archive. Custom steps derive names with `jwstflow.naming.derived_name()`
 and may not use a suffix the pipeline reserves (`_x1d`, `_s3d`, `_cal`, …);
 jwstflow's own product types are `_s1d` (extracted spectra), `_s1dcomb`
-(stitched), `_bkgspec` (background spectra), `_lsr` and `_psfcube` (PSF
-cubes). Edited copies of an official product (a DQ-flagged `_cal`) keep the
+(stitched), `_bkgspec` (background spectra), `_lsr`, `_psfcube` (PSF
+cubes) and `_clustermask` (bad spaxel clusters of a per-dither cube). Edited copies of an official product (a DQ-flagged `_cal`) keep the
 official name and record the edit in the header.
 
 ## Data products shipped with jwstflow
