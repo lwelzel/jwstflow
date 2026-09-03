@@ -4,7 +4,7 @@
 version: 1
 target: ESO-Ha 569
 run: mini_nirspec
-description: mock detector1 -> spec2 -> spec3 -> QA, end to end
+description: mock detector1 -> spec2 -> per-dither cubes -> cluster flags -> spec3 -> QA, end to end
 
 crds: {context: jwst_1364.pmap, prefetch: false}
 parallel: {backend: process, workers: 2}
@@ -19,9 +19,37 @@ stages:
       - {stage: calwebb_detector1, pattern: "*_rate.fits"}
     association: {mode: per_exposure, level: 2, asn_type: spec2}
 
-  - step: jwstflow.testing.mock:StubSpec3
+  # the bad-cluster chain (jwstflow.clusters): per-dither cubes -> which dither / which
+  # spaxels -> DQ flags on the detector pixels behind them; spec3 consumes the flagged frames
+  - step: jwstflow.testing.mock:StubCubeBuild
+    variant: perdither
     inputs:
       - {stage: calwebb_spec2, pattern: "*_cal.fits"}
+    association:
+      mode: group
+      level: 3
+      asn_type: spec3
+      group_by: [PROGRAM, OBSERVTN, GRATING, FILTER, PATT_NUM]
+      product_name: "jw{PROGRAM}-o{OBSERVTN}_{TARGID}_nirspec_dither{PATT_NUM}_{GRATING}"
+
+  - step: flag_spaxel_clusters
+    inputs:
+      - {stage: cube_build-perdither, pattern: "*_s3d.fits"}
+    parameters:
+      regions:
+        # the mock scene's injected cluster: 0.4" east / 0.4" north of the field centre, dither 2
+        - {id: mock-blob, ra: 167.788983, dec: -76.695889, radius: 0.35, wave_min: 4.52, wave_max: 4.61,
+           where: {GRATING: G395H}}
+      grow: 0
+
+  - step: propagate_cluster_flags
+    inputs:
+      - {stage: calwebb_spec2, pattern: "*_cal.fits"}
+    depends_on: [flag_spaxel_clusters]
+
+  - step: jwstflow.testing.mock:StubSpec3
+    inputs:
+      - {stage: propagate_cluster_flags, pattern: "*_cal.fits"}
     association:
       mode: group
       level: 3
@@ -46,6 +74,11 @@ stages:
   - step: quicklook_image
     inputs:
       - {stage: calwebb_spec3, pattern: "*_s3d.fits"}
+    tags: [qa]
+
+  - step: qa_spaxel_clusters
+    inputs:
+      - {stage: flag_spaxel_clusters, pattern: "*_clustermask.fits"}
     tags: [qa]
 
   - step: plot_spectrum

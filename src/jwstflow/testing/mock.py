@@ -21,8 +21,8 @@ Three pieces:
   :func:`write_observation` materialises the ``_uncal`` files plus the MAST
   observation log (the source of the DMS target id).
 
-* **Stub pipelines** -- :class:`StubDetector1`, :class:`StubSpec2` and
-  :class:`StubSpec3` mimic the official pipelines' *interfaces*: same stage
+* **Stub pipelines** -- :class:`StubDetector1`, :class:`StubSpec2`,
+  :class:`StubSpec3` and :class:`StubCubeBuild` mimic the official pipelines' *interfaces*: same stage
   names (``calwebb_detector1`` ...), same product names (``_rate``, ``_cal``,
   DMS level-3 cube names with the band appended), consuming the same
   association files, honouring the parameters that shape the data flow
@@ -31,8 +31,14 @@ Three pieces:
   subtracts the sky of associated background members like ``bkg_subtract``
   would, ``spec3`` renders the scene into IFU cubes, and
   ``spec3_with_background`` subtracts the measured ``*_bkgspec.fits`` sky
-  like ``master_background`` would. Custom (jwstflow / contributed) steps
-  then run *for real* on those cubes.
+  like ``master_background`` would. NIRSpec cal files carry a tiny but
+  faithful IFU *detector layout* with a real ``gwcs``: one detector pixel
+  per (spaxel, plane) of the detector's half of the band (rows = spaxels,
+  columns = planes; :func:`mock_cal_wcs`), so DQ flags set on a cal file
+  (``OUTLIER``, what ``propagate_cluster_flags`` writes) are honoured when the
+  cubes are rendered -- the bad-cluster chain of :mod:`jwstflow.clusters`
+  runs end to end offline. Custom (jwstflow / contributed) steps then run
+  *for real* on those cubes.
 
 * **Runners** -- :func:`stub_pipelines` shadows the official step aliases in
   the in-process registry (use the serial backend / ``workers=1``, where
@@ -70,7 +76,8 @@ __all__ = [
     "nirspec_ifu_observation", "miri_mrs_observation", "write_observation",
     "star_field", "write_gaia_catalog",
     "StubDetector1", "StubSpec2", "StubSpec3", "StubSpec3WithBackground",
-    "StubImage2", "StubImage3",
+    "StubCubeBuild", "StubImage2", "StubImage3", "mock_cal_layout", "mock_cal_wcs",
+    "DEFAULT_NIRSPEC_SCENE",
     "stub_pipelines", "offline_overrides", "run_mock_workflow",
     "NRS_GRATINGS", "MRS_BANDS",
 ]
@@ -136,10 +143,30 @@ class MockScene:
     hot_value: float = 3000.0
     noise: float = 0.0
     seed: int = 0
+    #: a bad spaxel cluster in ONE dither (0: none): an elongated blob (3:1 ellipse, 30 deg)
+    #: of semi-major ``cluster_radius`` px around ``cluster_center`` (y, x), adding
+    #: ``cluster_value`` on the planes inside ``cluster_wave`` [um] -- what
+    #: flag_spaxel_clusters must find and propagate_cluster_flags must remove
+    cluster_dither: int = 0
+    cluster_center: tuple[int, int] = (0, 0)
+    cluster_radius: float = 0.0
+    cluster_wave: tuple[float, float] = (0.0, 0.0)
+    cluster_value: float = 0.0
 
     # -- rendering -----------------------------------------------------------
-    def plane(self, size: int, pix_arcsec: float, wave_um: float) -> np.ndarray:
-        """One (size, size) surface-brightness image [MJy/sr] at ``wave_um``."""
+    def cluster_mask(self, size: int) -> np.ndarray:
+        """The (size, size) footprint of the bad cluster: deliberately not circular."""
+        yy, xx = np.mgrid[:size, :size]
+        cy, cx = self.cluster_center
+        pa = np.radians(30.0)
+        u = (xx - cx) * np.cos(pa) + (yy - cy) * np.sin(pa)
+        v = -(xx - cx) * np.sin(pa) + (yy - cy) * np.cos(pa)
+        a = max(float(self.cluster_radius), 1e-6)
+        return (u / a) ** 2 + (v / (a / 3.0)) ** 2 <= 1.0
+
+    def plane(self, size: int, pix_arcsec: float, wave_um: float, dither: int | None = None) -> np.ndarray:
+        """One (size, size) surface-brightness image [MJy/sr] at ``wave_um``; ``dither``
+        selects dither-specific content (the bad cluster of ``cluster_dither``)."""
         yy, xx = np.mgrid[:size, :size]
         c_x = (size - 1) / 2.0 + self.offset_x_arcsec / pix_arcsec
         c_y = (size - 1) / 2.0 + self.offset_y_arcsec / pix_arcsec
@@ -163,11 +190,14 @@ class MockScene:
             img += peak * (1.0 + boost) * psf
         if self.hot_pixel is not None:
             img[self.hot_pixel] += self.hot_value
+        if (self.cluster_dither and dither == self.cluster_dither
+                and self.cluster_wave[0] <= wave_um <= self.cluster_wave[1]):
+            img[self.cluster_mask(size)] += self.cluster_value
         return img
 
-    def cube(self, wave_um: np.ndarray, size: int, pix_arcsec: float) -> np.ndarray:
+    def cube(self, wave_um: np.ndarray, size: int, pix_arcsec: float, dither: int | None = None) -> np.ndarray:
         """The full (nwave, size, size) scene cube [MJy/sr], with optional noise."""
-        data = np.stack([self.plane(size, pix_arcsec, float(w)) for w in np.asarray(wave_um)])
+        data = np.stack([self.plane(size, pix_arcsec, float(w), dither) for w in np.asarray(wave_um)])
         if self.noise > 0:
             data = data + np.random.default_rng(self.seed).normal(0.0, self.noise, data.shape)
         return data.astype("f4")
@@ -192,6 +222,13 @@ class MockScene:
             "JWFMKHV": (self.hot_value, "mock scene: hot pixel value [MJy/sr]"),
             "JWFMKNS": (self.noise, "mock scene: noise sigma [MJy/sr]"),
             "JWFMKSD": (self.seed, "mock scene: noise seed"),
+            "JWFMKCD": (self.cluster_dither, "mock scene: bad cluster dither (0: none)"),
+            "JWFMKCY": (self.cluster_center[0], "mock scene: bad cluster centre y [px]"),
+            "JWFMKCX": (self.cluster_center[1], "mock scene: bad cluster centre x [px]"),
+            "JWFMKCR": (self.cluster_radius, "mock scene: bad cluster semi-major [px]"),
+            "JWFMKC1": (self.cluster_wave[0], "mock scene: bad cluster wave min [um]"),
+            "JWFMKC2": (self.cluster_wave[1], "mock scene: bad cluster wave max [um]"),
+            "JWFMKCV": (self.cluster_value, "mock scene: bad cluster value [MJy/sr]"),
         }
 
     @classmethod
@@ -217,6 +254,11 @@ class MockScene:
             hot_value=float(hdr.get("JWFMKHV", 0.0)),
             noise=float(hdr.get("JWFMKNS", 0.0)),
             seed=int(hdr.get("JWFMKSD", 0)),
+            cluster_dither=int(hdr.get("JWFMKCD", 0)),
+            cluster_center=(int(hdr.get("JWFMKCY", 0)), int(hdr.get("JWFMKCX", 0))),
+            cluster_radius=float(hdr.get("JWFMKCR", 0.0)),
+            cluster_wave=(float(hdr.get("JWFMKC1", 0.0)), float(hdr.get("JWFMKC2", 0.0))),
+            cluster_value=float(hdr.get("JWFMKCV", 0.0)),
         )
 
 
@@ -302,6 +344,15 @@ def _base_header(*, instrument: str, detector: str, exp_type: str, program: int,
     return hdr
 
 
+#: The default NIRSpec mock scene: a bright edge-on disk over a faint sky with one gas-line
+#: halo per grating and a hot pixel. The hot pixel stays a clear outlier but below the disk's
+#: *smoothed* peak, so it cannot dominate the disk_mask normalisation (in real data the
+#: many-plane median and dither averaging dilute single hot detector pixels the same way).
+#: ``dataclasses.replace(DEFAULT_NIRSPEC_SCENE, cluster_dither=2, ...)`` adds a bad cluster.
+DEFAULT_NIRSPEC_SCENE = MockScene(background=1.0, disk_peak=1000.0, point_flux_jy=0.0, hot_value=3000.0,
+                                  lines=((2.1218, 400.0), (3.2970, 300.0)), line_width_um=0.03)
+
+
 def nirspec_ifu_observation(
     *,
     program: int = 1751,
@@ -328,11 +379,7 @@ def nirspec_ifu_observation(
     (H2 1-0 S(1) in G235H, H I Pf-delta in G395H) and one hot pixel.
     """
     if scene is None:
-        # hot pixel stays a clear outlier but below the disk's *smoothed* peak, so it
-        # cannot dominate the disk_mask normalisation (in real data the many-plane
-        # median and dither averaging dilute single hot detector pixels the same way)
-        scene = MockScene(background=1.0, disk_peak=1000.0, point_flux_jy=0.0, hot_value=3000.0,
-                          lines=((2.1218, 400.0), (3.2970, 300.0)), line_width_um=0.03)
+        scene = DEFAULT_NIRSPEC_SCENE
     obs = MockObservation(program, observation, target_id, scene)
     exposure = 0
     for grating, filt in gratings:
@@ -532,6 +579,91 @@ def write_observation(raw_dir: Path, *observations: MockObservation,
     return written
 
 
+# --------------------------------------------------------------------------- the mock IFU detector
+
+
+def mock_cal_layout(hdr: Any) -> dict[str, Any] | None:
+    """The detector layout of a mock NIRSpec cal file, or None for other exposures.
+
+    Rows are the flattened spaxels (``row = iy * size + ix``), columns the
+    planes of *this detector's half* of the band (NRS1: the blue half, NRS2:
+    the red half -- ``planes = (lo, hi)`` in the band's plane numbering).
+    Returns ``size``, ``pix``, the band ``wave`` grid [um], ``planes`` and the
+    detector ``shape``.
+    """
+    if str(hdr.get("EXP_TYPE", "")).upper() != "NRS_IFU":
+        return None
+    grating, filt = str(hdr["GRATING"]).upper(), str(hdr["FILTER"]).upper()
+    lo_um, hi_um = NRS_GRATINGS[(grating, filt)]
+    nwave, size, pix = int(hdr["JWFMKNW"]), int(hdr["JWFMKSZ"]), float(hdr["JWFMKPX"])
+    half = nwave // 2
+    planes = (0, half) if str(hdr["DETECTOR"]).upper() == "NRS1" else (half, nwave)
+    return {"size": size, "pix": pix, "wave": np.linspace(lo_um, hi_um, nwave), "planes": planes,
+            "shape": (size * size, planes[1] - planes[0])}
+
+
+def mock_cal_wcs(hdr: Any) -> Any:
+    """A ``gwcs`` for the mock detector layout: (x, y) -> (RA, Dec, wavelength [um]).
+
+    The sky part is the very TAN projection the stub cubes carry (centre
+    TARG_RA/TARG_DEC, ``JWFMKPX`` arcsec per spaxel), so a detector pixel
+    maps back onto exactly the cube spaxel it renders; the bounding box
+    covers the detector. Serialises with the datamodel (ASDF extension).
+    """
+    from astropy import units as u
+    from astropy.coordinates import ICRS
+    from astropy.modeling import models
+    from gwcs import WCS
+    from gwcs import coordinate_frames as cf
+
+    layout = mock_cal_layout(hdr)
+    if layout is None:
+        raise ValueError("mock_cal_wcs: not a mock NIRSpec IFU exposure")
+    size, pix, wave = layout["size"], layout["pix"], layout["wave"]
+    lo, hi = layout["planes"]
+    n_spax = size * size
+    idx = np.arange(n_spax)
+    iy, ix = np.divmod(idx, size)
+    y_to_ix = models.Tabular1D(points=idx.astype(float), lookup_table=ix.astype(float), bounds_error=False,
+                               fill_value=np.nan, name="y_to_ix")
+    y_to_iy = models.Tabular1D(points=idx.astype(float), lookup_table=iy.astype(float), bounds_error=False,
+                               fill_value=np.nan, name="y_to_iy")
+    step = float(wave[1] - wave[0])
+    x_to_wave = models.Shift(lo) | models.Scale(step) | models.Shift(float(wave[0]))
+    centre = (size - 1) / 2.0
+    sky = ((models.Shift(-centre) & models.Shift(-centre)) | (models.Scale(-pix / 3600.0) & models.Scale(pix / 3600.0))
+           | models.Pix2Sky_TAN() | models.RotateNative2Celestial(float(hdr["TARG_RA"]), float(hdr["TARG_DEC"]), 180.0))
+    forward = models.Mapping((1, 1, 0)) | (y_to_ix & y_to_iy & x_to_wave) | (sky & models.Identity(1))
+    detector = cf.Frame2D(name="detector", axes_order=(0, 1), unit=(u.pix, u.pix))
+    world = cf.CompositeFrame([cf.CelestialFrame(name="sky", reference_frame=ICRS(), axes_order=(0, 1)),
+                               cf.SpectralFrame(name="spectral", axes_order=(2,), unit=(u.micron,),
+                                                axes_names=("wavelength",))], name="world")
+    wcs = WCS([(detector, forward), (world, None)])
+    wcs.bounding_box = ((-0.5, hi - lo - 0.5), (-0.5, n_spax - 0.5))
+    return wcs
+
+
+def _mock_flagged_voxels(cal: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """(plane, iy, ix) of the OUTLIER-flagged detector pixels of a mock cal file (None: no layout).
+
+    Only the OUTLIER bit (what ``propagate_cluster_flags`` sets) is honoured:
+    ``DO_NOT_USE`` alone (the gap edges of ``flag_frames``) is ignored on
+    purpose, so the mock cubes stay fully sampled.
+    """
+    from astropy.io import fits
+
+    with fits.open(cal) as hdul:
+        hdr = hdul[0].header
+        layout = mock_cal_layout(hdr)
+        if layout is None or "DQ" not in hdul or hdul["DQ"].data.shape != layout["shape"]:
+            return None
+        dq = np.asarray(hdul["DQ"].data)
+    rows, cols = np.nonzero(dq & 16)   # OUTLIER
+    size, (lo, _) = layout["size"], layout["planes"]
+    iy, ix = np.divmod(rows, size)
+    return cols + lo, iy, ix
+
+
 # --------------------------------------------------------------------------- stub pipelines
 
 
@@ -608,7 +740,10 @@ class StubSpec2(Step):
     ``steps.bkg_subtract.skip`` is false, the members' sky (their scene
     background) is subtracted from the science scene, and ``JWFBKGN`` records
     how many backgrounds were used -- so a test can assert the association
-    logic actually wired the dedicated sky observation in.
+    logic actually wired the dedicated sky observation in. NIRSpec IFU cal
+    files get the mock detector layout (:func:`mock_cal_layout`: the scene
+    rendered as one pixel per spaxel and plane) and its ``gwcs``
+    (:func:`mock_cal_wcs`), like ``assign_wcs`` would attach one.
     """
 
     name = "calwebb_spec2"
@@ -637,12 +772,27 @@ class StubSpec2(Step):
         hdr["JWFBKGN"] = (len(backgrounds) if subtract else 0, "stub spec2: background members subtracted")
         hdr["DATAMODL"] = "ImageModel"
         out = ctx.output_dir / f"{_strip_suffix(sci.stem)}_cal.fits"
+        layout = mock_cal_layout(hdr)
+        if layout is not None:
+            # the IFU detector: rows = spaxels, columns = this detector's planes, scene-rendered
+            lo, hi = layout["planes"]
+            scene = MockScene.from_header(hdr)
+            planes = scene.cube(layout["wave"][lo:hi], layout["size"], layout["pix"], dither=int(hdr.get("PATT_NUM", 1)))
+            data = np.ascontiguousarray(planes.reshape(hi - lo, -1).T)
         fits.HDUList([
             fits.PrimaryHDU(header=hdr),
             fits.ImageHDU(data.astype("f4"), name="SCI"),
             fits.ImageHDU(np.full_like(data, 0.01, dtype="f4"), name="ERR"),
             fits.ImageHDU(np.zeros(data.shape, dtype="u4"), name="DQ"),
         ]).writeto(out, overwrite=True)
+        if layout is not None:
+            from stdatamodels.jwst import datamodels
+
+            tmp = out.with_name(out.stem + ".wcs.tmp.fits")
+            with datamodels.open(out) as model:
+                model.meta.wcs = mock_cal_wcs(hdr)
+                model.save(str(tmp))
+            tmp.replace(out)
         ctx.log.info("stub spec2: %s -> %s (%d background member(s))", src.name, out.name, len(backgrounds))
         return [out]
 
@@ -656,6 +806,13 @@ class StubSpec3(Step):
     is false a matching aperture-summed ``_x1d.fits`` is written per cube,
     like the official pipeline would. Cubes are IFUCubeModels with the same
     WCS/photometry metadata the contributed steps read from real cubes.
+
+    Like ``cube_build``, the scene is rendered *per dither* (the members'
+    PATT_NUM) and averaged over the dithers; voxels whose detector pixel is
+    OUTLIER-flagged in a member cal file (:func:`_mock_flagged_voxels`) are
+    left out of that dither, so flags set by ``propagate_cluster_flags``
+    remove a dither's bad cluster from the combined cube exactly as the real
+    drizzle would, and a single-dither cube shows NaN there.
     """
 
     name = "calwebb_spec3"
@@ -670,10 +827,9 @@ class StubSpec3(Step):
         from astropy.io import fits
 
         (asn,) = inputs
-        members = _member_paths(asn, "science")
+        members, product = self._members_and_product(asn)
         if not members:
             raise ValueError(f"association {asn.name} has no science members")
-        product = _product_name(asn)
         headers = [fits.getheader(m) for m in members]
         first = headers[0]
         scene = MockScene.from_header(first)
@@ -688,9 +844,12 @@ class StubSpec3(Step):
             for grating, filt in configs:
                 lo, hi = NRS_GRATINGS[(grating, filt)]
                 name = f"{product}-{filt.lower()}" if not product.endswith(filt.lower()) else product
+                band_members = [m for m, h in zip(members, headers)
+                                if (str(h["GRATING"]), str(h["FILTER"])) == (grating, filt)]
                 outputs += self._write_band(ctx, name, scene, first, nwave, size, pix, lo, hi,
                                             instrument="NIRSPEC", grating=grating, filt=filt,
-                                            n_members=len(members), x1d=write_x1d, cal_steps=cal_steps)
+                                            n_members=len(members), x1d=write_x1d, cal_steps=cal_steps,
+                                            members=band_members)
         else:
             covered: set[tuple[str, str]] = set()
             for h in headers:
@@ -705,9 +864,46 @@ class StubSpec3(Step):
                 pix_band = pix * MRS_PIX_ARCSEC[channel] / MRS_PIX_ARCSEC["1"]
                 outputs += self._write_band(ctx, name, scene, first, nwave, size, pix_band, lo, hi,
                                             instrument="MIRI", channel=channel, band=band,
-                                            n_members=len(members), x1d=write_x1d, cal_steps=cal_steps)
+                                            n_members=len(members), x1d=write_x1d, cal_steps=cal_steps,
+                                            members=list(members))
         ctx.log.info("stub spec3: %s -> %d product(s)", asn.name, len(outputs))
         return outputs
+
+    def _members_and_product(self, src: Path) -> tuple[list[Path], str]:
+        """Science members and product base name of an association file."""
+        return _member_paths(src, "science"), _product_name(src)
+
+    @staticmethod
+    def _render(scene: MockScene, wave: np.ndarray, size: int, pix: float, members: list[Path],
+                ) -> tuple[np.ndarray, tuple[int, int]]:
+        """The band cube: the scene per dither, minus OUTLIER-flagged voxels, averaged over
+        the dithers; plus the plane range the members' detectors cover."""
+        import warnings
+
+        from astropy.io import fits
+
+        by_dither: dict[int, list[Path]] = {}
+        covered: list[tuple[int, int]] = []
+        for m in members:
+            hdr = fits.getheader(m)
+            by_dither.setdefault(int(hdr.get("PATT_NUM", 1)), []).append(m)
+            layout = mock_cal_layout(hdr)
+            covered.append(layout["planes"] if layout is not None else (0, len(wave)))
+        stack = []
+        for dither, files in sorted(by_dither.items()):
+            cube = scene.cube(wave, size, pix, dither=dither).astype(float)
+            for m in files:
+                voxels = _mock_flagged_voxels(m)
+                if voxels is not None and voxels[0].size:
+                    k, iy, ix = voxels
+                    ok = k < cube.shape[0]
+                    cube[k[ok], iy[ok], ix[ok]] = np.nan
+            stack.append(cube)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*Mean of empty slice.*")
+            data = np.nanmean(np.stack(stack), axis=0)
+        lo, hi = min(c[0] for c in covered), max(c[1] for c in covered)
+        return data.astype("f4"), (lo, hi)
 
     def _apply_background(self, scene: MockScene, headers: list[Any], ctx: RunContext,
                           **params: Any) -> tuple[MockScene, dict[str, str]]:
@@ -719,11 +915,16 @@ class StubSpec3(Step):
                     size: int, pix: float, lo: float, hi: float, *, instrument: str,
                     grating: str | None = None, filt: str | None = None, channel: str | None = None,
                     band: str | None = None, n_members: int, x1d: bool,
-                    cal_steps: dict[str, str] | None = None) -> list[Path]:
+                    cal_steps: dict[str, str] | None = None, members: list[Path] | None = None) -> list[Path]:
         from stdatamodels.jwst import datamodels
 
         wave = np.linspace(lo, hi, nwave)
-        data = scene.cube(wave, size, pix)
+        if members:
+            data, (k_lo, k_hi) = self._render(scene, wave, size, pix, members)
+            wave, data = wave[k_lo:k_hi], data[k_lo:k_hi]   # only the planes the members' detectors cover
+            nwave = len(wave)
+        else:
+            data = scene.cube(wave, size, pix)
         area_sr = (pix / 206265.0) ** 2
         cube = datamodels.IFUCubeModel(data=data, err=np.full_like(data, 0.01), dq=np.zeros(data.shape, "u4"))
         cube.meta.instrument.name = instrument
@@ -797,6 +998,29 @@ class StubSpec3WithBackground(StubSpec3):
         return replace(scene, background=max(0.0, scene.background - measured)), {"master_background": "COMPLETE"}
 
 
+class StubCubeBuild(StubSpec3):
+    """Stand-in for the ``cube_build`` step on its own: one cube per association *or* cal file.
+
+    Same rendering as :class:`StubSpec3` (per dither, OUTLIER voxels left
+    out), under the ``cube_build`` identity. Per-dither associations
+    (``group_by: [..., PATT_NUM]``) give the per-dither cubes the bad-cluster
+    chain inspects; a single cal file gives ``<base>_<grating>-<filter>_s3d.fits``
+    over that detector's half of the band, like the real step. Accepts and
+    ignores ``coord_system``/``weighting``.
+    """
+
+    name = "cube_build"
+    inputs = ("*_asn.json", "*_cal.fits")
+
+    def _members_and_product(self, src: Path) -> tuple[list[Path], str]:
+        if src.suffix == ".json":
+            return super()._members_and_product(src)
+        from astropy.io import fits
+
+        hdr = fits.getheader(src)
+        return [src], f"{_strip_suffix(src.stem)}_{str(hdr['GRATING']).lower()}"
+
+
 class StubImage2(StubSpec2):
     """Stand-in for calwebb_image2: one ``_cal.fits`` per level-2 association.
 
@@ -859,6 +1083,7 @@ DEFAULT_STUBS: dict[str, type[Step]] = {
     "spec2": StubSpec2,
     "spec3": StubSpec3,
     "spec3_with_background": StubSpec3WithBackground,
+    "cube_build": StubCubeBuild,
     "image2": StubImage2,
     "image3": StubImage3,
 }

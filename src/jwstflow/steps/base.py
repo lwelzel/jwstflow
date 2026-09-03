@@ -157,6 +157,9 @@ CONTRIB_ALIASES: dict[str, str] = {
     "stitch_segments": "jwstflow.stitching:StitchSegments",
     "psf_cube": "jwstflow.contrib.psf:PsfCube",
     "qa_psf_cube": "jwstflow.contrib.psf:QaPsfCube",
+    "flag_spaxel_clusters": "jwstflow.clusters:FlagSpaxelClusters",
+    "propagate_cluster_flags": "jwstflow.clusters:PropagateClusterFlags",
+    "qa_spaxel_clusters": "jwstflow.contrib.clusters:QaSpaxelClusters",
 }
 
 ALIAS_ASN_TYPE: dict[str, str] = {

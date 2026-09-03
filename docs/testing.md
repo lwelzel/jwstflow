@@ -54,8 +54,16 @@ observations** — the heart of the strategy, built on
   the `gaia_offset`/`wcs_offset` astrometry loop closes offline. MRS band
   cubes use the real per-channel spaxel scales (0.13–0.35 arcsec), so
   PSF-scaled apertures and sky annuli behave as on real cubes.
+* NIRSpec mock cal files carry a tiny but faithful **IFU detector layout**
+  with a real `gwcs` (`mock_cal_layout` / `mock_cal_wcs`: rows = spaxels,
+  columns = the detector's half of the band's planes), and the cube stubs
+  leave OUTLIER-flagged voxels out of a dither, so the bad-cluster chain
+  (`cube_build` per dither -> `flag_spaxel_clusters` ->
+  `propagate_cluster_flags`) is tested end to end: a cluster injected into
+  one dither of the scene (`MockScene.cluster_*`) must be found, traced back
+  to the right detector pixels, and be gone from the final cube.
 * The official pipelines are replaced by **scene-faithful stubs**
-  (`StubDetector1/StubSpec2/StubSpec3/StubImage2/StubImage3`) that keep the
+  (`StubDetector1/StubSpec2/StubSpec3/StubCubeBuild/StubImage2/StubImage3`) that keep the
   interfaces exact:
   same stage names and directories, same DMS product names (`cube_build`'s
   band suffix included), consuming the same association files, honouring
@@ -74,7 +82,7 @@ Who tests what at level 3:
 
 | repo | workflow under test | focus |
 |---|---|---|
-| jwstflow | `tests/data/mini_nirspec.yaml` | engine end to end: process pool, associations, DMS naming, resume, `--only`, graph rendering |
+| jwstflow | `tests/data/mini_nirspec.yaml` | engine end to end: process pool, associations, DMS naming, resume, `--only`, graph rendering, the bad-cluster chain |
 | jwstflow-midas | `tests/data/nirspec_ifu_mock.yaml` (mirrors the production NIRSpec YAML) | the disk chain: flag_frames → pass-1 cubes → disk_mask → in_field_background → background-aware spec3 → extract_extended → stitch + QA |
 | jwstflow-joys | `tests/data/miri_mrs_mock.yaml` (mirrors the production MIRI YAML) | the MRS chain: the simultaneous-imager astrometry loop (image2/image3 stubs → gaia_offset on a local truth catalogue → wcs_offset on the rates, closing on an injected pointing error) → band cubes → on/off annulus extraction → defringe → clean → per-aperture stitch_bands → LSRK + QA |
 | jwstflow-reducer | **the production YAMLs themselves** | the dress rehearsal: `nirspec_ifu.yaml`, `miri_mrs.yaml` and `combine_nirspec_miri.yaml` unmodified (two mock-specific `--set`-style overrides), full product tree, flux recovery, cross-instrument 1.7–28 µm combine, cached reruns |
