@@ -6,6 +6,8 @@ The format follows the principles of [Keep a Changelog](https://keepachangelog.c
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-29
+
 The repository currently identifies the development version as `0.1.0`. Until the first public release is tagged, release-preparation changes should remain in this section. At release time, move the relevant entries into a versioned section and add the release date.
 
 ### Added
