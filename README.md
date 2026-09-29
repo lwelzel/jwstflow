@@ -138,6 +138,7 @@ jwstflow validates the declaration at import, the parameters at config load,
 and the outputs after every run (custom steps can never masquerade as
 official products); `jwstflow new-step` scaffolds a step with a passing test
 and `jwstflow.testing` runs steps on synthetic data without CRDS or real
+observations.
 
 ## Citing
 
