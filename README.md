@@ -11,7 +11,7 @@
 jwstflow (pronounced <i>"justflow"</i>) orchestrates the official STScI <a href="https://github.com/spacetelescope/jwst"><code>jwst</code></a>
 calibration pipeline and automates everything around it: data, references, execution, provenance.</p>
 
-<img src="docs/jwstflow_logo.png" alt="jwstflow logo" width="240" align="left" hspace="18">
+<img src="https://raw.githubusercontent.com/lwelzel/jwstflow/main/docs/jwstflow_logo.png" alt="jwstflow logo" width="240" align="left" hspace="18">
 
 You describe your reduction in one YAML file; the target, where its data
 comes from, and the pipeline stages with their parameters, and jwstflow
@@ -29,7 +29,11 @@ defend, with every calibration decision one visible line of YAML.
 What a reduction looks like, in one (simplified) picture:
 
 <p align="center">
-  <a href="docs/overview_dag.png"><img src="docs/overview_dag.png" alt="a simplified jwstflow workflow with its capabilities annotated" width="100%"></a>
+  <a href="https://github.com/lwelzel/jwstflow/blob/main/docs/overview_dag.png">
+    <img src="https://raw.githubusercontent.com/lwelzel/jwstflow/main/docs/overview_dag.png"
+         alt="a simplified jwstflow workflow with its capabilities annotated"
+         width="100%">
+  </a>
 </p>
 
 Every run starts by drawing its own version of this figure, with the
@@ -39,11 +43,11 @@ so you can inspect what a workflow does before and after it runs.
 ## Installation
 
 ```bash
-uv pip install git+https://github.com/lwelzel/jwstflow   # core: jwstflow + the official jwst pipeline
+uv add jwstflow  # core: jwstflow + the official jwst pipeline
 ```
 The `psf` extra (`"jwstflow[psf]"`) adds [stpsf](https://stpsf.readthedocs.io)
 for the `psf_cube` step -- per-observation PSF cubes for model comparison
-(see [docs/psf_cubes.md](docs/psf_cubes.md)).
+(see [docs/psf_cubes.md](https://github.com/lwelzel/jwstflow/blob/main/docs/psf_cubes.md)).
 Contributed step packages are separate distributions that register their steps
 with jwstflow on install -- add the ones you have access to:
 ```bash
@@ -51,7 +55,7 @@ uv pip install jwstflow-midas                                  # public contribu
 uv pip install git+ssh://git@github.com/<org>/jwstflow-joys    # proprietary, e.g. JOYS+
 ```
 Your reductions live in a project repository of their own that depends on
-jwstflow (see [docs/guide.md](docs/guide.md), "Projects, targets, runs").
+jwstflow (see [docs/guide.md](https://github.com/lwelzel/jwstflow/blob/main/docs/guide.md), "Projects, targets, runs").
 
 Put your credentials in the project root (they are found automatically):
 `.env.crds` with `CRDS_PATH=...`, and `CRDS_SERVER_URL=...`, as well as `.env.mast` with `MAST_API_TOKEN=...`
@@ -112,8 +116,9 @@ Start from a preset (`extends: preset:nirspec_ifu`; also `nirspec_mos`,
 | `init [preset]` | write a starter workflow |
 
 Everything is also a Python API (`load_config`, `Runner`); see
-[docs/guide.md](docs/guide.md) for the run model, naming rules, the full YAML
-reference, associations, checkpointing and parallelism.
+[docs/guide.md](https://github.com/lwelzel/jwstflow/blob/main/docs/guide.md) 
+for the run model, naming rules, the full YAML reference, 
+associations, checkpointing and parallelism.
 
 ## Custom steps
 
@@ -162,6 +167,6 @@ Issues and contributions are welcome; run `python -m pytest` before a PR
 `scripts/test-all.sh` runs every sibling repo's suite from a flat checkout).
 The testing strategy -- unit steps, engine semantics, and complete mock
 ESO-Ha 569 workflows through the real engine with stubbed official pipelines
-(`jwstflow.testing.mock`) -- is described in [docs/testing.md](docs/testing.md).
+(`jwstflow.testing.mock`) -- is described in [docs/testing.md](https://github.com/lwelzel/jwstflow/blob/main/docs/testing.md).
 
-License: BSD 3-Clause (see [LICENSE](LICENSE)).
+License: BSD 3-Clause (see [LICENSE](https://github.com/lwelzel/jwstflow/blob/main/LICENSE)).
