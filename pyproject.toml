@@ -2,6 +2,7 @@
 name = "jwstflow"
 version = "0.2.0"
 description = "Lightweight YAML-driven orchestrator for the official JWST calibration pipeline (NIRSpec + MIRI)."
+readme = "README.md"
 authors = [
     { name = "Lukas Welzel", email = "welzel@strw.leidenuniv.nl" }
 ]
@@ -43,6 +44,11 @@ dependencies = [
 # (plus the stpsf data files: $STPSF_PATH, or stpsf downloads them on first use).
 [project.optional-dependencies]
 psf = ["stpsf>=2.0"]
+
+[project.urls]
+Homepage = "https://github.com/lwelzel/jwstflow"
+Repository = "https://github.com/lwelzel/jwstflow"
+Issues = "https://github.com/lwelzel/jwstflow/issues"
 
 [project.scripts]
 jwstflow = "jwstflow.cli:app"
