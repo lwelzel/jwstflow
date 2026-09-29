@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: >-
+  If you use jwstflow in research, please cite this software and also cite
+  the version of the official JWST calibration pipeline used in your
+  analysis. Record the JWST pipeline version and CRDS context associated
+  with the reduction where relevant.
+title: jwstflow
+type: software
+authors:
+  - given-names: Lukas
+    family-names: Welzel
+    email: welzel@strw.leidenuniv.nl
+    affiliation: Leiden Observatory, Leiden University
+version: 0.1.0
+license: BSD-3-Clause
+repository-code: https://github.com/lwelzel/jwstflow
+url: https://github.com/lwelzel/jwstflow
+abstract: >-
+  jwstflow is a lightweight, YAML-driven orchestrator for the official
+  James Webb Space Telescope calibration pipeline. It coordinates data
+  acquisition, CRDS reference handling, association construction,
+  pipeline and custom-step execution, checkpointing, parallel execution,
+  provenance, product organization, and quality-assurance tasks to make
+  JWST reductions easier to reproduce and share.
+keywords:
+  - astronomy
+  - JWST
+  - data reduction
+  - calibration pipeline
+  - reproducible workflows
+  - NIRSpec
+  - MIRI
