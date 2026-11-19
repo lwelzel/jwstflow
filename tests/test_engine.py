@@ -234,3 +234,44 @@ def test_task_ids_are_stable_and_sensitive():
     assert tid != make_task_id(**{**base, "parameters": {"k": 2}})
     assert tid != make_task_id(**{**base, "env_signature": {"jwst": "3.1"}})
     assert tid != make_task_id(**{**base, "fingerprints": {"/a": "9:9", "/b": "3:4"}})
+
+
+def test_a_step_declares_that_it_needs_the_reference_products(tmp_path: Path, steps_registry):
+    """The engine asks the step, not its name: `needs_reference_products` makes the run wait for the
+    background download of the MAST products before the stage starts (mast_compare sets it)."""
+    from jwstflow.qa.steps import MastCompare
+    from jwstflow.steps import Step
+
+    class ReadsTheArchive(Step):
+        needs_reference_products = True
+
+        def run(self, inputs, ctx, **params):  # pragma: no cover
+            return []
+
+    assert MastCompare.needs_reference_products and not Step.needs_reference_products
+    register_step("reads_the_archive", ReadsTheArchive)
+    try:
+        cfg = base_config(tmp_path, [
+            {"step": "reads_the_archive", "inputs": [{"stage": "raw", "pattern": "*.txt"}]},
+            {"step": "make_copies", "inputs": [{"stage": "raw", "pattern": "*.txt"}]},
+            {"step": "mast_compare", "inputs": [{"stage": "raw", "pattern": "*.txt"}]},
+            {"step": "spec2", "inputs": [{"stage": "raw", "pattern": "*.txt"}]},
+        ])
+        runner = Runner(cfg, dry_run=True)
+        assert [runner.needs_reference(st) for st in cfg.stages] == [True, False, True, False]
+    finally:
+        _REGISTRY.pop("reads_the_archive", None)
+
+
+def test_the_cli_reports_the_installed_version():
+    """`jwstflow --version` works without a command and prints the version of the distribution."""
+    from importlib.metadata import version
+
+    from typer.testing import CliRunner
+
+    import jwstflow
+    from jwstflow.cli import app
+
+    result = CliRunner().invoke(app, ["--version"])
+    assert result.exit_code == 0 and result.output.strip() == f"jwstflow {version('jwstflow')}"
+    assert jwstflow.__version__ == version("jwstflow")

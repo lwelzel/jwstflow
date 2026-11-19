@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 from typing import Any
 
 from ..steps import (
@@ -11,6 +12,7 @@ from ..steps import (
     check_declaration,
     is_stpipe_step,
     resolve_target,
+    source_origin,
 )
 
 
@@ -20,22 +22,26 @@ def check_step(spec: str | type | Any) -> tuple[dict[str, Any], list[str]]:
     Checks: the spec imports; it is a jwstflow Step, an stpipe Step, or a
     callable; a Step's declaration (name, level, batch, inputs, outputs, Params)
     is valid; ``run`` has the ``(inputs, ctx, **params)`` shape; keyword
-    parameters of ``run`` are consistent with ``Params`` when both exist.
+    parameters of ``run`` are consistent with ``Params`` when both exist. For
+    a step addressed by name or dotted path, also that the address leads to
+    the module that *defines* the step, not to one that re-exports it.
     """
     problems: list[str] = []
     try:
         target = resolve_target(spec) if isinstance(spec, str) else spec
     except Exception as exc:
         return {"spec": str(spec)}, [f"cannot import {spec!r}: {exc}"]
+    if isinstance(spec, str):
+        problems += _check_address(spec, target)
     if is_stpipe_step(target):
         return {"spec": str(spec), "kind": "stpipe", "object": f"{target.__module__}.{target.__name__}",
-                "class_alias": getattr(target, "class_alias", None)}, []
+                "class_alias": getattr(target, "class_alias", None)}, problems
     if isinstance(target, Step):
         cls: Any = type(target)
     elif inspect.isclass(target) and issubclass(target, Step):
         cls = target
     elif callable(target):
-        return _check_function(target, spec)
+        return _check_function(target, spec, problems)
     else:
         return {"spec": str(spec)}, [f"{spec!r} is neither a jwstflow Step, an stpipe Step nor a function"]
     problems += check_declaration(cls)
@@ -59,8 +65,24 @@ def check_step(spec: str | type | Any) -> tuple[dict[str, Any], list[str]]:
     return desc, problems
 
 
-def _check_function(func: Any, spec: Any) -> tuple[dict[str, Any], list[str]]:
-    problems: list[str] = []
+def _check_address(spec: str, target: Any) -> list[str]:
+    """A name or dotted path must lead to the file that defines the step: that file is what
+    jwstflow hashes into the task ids (so an edit reruns the step) and reads the description
+    from. An entry point naming a package that merely re-exports the class defeats both."""
+    obj = target if inspect.isclass(target) or inspect.isfunction(target) else type(target)
+    try:
+        defined = inspect.getsourcefile(obj)
+    except (TypeError, OSError):  # builtins, classes made in a session: nothing to compare
+        return []
+    origin = source_origin(spec)
+    if origin is None or defined is None or Path(defined).resolve() == Path(origin).resolve():
+        return []
+    return [f"{spec!r} is addressed through {origin}, but {obj.__name__} is defined in {defined}: name the "
+            f"defining module (its file is hashed into the task ids and read for the description)"]
+
+
+def _check_function(func: Any, spec: Any, problems: list[str] | None = None) -> tuple[dict[str, Any], list[str]]:
+    problems = list(problems or [])
     names = [p.name for p in inspect.signature(func).parameters.values()]
     if names[:2] != ["inputs", "ctx"]:
         problems.append(f"a step function must be f(inputs, ctx, **params), got ({', '.join(names)})")

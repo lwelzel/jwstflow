@@ -392,6 +392,18 @@ class Runner:
         origin = origin.resolve()
         return any(d == origin.parent or d in origin.parents for d in self._plugin_dirs)
 
+    def needs_reference(self, stage: StageConfig) -> bool:
+        """True when the stage's step declares `needs_reference_products`: it reads MAST's own
+        products, so the stage must not start before their background download has finished."""
+        if stage.step in BUILTIN_ALIASES:
+            return False
+        try:
+            target = resolve_target(stage.step)
+        except Exception as exc:  # unresolvable steps fail later with a proper message
+            log.debug("cannot resolve %s to read its declaration: %s", stage.step, exc)
+            return False
+        return bool(getattr(target, "needs_reference_products", False))
+
     def batch_mode(self, stage: StageConfig) -> str:
         """'per_file' or 'all': the YAML value if given, else the step's own `batch`
         attribute (jwst steps and pipelines are always per_file)."""
@@ -474,7 +486,7 @@ class Runner:
 
     # -------------------------------------------------------------- execution
     def run_stage(self, stage: StageConfig, tasks: list[Task] | None = None) -> StageSummary:
-        if stage.name.startswith("mast_compare"):
+        if self.needs_reference(stage):
             self.wait_for_reference()
         tasks = self.plan_stage(stage) if tasks is None else tasks
         if self.task_filter:

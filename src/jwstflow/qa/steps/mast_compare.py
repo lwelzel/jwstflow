@@ -54,6 +54,7 @@ class MastCompare(Step):
 
     level = "qa"
     version = "3"   # 2 -> 3: logarithmic wavelength axis on the spectrum figure
+    needs_reference_products = True   # the run waits for the background download of the MAST products
 
     def run(self, inputs: list[Path], ctx: RunContext, *, reference_dir: str | None = None,
             plot: bool = True, **params: Any) -> list[Path]:

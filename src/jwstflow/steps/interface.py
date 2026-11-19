@@ -153,6 +153,10 @@ class Step(ABC):
     #: official names (a DQ-flagged ``_cal``, a WCS-shifted ``_rate``); everything else must use
     #: its own suffix. Record the edit in the header when you set this.
     writes_official_products: ClassVar[bool] = False
+    #: Only for steps that read MAST's own products of the run (``ctx.reference_dir``, fetched in the
+    #: background when ``download.reference_products`` is on): the run waits for that download to
+    #: finish before the stage starts.
+    needs_reference_products: ClassVar[bool] = False
     #: Optional pydantic model describing ``parameters:`` (subclass of :class:`StepParams`).
     Params: ClassVar[type[Any] | None] = None
 
@@ -240,7 +244,8 @@ class FunctionStep(Step):
     (``f.level = 2``, ``f.outputs = ("s1d",)``, ``f.writes_official_products = True``, ...).
     """
 
-    DECLARATION = ("batch", "level", "name", "inputs", "outputs", "version", "writes_official_products", "Params")
+    DECLARATION = ("batch", "level", "name", "inputs", "outputs", "version", "writes_official_products",
+                   "needs_reference_products", "Params")
 
     def __init__(self, func: Callable[..., Any]):
         self.func = func

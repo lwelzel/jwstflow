@@ -61,11 +61,15 @@ def _load(config: Path, overrides: list[str] | None) -> Config:
         raise typer.Exit(2) from None
 
 
-@app.callback()
-def _main(version: Annotated[bool, typer.Option("--version", help="Show version and exit.")] = False) -> None:
+@app.callback(invoke_without_command=True)
+def _main(ctx: typer.Context,
+          version: Annotated[bool, typer.Option("--version", help="Show version and exit.")] = False) -> None:
     if version:
         console.print(f"jwstflow {__version__}")
         raise typer.Exit()
+    if ctx.invoked_subcommand is None:   # options but no command
+        console.print(ctx.get_help())
+        raise typer.Exit(2)
 
 
 # ---------------------------------------------------------------------------

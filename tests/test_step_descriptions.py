@@ -117,3 +117,16 @@ def test_step_describe_carries_both():
     d = Documented.describe()
     assert d["doc"] == "Sum the flux."
     assert d["description"] == "Every plane is summed."
+
+
+def test_check_step_tells_when_an_address_is_not_the_defining_module(tmp_path: Path):
+    """An entry point (or dotted path) through a re-exporting module would fingerprint the wrong file."""
+    from jwstflow.testing import check_step
+
+    for name in BUNDLED_STEPS:                                  # jwstflow's own registrations are clean
+        _, problems = check_step(name)
+        assert problems == [], (name, problems)
+    _, problems = check_step("jwstflow.cubes.psf:PsfCube")            # the package re-exports the class from psf/steps.py
+    assert len(problems) == 1 and "defined in" in problems[0] and "steps.py" in problems[0]
+    _, problems = check_step("jwstflow.cubes.psf.steps:PsfCube")
+    assert problems == []
