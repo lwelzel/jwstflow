@@ -212,6 +212,25 @@ def test_a_log_axis_without_positive_data_falls_back_to_linear(tmp_path):
     assert ax.get_yscale() == "linear"
 
 
+def test_a_flat_spectrum_on_a_log_axis_gets_a_bounded_number_of_ticks(tmp_path):
+    """A (nearly) constant curve leaves a view a few 1e-9 wide before the limits are set; a minor
+    tick step fixed from that view asked for billions of ticks once the limits were widened."""
+    wave = np.linspace(5.0, 6.5, 200)
+    plot = qa.Spectrum(xscale="log", yscale="log")
+    plot.line(wave, np.full(200, 1.0) + 1e-9 * np.arange(200) / 200, label="flat")
+    plot.decorate(ylabel=qa.FLUX_LABEL)
+    qa.finalize(plot.fig)
+    lo, hi = plot.ax.get_ylim()
+    assert lo < 0.7 and hi > 1.5                                 # the robust limits, set before the ticks were chosen
+    for axis in (plot.ax.yaxis, plot.ax.xaxis):
+        minor, major = axis.get_minor_locator(), axis.get_major_locator()
+        step = getattr(getattr(minor, "_edge", None), "step", None)      # a fixed step must not be finer than the view
+        assert step is None or (hi - lo) / step < 1000
+        assert 2 <= len(major.tick_values(*sorted(axis.get_view_interval()))) <= 15
+        assert len(minor.tick_values(*sorted(axis.get_view_interval()))) <= 100
+    assert qa.save(plot.fig, tmp_path / "flat.png").stat().st_size > 5_000
+
+
 def test_detect_lines_and_typeset_labels():
     wave, flux = _spectrum(lines=(4.05226,), dips=(2.20625,), lo=1.7, hi=5.3)
     found = qa.detect_lines(wave, flux)

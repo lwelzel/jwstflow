@@ -256,7 +256,7 @@ def test_flags_propagate_to_exactly_the_detector_pixels_behind_the_cluster(mock_
     asn = tmp_path / "all_asn.json"
     asn.write_text(json.dumps({"products": [{"name": "jw01751-o006_t005_nirspec_g395h",
                                              "members": [{"expname": str(m), "exptype": "science"} for m in propagated]}]}))
-    (combined,) = run_step(StubSpec3, [asn], tmp_path, stage="s3")
+    (combined,) = (p for p in run_step(StubSpec3, [asn], tmp_path, stage="s3") if p.name.endswith("_s3d.fits"))
     with datamodels.open(combined) as cube:
         data = np.asarray(cube.data, float)
     k = int(flagged_planes[0])
@@ -267,7 +267,7 @@ def test_flags_propagate_to_exactly_the_detector_pixels_behind_the_cluster(mock_
     asn_raw = tmp_path / "raw_asn.json"
     asn_raw.write_text(json.dumps({"products": [{"name": "jw01751-o006_t005_nirspec_g395h",
                                                  "members": [{"expname": str(m), "exptype": "science"} for m in cals]}]}))
-    (dirty,) = run_step(StubSpec3, [asn_raw], tmp_path, stage="s3raw")
+    (dirty,) = (p for p in run_step(StubSpec3, [asn_raw], tmp_path, stage="s3raw") if p.name.endswith("_s3d.fits"))
     with datamodels.open(dirty) as cube:
         assert float(cube.data[k][11, 4]) > truth[11, 4] + 200
 

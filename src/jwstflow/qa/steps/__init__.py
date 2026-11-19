@@ -12,11 +12,13 @@ and :class:`jwstflow.qa.Frame`:
 * :mod:`.psf` -- PSF cubes (:mod:`jwstflow.cubes.psf`): ``qa_psf_cube``
 * :mod:`.clusters` -- bad spaxel clusters (:mod:`jwstflow.cubes.clusters`): ``qa_spaxel_clusters``
 * :mod:`.gaps` -- the NIRSpec detector gap (:mod:`jwstflow.cubes.gaps`): ``qa_gap_coverage``
+* :mod:`.cube_stitch` -- joint cubes (:mod:`jwstflow.cubes.stitching`): ``qa_cube_stitch``
 * :mod:`.mast_compare` -- ``mast_compare``: jwstflow's products against the archive's own
 * :mod:`.summary` -- ``header_summary`` (a table, not a figure)
 """
 
 from .clusters import QaSpaxelClusters
+from .cube_stitch import QaCubeStitch
 from .cubes import QaCubeSlices, QaCubeSummary
 from .gaps import QaGapCoverage
 from .images import QuicklookImage
@@ -36,6 +38,7 @@ __all__ = [
     "PlotStitchBackground",
     "PlotStitchOverlaps",
     "QaCubeSlices",
+    "QaCubeStitch",
     "QaCubeSummary",
     "QaGapCoverage",
     "QaPsfCube",

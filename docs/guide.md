@@ -139,7 +139,7 @@ hash covers direct edits, but not edits to helper modules.
 
 ## Shared step contracts
 
-Two product shapes recur across instruments and packages, so their layout is
+Some product shapes recur across instruments and packages, so their layout is
 fixed in core and plugins build on them instead of inventing variants:
 
 * **Mask products** (`jwstflow.cubes.masks`): wavelength-resolved spatial masks for
@@ -216,6 +216,86 @@ fixed in core and plugins build on them instead of inventing variants:
     tags: [qa]
   ```
 
+* **Joint cubes** (`jwstflow.cubes.stitching`): the band cubes of one
+  instrument -- the gratings of a NIRSpec IFU observation, the twelve bands
+  of an MRS observation -- joined along wavelength into one cube
+  (`*_s3dcomb.fits`), by the rules of the spectrum stitch and with every
+  number left where the pipeline measured it:
+
+  * *one spatial grid*: the finest spaxel scale among the bands over the
+    union of their fields (for the MRS the 0.13" spaxels of channel 1 over
+    the field of channel 4), on the pixel lattice of the finest band;
+  * *no spectral resampling*: bands are ordered blue to red and the cube
+    switches from one to the next at a crossover (default: the midpoint of
+    their overlap); every plane is one plane of one band at its own
+    wavelength, and the wavelength axis is the table of those wavelengths
+    (`CTYPE3 = 'WAVE-TAB'`, as in the official multi-band cubes);
+  * *overlap ratios as for spectra*: for each neighbouring pair the flux of
+    both bands is measured over one region of sky -- where both are complete
+    and the source stands out, whole sources only: a bright object the edge
+    of the field cuts is held differently by each band and is left out --
+    as the excess over the level of the field
+    in each plane (the cube counterpart of an on/off extraction), and the
+    ratio is taken in the window around the crossover with its propagated
+    uncertainty (the same function `stitch_segments` uses,
+    `jwstflow.spectra.overlaps`). Always recorded; with `rescale` applied as
+    one factor per band, chained onto a reference band, its uncertainty
+    folded into ERR. The level of the field in both bands is recorded next
+    to it: two bands rarely agree in it, the difference is additive, and no
+    factor removes it. Such a factor is well defined for a bright, compact
+    source (it is then the factor of a stitched aperture spectrum of the
+    same data, to about a percent, for NIRSpec gratings and MRS bands
+    alike); for a faint or extended source it depends on where it is
+    measured -- there `scales_from` adopts the scales of one stitched
+    spectrum of the same data instead, or the bands are left as calibrated;
+  * *positions checked, not adjusted*: each band is placed by its own WCS,
+    and for every crossover the two bands are registered against each other
+    at the same wavelengths (one window around the bright core they share,
+    scale and level free); the shift is recorded. Two NIRSpec gratings agree
+    to a few milliarcseconds; MRS bands differ by tens, and the joint cube
+    carries that.
+
+  The segments follow one another in wavelength (one lying inside another's
+  range is refused) and a crossover lies inside the overlap of its pair, so
+  no wavelength a band holds is left out.
+
+  `cube_build` gives every band a grid of its own, so finished band cubes
+  never share a pixel lattice. `stitch_cubes` takes them as they are and
+  resamples those that are off the joint lattice with the overlap areas
+  between spaxels as weights -- exact, flux-conserving, nothing interpolated
+  -- but that is a second resampling and costs resolution (the three
+  sub-bands of an MRS channel sit up to three quarters of a spaxel apart).
+  The better way is to build the band cubes on the joint grid in the first
+  place: `cube_build_matched` is the official `cube_build` with the grid
+  prescribed (the joint grid of the cubes in `grid_from`, handed over as
+  `scalexy`, `ra_center`, `dec_center`, `nspax_x`, `nspax_y`). It drizzles
+  the detector pixels of every band once, straight onto the common grid,
+  and `stitch_cubes` then copies spaxels; on the lattice of the reference
+  band its cube is the pipeline's own, value for value. The product says
+  for every band which way it came (SEGMENTS: `identity` or `regridded`):
+
+  ```yaml
+  - step: cube_build_matched           # -> stage3/cube_build_matched
+    inputs: [{stage: calwebb_spec3, pattern: "*_crf.fits"}]     # what the band cubes were built from
+    association: {mode: group, level: 3, asn_type: spec3, group_by: [PROGRAM, OBSERVTN, GRATING, FILTER],
+                  product_name: "jw{PROGRAM}-o{OBSERVTN}_{TARGID}_nirspec_{GRATING}"}
+    parameters: {grid_from: "${run_dir}/stage3/calwebb_spec3"}
+  - step: stitch_cubes                 # -> stage4/stitch_cubes
+    inputs: [{stage: cube_build_matched, pattern: "*_s3d.fits"}]
+    parameters: {crossovers: [2.890], rescale: true}
+  - step: qa_cube_stitch
+    inputs: [{stage: stitch_cubes, pattern: "*_s3dcomb.fits"}]
+    tags: [qa]
+  ```
+
+  (For the MRS: one association for all bands, `group_by: [PROGRAM,
+  OBSERVTN]`, after the same `pixel_replace` the band cubes had.) The joint
+  cube is an `IFUCubeModel` followed by the records of the stitch (SEGMENTS,
+  OVERLAPS, the region spectra and images of every overlap), so it opens
+  like any `_s3d` cube, the stock cube figures read it, and
+  `qa_cube_stitch` draws the join, the overlaps and the positions from the
+  product alone.
+
 Extraction steps additionally share `jwstflow.cubes.apcorr`: the CRDS
 aperture-correction reference (MIRI MRS and NIRSpec IFU layouts) normalised
 to one plain-array table and evaluated per plane, so contributed extraction
@@ -255,12 +335,13 @@ jwstflow/
 
                 -- science, by the kind of data: a toolkit for step authors, plus the bundled features
   spectra/      1-D spectra: the x1d format (x1d.py), line and band datasets (features.py),
-                the stitching contract and its step (stitching.py)
+                overlap ratios and chained scales (overlaps.py), the stitching contract and
+                its step (stitching.py)
   cubes/        IFU cubes: WCS and regridding (wcs.py), the detector pixels behind a cube
                 (detector.py), image operations (morphology.py), instrument matching
                 (instrument.py), the mask-product contract (masks.py), aperture corrections
-                (apcorr.py); psf/, clusters/ and gaps/, each with its library, its product
-                and its steps.py
+                (apcorr.py); psf/, clusters/, gaps/ and stitching/ (joint cubes), each with
+                its library, its product and its steps.py
   qa/           the QA figure standard; qa/steps/ holds every QA step
 
                 -- tools around it
@@ -276,8 +357,8 @@ jwstflow/
 ```
 cli · testing · scaffold                            tools: may import anything below
 
-engine              qa.steps · cubes.psf · cubes.clusters · cubes.gaps · spectra.stitching    the features
-   |                qa · cubes · spectra                                                      the toolkits
+engine              qa.steps · cubes.psf · cubes.clusters · cubes.gaps · cubes.stitching · spectra.stitching    the features
+   |                qa · cubes · spectra                                                                        the toolkits
    |                     |
    +------> data <-------+           files and headers, MAST, target positions
               |
@@ -298,7 +379,8 @@ The two columns never import each other:
 * Within a domain, the toolkit does not depend on the features built with it
   (`cubes/wcs.py` knows nothing of `cubes/psf/`), and no feature imports
   another: what two of them need moves into the toolkit (`cubes/detector.py`
-  serves both `clusters` and `gaps`). Only the QA steps look across -- they
+  serves both `clusters` and `gaps`, `spectra/overlaps.py` the stitch of
+  spectra and the stitch of cubes). Only the QA steps look across -- they
   draw the products of the others.
 
 **Where a step is defined.**
@@ -306,10 +388,14 @@ The two columns never import each other:
 * A data step lives with the feature it implements: `stitch_segments` in
   `jwstflow.spectra.stitching`, `psf_cube` in `jwstflow.cubes.psf.steps`, the
   cluster steps in `jwstflow.cubes.clusters.steps`, `flag_gap_outliers` in
-  `jwstflow.cubes.gaps.steps`, `fix_msa_metafile` in `jwstflow.data.msa`.
+  `jwstflow.cubes.gaps.steps`, `stitch_cubes` in
+  `jwstflow.cubes.stitching.steps` and `cube_build_matched` -- a subclass of
+  the official `cube_build`, so a module of its own that imports jwst -- in
+  `jwstflow.cubes.stitching.matched`, `fix_msa_metafile` in
+  `jwstflow.data.msa`.
 * Every QA step lives in `jwstflow.qa.steps`, one module per kind of product
-  (`spectra`, `stitch`, `images`, `cubes`, `psf`, `clusters`, `gaps`,
-  `mast_compare`, `summary`).
+  (`spectra`, `stitch`, `images`, `cubes`, `cube_stitch`, `psf`, `clusters`,
+  `gaps`, `mast_compare`, `summary`).
 
 jwstflow registers its own steps the way any step package does: as
 `jwstflow.steps` entry points in `pyproject.toml`, and nowhere else. Each
@@ -326,7 +412,9 @@ from jwstflow.steps.naming import derived_name, slug
 from jwstflow.spectra import Spectrum1D, read_x1d, write_x1d
 from jwstflow.spectra.features import feature_windows
 from jwstflow.spectra.stitching import StitchSegments
+from jwstflow.spectra.overlaps import measure_overlap_ratio, chain_scales
 from jwstflow.cubes import celestial_wcs, cube_wavelengths, write_mask_product, load_apcorr
+from jwstflow.cubes.stitching import SpatialGrid, joint_grid, Placement
 from jwstflow.cubes.psf import PsfCubeProduct
 from jwstflow.data.targets import resolve_source
 ```
@@ -349,9 +437,10 @@ target id taken from MAST at download time, so cubes come out named exactly as
 in the archive. Custom steps derive names with `jwstflow.steps.naming.derived_name()`
 and may not use a suffix the pipeline reserves (`_x1d`, `_s3d`, `_cal`, …);
 jwstflow's own product types are `_s1d` (extracted spectra), `_s1dcomb`
-(stitched), `_bkgspec` (background spectra), `_lsr`, `_psfcube` (PSF
-cubes), `_clustermask` (bad spaxel clusters of a per-dither cube) and
-`_gapcov` (coverage at the NIRSpec detector gap). Edited copies of an official product (a DQ-flagged `_cal`) keep the
+(stitched spectra), `_s3dcomb` (joint cubes), `_bkgspec` (background
+spectra), `_lsr`, `_psfcube` (PSF cubes), `_clustermask` (bad spaxel
+clusters of a per-dither cube) and `_gapcov` (coverage at the NIRSpec
+detector gap). Edited copies of an official product (a DQ-flagged `_cal`) keep the
 official name and record the edit in the header.
 
 ## Data products shipped with jwstflow

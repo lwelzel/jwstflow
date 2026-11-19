@@ -22,16 +22,19 @@ Three pieces:
   observation log (the source of the DMS target id).
 
 * **Stub pipelines** -- :class:`StubDetector1`, :class:`StubSpec2`,
-  :class:`StubSpec3` and :class:`StubCubeBuild` mimic the official pipelines' *interfaces*: same stage
+  :class:`StubSpec3`, :class:`StubCubeBuild`, :class:`StubCubeBuildMatched` and
+  :class:`StubPixelReplace` mimic the official pipelines' *interfaces*: same stage
   names (``calwebb_detector1`` ...), same product names (``_rate``, ``_cal``,
   DMS level-3 cube names with the band appended), consuming the same
   association files, honouring the parameters that shape the data flow
   (``steps.extract_1d.skip``, background members, ``background_dir``).
   The data they write is synthesised from the scene keywords: ``spec2``
   subtracts the sky of associated background members like ``bkg_subtract``
-  would, ``spec3`` renders the scene into IFU cubes, and
-  ``spec3_with_background`` subtracts the measured ``*_bkgspec.fits`` sky
-  like ``master_background`` would. NIRSpec cal files carry a tiny but
+  would, ``spec3`` renders the scene into IFU cubes (and leaves its
+  ``_crf`` exposures next to them), ``spec3_with_background`` subtracts the
+  measured ``*_bkgspec.fits`` sky like ``master_background`` would, and
+  ``cube_build_matched`` renders every band on the joint grid of the cubes
+  in ``grid_from``, for ``stitch_cubes`` to join. NIRSpec cal files carry a tiny but
   faithful IFU *detector layout* with a real ``gwcs``: one detector pixel
   per (spaxel, plane) of the detector's half of the band (rows = spaxels,
   columns = planes; :func:`mock_cal_wcs`), so DQ flags set on a cal file
@@ -80,9 +83,11 @@ from .scene import MockScene
 from .stubs import (
     DEFAULT_STUBS,
     StubCubeBuild,
+    StubCubeBuildMatched,
     StubDetector1,
     StubImage2,
     StubImage3,
+    StubPixelReplace,
     StubSpec2,
     StubSpec3,
     StubSpec3WithBackground,
@@ -91,12 +96,32 @@ from .stubs import (
 from .workflow import offline_overrides, run_mock_workflow
 
 __all__ = [
-    "MockScene", "MockExposure", "MockObservation",
-    "nirspec_ifu_observation", "miri_mrs_observation", "write_observation",
-    "star_field", "write_gaia_catalog",
-    "StubDetector1", "StubSpec2", "StubSpec3", "StubSpec3WithBackground",
-    "StubCubeBuild", "StubImage2", "StubImage3", "mock_cal_layout", "mock_cal_wcs",
     "DEFAULT_NIRSPEC_SCENE",
-    "stub_pipelines", "offline_overrides", "run_mock_workflow",
-    "NRS_GRATINGS", "MRS_BANDS", "MRS_DETECTOR_CHANNELS", "MRS_PIX_ARCSEC", "DEFAULT_STUBS",
+    "DEFAULT_STUBS",
+    "MRS_BANDS",
+    "MRS_DETECTOR_CHANNELS",
+    "MRS_PIX_ARCSEC",
+    "NRS_GRATINGS",
+    "MockExposure",
+    "MockObservation",
+    "MockScene",
+    "StubCubeBuild",
+    "StubCubeBuildMatched",
+    "StubDetector1",
+    "StubImage2",
+    "StubImage3",
+    "StubPixelReplace",
+    "StubSpec2",
+    "StubSpec3",
+    "StubSpec3WithBackground",
+    "miri_mrs_observation",
+    "mock_cal_layout",
+    "mock_cal_wcs",
+    "nirspec_ifu_observation",
+    "offline_overrides",
+    "run_mock_workflow",
+    "star_field",
+    "stub_pipelines",
+    "write_gaia_catalog",
+    "write_observation",
 ]

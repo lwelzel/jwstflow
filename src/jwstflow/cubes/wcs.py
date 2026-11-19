@@ -31,6 +31,32 @@ def celestial_wcs(cube: Any) -> Any:
     return WCS(hdr).celestial
 
 
+def celestial_wcs_from_header(header: Any) -> Any:
+    """Celestial (2-D) WCS from the header of a cube extension, whatever its spectral axis is.
+
+    Only the keywords of the two celestial axes are read, so a cube whose
+    wavelength axis is tabular (``CTYPE3 = 'WAVE-TAB'``: astropy cannot build
+    its WCS from the header alone) works like a linear one.
+    """
+    from astropy.io import fits
+    from astropy.wcs import WCS
+
+    hdr = fits.Header()
+    for i in (1, 2):
+        hdr[f"CTYPE{i}"] = header[f"CTYPE{i}"]
+        hdr[f"CRVAL{i}"] = header[f"CRVAL{i}"]
+        hdr[f"CRPIX{i}"] = header[f"CRPIX{i}"]
+        hdr[f"CUNIT{i}"] = header.get(f"CUNIT{i}") or "deg"
+        if f"CDELT{i}" in header:
+            hdr[f"CDELT{i}"] = header[f"CDELT{i}"]
+        for j in (1, 2):
+            for name in (f"PC{i}_{j}", f"CD{i}_{j}"):
+                if name in header:
+                    hdr[name] = header[name]
+    hdr["NAXIS"] = 2
+    return WCS(hdr).celestial
+
+
 def cube_wavelengths(cube: Any) -> np.ndarray:
     """Wavelength [um] of every plane of an ``IFUCubeModel`` (linear WCS or wavetable)."""
     wavetable = getattr(cube, "wavetable", None)
@@ -39,6 +65,22 @@ def cube_wavelengths(cube: Any) -> np.ndarray:
     n = cube.data.shape[0]
     w = cube.meta.wcsinfo
     return w.crval3 + (np.arange(n) + 1 - w.crpix3) * w.cdelt3
+
+
+def hdu_wavelengths(hdul: Any, ext: str = "SCI") -> np.ndarray:
+    """Wavelength [um] of every plane of an open cube FITS file: the ``WCS-TABLE`` extension when
+    it holds one value per plane (jwst writes it for every cube), else the linear WCS of ``ext``."""
+    n = int(hdul[ext].data.shape[0])
+    if "WCS-TABLE" in hdul and hdul["WCS-TABLE"].data is not None:
+        names = {name.lower(): name for name in hdul["WCS-TABLE"].data.names}
+        if "wavelength" in names:
+            wave = np.asarray(hdul["WCS-TABLE"].data[names["wavelength"]], dtype=float).ravel()
+            if wave.size == n:
+                return wave
+    header = hdul[ext].header
+    if "CDELT3" not in header or "CRVAL3" not in header:
+        raise ValueError(f"{ext} has neither a wavelength table nor a linear wavelength axis")
+    return float(header["CRVAL3"]) + (np.arange(n) + 1 - float(header.get("CRPIX3", 1.0))) * float(header["CDELT3"])
 
 
 def pixel_map(src_wcs: Any, dst_wcs: Any, dst_shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:

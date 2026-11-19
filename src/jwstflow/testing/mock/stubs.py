@@ -43,7 +43,7 @@ def _product_name(asn_path: Path) -> str:
 
 
 def _strip_suffix(stem: str) -> str:
-    return re.sub(r"_(uncal|rate|cal)$", "", stem)
+    return re.sub(r"_(uncal|rate|cal|crf)$", "", stem)
 
 
 def _skip_requested(steps_params: Any, step_name: str, default: bool) -> bool:
@@ -171,6 +171,12 @@ class StubSpec3(Step):
     left out of that dither, so flags set by ``propagate_cluster_flags``
     remove a dither's bad cluster from the combined cube exactly as the real
     drizzle would, and a single-dither cube shows NaN there.
+
+    Like the real stage it also leaves the exposures its cubes were built
+    from next to them: one ``_crf.fits`` per member (the cal file as it is
+    after ``outlier_detection``, named ``<exposure>_o<obs>_crf.fits``), with
+    the sky this stage subtracted taken off the scene it carries -- what
+    ``cube_build_matched`` rebuilds the cubes from.
     """
 
     name = "calwebb_spec3"
@@ -178,9 +184,10 @@ class StubSpec3(Step):
     batch = "per_file"
     inputs = ("*_asn.json",)
     writes_official_products = True
-    version = "1"
+    version = "2"   # 1 -> 2: leaves the _crf files
+    #: whether the stage leaves ``_crf`` files (the pipeline does; ``cube_build`` alone does not)
+    leaves_crf = True
 
-    #: subtract this much sky before rendering (set by StubSpec3WithBackground)
     def run(self, inputs: list[Path], ctx: RunContext, **params: Any) -> list[Path]:
         from astropy.io import fits
 
@@ -195,7 +202,7 @@ class StubSpec3(Step):
         nwave = int(first["JWFMKNW"])
         size = int(first["JWFMKSZ"])
         pix = float(first["JWFMKPX"])
-        outputs: list[Path] = []
+        outputs: list[Path] = self._write_crf(ctx, members, headers, scene, cal_steps) if self.leaves_crf else []
         write_x1d = not _skip_requested(params.get("steps"), "extract_1d", True)
         if str(first["INSTRUME"]).upper() == "NIRSPEC":
             configs = sorted({(str(h["GRATING"]), str(h["FILTER"])) for h in headers})
@@ -204,7 +211,8 @@ class StubSpec3(Step):
                 name = f"{product}-{filt.lower()}" if not product.endswith(filt.lower()) else product
                 band_members = [m for m, h in zip(members, headers)
                                 if (str(h["GRATING"]), str(h["FILTER"])) == (grating, filt)]
-                outputs += self._write_band(ctx, name, scene, first, nwave, size, pix, lo, hi,
+                band_size, band_pix = self._grid(size, pix, None, **params)
+                outputs += self._write_band(ctx, name, scene, first, nwave, band_size, band_pix, lo, hi,
                                             instrument="NIRSPEC", grating=grating, filt=filt,
                                             n_members=len(members), x1d=write_x1d, cal_steps=cal_steps,
                                             members=band_members)
@@ -216,11 +224,8 @@ class StubSpec3(Step):
             for channel, band in sorted(covered):
                 lo, hi = MRS_BANDS[(channel, band)]
                 name = f"{product}_ch{channel}-{band.lower()}"
-                # the header pix scale is the channel-1 value; later channels grow like
-                # the real cube_build grids (0.13 -> 0.35 arcsec), so PSF-scaled
-                # apertures and sky annuli stay inside the (small) mock FOV
-                pix_band = pix * MRS_PIX_ARCSEC[channel] / MRS_PIX_ARCSEC["1"]
-                outputs += self._write_band(ctx, name, scene, first, nwave, size, pix_band, lo, hi,
+                band_size, pix_band = self._grid(size, pix, channel, **params)
+                outputs += self._write_band(ctx, name, scene, first, nwave, band_size, pix_band, lo, hi,
                                             instrument="MIRI", channel=channel, band=band,
                                             n_members=len(members), x1d=write_x1d, cal_steps=cal_steps,
                                             members=list(members))
@@ -230,6 +235,33 @@ class StubSpec3(Step):
     def _members_and_product(self, src: Path) -> tuple[list[Path], str]:
         """Science members and product base name of an association file."""
         return _member_paths(src, "science"), _product_name(src)
+
+    def _grid(self, size: int, pix: float, channel: str | None, **params: Any) -> tuple[int, float]:
+        """Spatial size [px] and spaxel scale [arcsec] of a band cube, like ``cube_build`` chooses
+        them: the mock field as it is for NIRSpec; for the MRS the header scale is the channel-1
+        value and later channels grow like the real grids (0.13 -> 0.35 arcsec), so PSF-scaled
+        apertures and sky annuli stay inside the (small) mock FOV."""
+        if channel is None:
+            return size, pix
+        return size, pix * MRS_PIX_ARCSEC[channel] / MRS_PIX_ARCSEC["1"]
+
+    @staticmethod
+    def _write_crf(ctx: RunContext, members: list[Path], headers: list[Any], scene: MockScene,
+                   cal_steps: dict[str, str]) -> list[Path]:
+        """The members as ``calwebb_spec3`` leaves them after outlier detection: ``_crf`` copies,
+        carrying the scene with the background this stage subtracted (and its record)."""
+        from astropy.io import fits
+
+        out: list[Path] = []
+        for member, header in zip(members, headers):
+            dst = ctx.output_dir / f"{_strip_suffix(member.stem)}_o{header.get('OBSERVTN', '001')!s}_crf.fits"
+            with fits.open(member) as hdul:
+                hdul[0].header["JWFMKBG"] = float(scene.background)
+                if cal_steps.get("master_background") == "COMPLETE":
+                    hdul[0].header["S_MSBSUB"] = "COMPLETE"
+                hdul.writeto(dst, overwrite=True)
+            out.append(dst)
+        return out
 
     @staticmethod
     def _render(scene: MockScene, wave: np.ndarray, size: int, pix: float, members: list[Path],
@@ -251,7 +283,9 @@ class StubSpec3(Step):
         for dither, files in sorted(by_dither.items()):
             cube = scene.cube(wave, size, pix, dither=dither).astype(float)
             for m in files:
-                voxels = _mock_flagged_voxels(m)
+                # flags live on the mock detector, one pixel per spaxel of the native field: a cube
+                # of another size (a matched grid wider than the field) cannot place them
+                voxels = _mock_flagged_voxels(m) if size == int(fits.getheader(m).get("JWFMKSZ", size)) else None
                 if voxels is not None and voxels[0].size:
                     k, iy, ix = voxels
                     ok = k < cube.shape[0]
@@ -369,6 +403,7 @@ class StubCubeBuild(StubSpec3):
 
     name = "cube_build"
     inputs = ("*_asn.json", "*_cal.fits")
+    leaves_crf = False
 
     def _members_and_product(self, src: Path) -> tuple[list[Path], str]:
         if src.suffix == ".json":
@@ -377,6 +412,54 @@ class StubCubeBuild(StubSpec3):
 
         hdr = fits.getheader(src)
         return [src], f"{_strip_suffix(src.stem)}_{str(hdr['GRATING']).lower()}"
+
+
+class StubCubeBuildMatched(StubCubeBuild):
+    """Stand-in for ``cube_build_matched``: every band cube of an association on the joint grid.
+
+    Like the real step it reads the band cubes in ``grid_from`` (``grid_pattern``), takes
+    their joint grid -- the finest spaxel scale over the union of their fields
+    (:func:`jwstflow.cubes.stitching.joint_grid_of`) -- and renders the scene of its members
+    on that grid for every band, so the cubes share one pixel lattice and ``stitch_cubes``
+    copies them. Fails like the real step when ``grid_from`` is missing or empty.
+    """
+
+    name = "cube_build_matched"
+    inputs = ("*_asn.json", "*_crf.fits", "*_cal.fits", "*_pixelreplacestep.fits")
+
+    def _grid(self, size: int, pix: float, channel: str | None, *, grid_from: str | None = None,
+              grid_pattern: str = "*_s3d.fits", **params: Any) -> tuple[int, float]:
+        from ...cubes.stitching import joint_grid_of
+
+        if not grid_from:
+            raise ValueError("cube_build_matched needs `grid_from`: the directory of the band cubes that define the grid")
+        cubes = sorted(Path(grid_from).glob(grid_pattern))
+        if not cubes:
+            raise FileNotFoundError(f"no {grid_pattern} in {grid_from}")
+        grid = joint_grid_of(cubes)
+        return max(grid.shape), grid.scale
+
+
+class StubPixelReplace(Step):
+    """Stand-in for the official ``pixel_replace`` step on its own: one exposure in, the same
+    exposure out under the name the step gives it (``<exposure>_pixelreplacestep.fits``) --
+    the mock detector has no bad pixels to fill. Accepts and ignores ``algorithm``."""
+
+    name = "pixel_replace"
+    level = 3
+    batch = "per_file"
+    inputs = ("*_crf.fits", "*_cal.fits")
+    writes_official_products = True
+    version = "1"
+
+    def run(self, inputs: list[Path], ctx: RunContext, **params: Any) -> list[Path]:
+        import shutil
+
+        (src,) = inputs
+        out = ctx.output_dir / f"{_strip_suffix(src.stem)}_pixelreplacestep.fits"
+        shutil.copy2(src, out)
+        ctx.log.info("stub pixel_replace: %s -> %s", src.name, out.name)
+        return [out]
 
 
 class StubImage2(StubSpec2):
@@ -442,6 +525,8 @@ DEFAULT_STUBS: dict[str, type[Step]] = {
     "spec3": StubSpec3,
     "spec3_with_background": StubSpec3WithBackground,
     "cube_build": StubCubeBuild,
+    "cube_build_matched": StubCubeBuildMatched,
+    "jwst.step:PixelReplaceStep": StubPixelReplace,
     "image2": StubImage2,
     "image3": StubImage3,
 }

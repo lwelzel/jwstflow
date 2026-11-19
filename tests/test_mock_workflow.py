@@ -151,6 +151,8 @@ def test_mini_workflow_end_to_end(tmp_path: Path):
     assert by_stage["flag_spaxel_clusters"].success == 1  # batch=all
     assert by_stage["propagate_cluster_flags"].success == 12
     assert by_stage["calwebb_spec3"].success == 2       # one association per grating
+    assert by_stage["cube_build_matched"].success == 2  # both gratings once more, on one grid
+    assert by_stage["stitch_cubes"].success == 1        # batch=all: one joint cube
     assert by_stage["psf_cube"].success == 2            # one PSF cube per grating cube
 
     run = cfg.run_dir
@@ -163,6 +165,12 @@ def test_mini_workflow_end_to_end(tmp_path: Path):
         "qa/qa_spaxel_clusters/jw01751-o006_t005_nirspec_g395h-f290lp_mock-blob_clusters.png",
         "stage3/calwebb_spec3/jw01751-o006_t005_nirspec_g235h-f170lp_s3d.fits",
         "stage3/calwebb_spec3/jw01751-o006_t005_nirspec_g395h-f290lp_x1d.fits",
+        "stage3/calwebb_spec3/jw01751006001_02101_00001_nrs1_o006_crf.fits",
+        "stage3/cube_build_matched/jw01751-o006_t005_nirspec_g395h-f290lp_s3d.fits",
+        "stage4/stitch_cubes/jw01751-o006_t005_nirspec_s3dcomb.fits",
+        "qa/qa_cube_stitch/jw01751-o006_t005_nirspec_s3dcomb_spectrum.png",
+        "qa/qa_cube_stitch/jw01751-o006_t005_nirspec_s3dcomb_overlaps.png",
+        "qa/qa_cube_stitch/jw01751-o006_t005_nirspec_s3dcomb_positions.png",
         "stage4/psf_cube/jw01751-o006_t005_nirspec_g235h-f170lp_psfcube.fits",
         "qa/qa_psf_cube/jw01751-o006_t005_nirspec_g235h-f170lp_psfcube.png",
         "qa/quicklook_image/jw01751-o006_t005_nirspec_g235h-f170lp_s3d.png",
@@ -219,6 +227,23 @@ def test_mini_workflow_end_to_end(tmp_path: Path):
     truth = DEFAULT_NIRSPEC_SCENE.plane(21, 0.1, float(masks[2]["waves"][20]))
     assert dirty[20, 14, 6] > truth[14, 6] + 400                    # the per-dither cube shows the cluster
     assert np.allclose(final[20], truth, rtol=1e-5) and np.isfinite(final[20]).all()   # the final one does not
+
+    # -- the joint cube: both gratings on one lattice, joined without resampling, the cluster gone
+    from jwstflow.cubes.stitching import read_joint_records
+
+    joint = run / "stage4/stitch_cubes/jw01751-o006_t005_nirspec_s3dcomb.fits"
+    rec = read_joint_records(joint)
+    assert [str(v).strip() for v in rec["segments"]["label"]] == ["g235h-f170lp", "g395h-f290lp"]
+    assert [str(v).strip() for v in rec["segments"]["placement"]] == ["identity", "identity"]
+    assert rec["header"]["JWFJCNRS"] == 0 and rec["header"]["JWFJCSCL"] == "measured"
+    assert rec["overlaps"]["ratio"][0] == pytest.approx(1.0, abs=0.02)          # one scene in both gratings
+    assert abs(rec["overlaps"]["dra"][0]) < 0.005 and abs(rec["overlaps"]["ddec"][0]) < 0.005
+    with datamodels.open(joint) as cube:
+        assert type(cube).__name__ == "IFUCubeModel" and cube.data.shape[1:] == (21, 21)
+        assert cube.data.shape[0] == int(rec["segments"]["n_planes"].sum()) < 60    # the overlap is not doubled
+        assert cube.meta.instrument.grating == "MULTIPLE" and np.isfinite(cube.data).all()
+    with datamodels.open(run / "stage3/cube_build_matched/jw01751-o006_t005_nirspec_g395h-f290lp_s3d.fits") as cube:
+        assert np.allclose(np.asarray(cube.data, float), final, rtol=1e-6)      # the matched cube is the final cube
 
     # -- resume: a second run computes nothing ---------------------------------
     summary2 = Runner(cfg, skip_download=True).run()

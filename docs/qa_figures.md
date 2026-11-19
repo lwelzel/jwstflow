@@ -261,7 +261,7 @@ marker or line style.
 | `qa.labels`, `qa.placement`, `qa.layout` | the parts of the annotation: label text and species colors and the line search; geometry along one axis; `FeatureLayout`, which places everything when the figure is saved, one method per phase |
 | `qa.plots` | **`Spectrum`** and **`Frame`** |
 | `qa.io` | `find_file`, `read_spectrum`, `read_background`, `read_cube`, `ancestor`, `short_labels` |
-| `qa.steps` | the steps shipped with jwstflow: `spectra`, `stitch`, `images`, `cubes`, `psf`, `clusters`, `gaps`, `mast_compare`, `summary` |
+| `qa.steps` | the steps shipped with jwstflow: `spectra`, `stitch`, `images`, `cubes`, `cube_stitch`, `psf`, `clusters`, `gaps`, `mast_compare`, `summary` |
 
 Everything public is importable from `jwstflow.qa` itself
 (`from jwstflow import qa`).
@@ -395,13 +395,14 @@ Guidelines that follow from the rules:
 | `plot_stitch_overlaps` | line panels | `*_s1dcomb.ecsv` | one panel per neighbouring segment pair, zoomed into their overlap (`*_overlaps.png`): both segments with error bands, the crossover, the window the factor was measured in, the bluer segment times that factor; pair and factor noted in each panel |
 | `plot_stitch_background` | spectrum | `*_s1dcomb.ecsv` | source / background / difference (`*_bkgcomp.png`), features annotated by default |
 | `quicklook_image` | frame | anything with a SCI extension | nan-median collapsed image (asinh), pixel and sky offsets from the target |
-| `qa_cube_summary` | frames + spectra | `*_s3d.fits` | median image, coverage and signal-to-noise maps; under them, over the full width, the field-integrated flux and the filled fraction of the footprint against wavelength (`*_summary.png`) |
-| `qa_cube_slices` | frames | `*_s3d.fits` | channel maps: the cube in `n_slices` wavelength bins on one display scale (`*_slices.png`) |
+| `qa_cube_summary` | frames + spectra | `*_s3d.fits`, `*_s3dcomb.fits` | median image, coverage and signal-to-noise maps; under them, over the full width, the field-integrated flux and the filled fraction of the footprint against wavelength (`*_summary.png`) |
+| `qa_cube_slices` | frames | `*_s3d.fits`, `*_s3dcomb.fits` | channel maps: the cube in `n_slices` wavelength bins on one display scale (`*_slices.png`) |
 | `qa_psf_cube` | frames + lines | `*_psfcube.fits` | PSF slices across wavelength, FWHM against the diffraction limit, in-field energy |
 | `mast_compare` | spectrum | `*_s3d` / `*_x1d` | jwstflow vs. MAST spectra and their ratio |
 | `qa_spaxel_clusters` | thumbnails | `*_clustermask.fits` | per band and region: one row per dither cube, one column per wavelength plane (`*_<region>_clusters.png`) |
 | `qa_gap_coverage` | frames | `*_gapcov.fits` | the coverage next to the NIRSpec detector gap on the sky: where all exposures stop before and after it, and how long the partially covered stretch beyond is (nm), per group of exposures |
+| `qa_cube_stitch` | spectrum, line panels, frames | `*_s3dcomb.fits` | the figures of a joint cube, from the records in the product: the flux over the field all segments cover -- the cube itself over its segments as joined, crossovers marked, features annotated (`*_spectrum.png`); one panel per neighbouring pair zoomed into the overlap, drawn like `plot_stitch_overlaps` (`*_overlaps.png`); one frame per pair, zoomed onto the source, with the bright core in both segments at the same wavelengths, the region the ratio was measured over and the measured shift between the segments tagged (`*_positions.png`); with two or more pairs those shifts against wavelength (`*_offsets.png`) |
 
 All of them live in `jwstflow.qa.steps`, one module per kind of product
-(`spectra`, `stitch`, `images`, `cubes`, `psf`, `clusters`, `gaps`,
-`mast_compare`, `summary`); workflows name them by their registered names.
+(`spectra`, `stitch`, `images`, `cubes`, `cube_stitch`, `psf`, `clusters`,
+`gaps`, `mast_compare`, `summary`); workflows name them by their registered names.

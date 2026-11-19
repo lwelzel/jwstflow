@@ -31,7 +31,9 @@ from .masks import (
 from .morphology import clean_blob, dilate, nan_smooth
 from .wcs import (
     celestial_wcs,
+    celestial_wcs_from_header,
     cube_wavelengths,
+    hdu_wavelengths,
     pixel_map,
     resample_image,
     sample_mask,
@@ -43,6 +45,7 @@ __all__ = [
     "INSTRUMENT_KEYS",
     "apcorr_factor",
     "celestial_wcs",
+    "celestial_wcs_from_header",
     "check_mask_matches",
     "clean_blob",
     "cube_wavelengths",
@@ -50,6 +53,7 @@ __all__ = [
     "dilate",
     "dq_value",
     "find_mask_product",
+    "hdu_wavelengths",
     "load_apcorr",
     "mask_from_stage",
     "matches_instrument",

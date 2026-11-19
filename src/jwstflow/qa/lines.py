@@ -176,12 +176,7 @@ def _plain_log_axis(axis: Any) -> None:
     axis.set_minor_formatter(_plain_log_formatter(minor=True))
 
     def finalize() -> None:
-        from matplotlib.ticker import (
-            FuncFormatter,
-            MaxNLocator,
-            MultipleLocator,
-            NullFormatter,
-        )
+        from matplotlib.ticker import FuncFormatter, Locator, MaxNLocator, NullFormatter
 
         if axis.get_scale() != "log":
             return
@@ -189,12 +184,30 @@ def _plain_log_axis(axis: Any) -> None:
         if vmin <= 0 or np.log10(vmax / vmin) >= 0.7:
             return
         major = MaxNLocator(nbins=9, steps=[1, 2, 2.5, 5, 10])
-        ticks = major.tick_values(vmin, vmax)
+
+        class Subdivided(Locator):
+            """Minor ticks that split the steps of the major ticks in four or five, worked out from
+            the view as it is when they are drawn -- so their number is bounded by the number of
+            major ticks whatever becomes of the limits (a fixed step, taken from a view that is
+            widened afterwards, can ask for billions of ticks)."""
+
+            def __call__(self) -> Any:
+                return self.tick_values(*sorted(self.axis.get_view_interval()))
+
+            def tick_values(self, lo: float, hi: float) -> Any:
+                ticks = major.tick_values(lo, hi)
+                if len(ticks) < 2:
+                    return np.array([])
+                spacing = float(ticks[1] - ticks[0])
+                if not spacing > 0:
+                    return np.array([])
+                mantissa = spacing / 10.0 ** np.floor(np.log10(spacing) + 1e-9)
+                parts = 4 if abs(mantissa - 2.0) < 1e-6 else 5
+                minor = float(ticks[0]) - spacing + np.arange((len(ticks) + 1) * parts + 1) * spacing / parts
+                return minor[(minor >= lo) & (minor <= hi)]
+
         axis.set_major_locator(major)
-        if len(ticks) > 1:
-            spacing = float(ticks[1] - ticks[0])
-            mantissa = spacing / 10.0 ** np.floor(np.log10(spacing) + 1e-9)
-            axis.set_minor_locator(MultipleLocator(spacing / (4 if abs(mantissa - 2.0) < 1e-6 else 5)))
+        axis.set_minor_locator(Subdivided())
         axis.set_major_formatter(FuncFormatter(lambda v, _pos: f"{v:.6g}"))
         axis.set_minor_formatter(NullFormatter())
 
@@ -214,8 +227,8 @@ def set_flux_scale(ax: Any, scale: str = "linear") -> None:
     plain-number tick labels as the wavelength axis (``0.3``, ``1``, ``3`` -- not ``3 x 10^0``)."""
     ax.set_yscale(scale)
     if scale == "log":
+        _defer(ax.figure, lambda: _robust_log_ylim(ax), early=True)   # the limits first: the ticks are chosen for them
         _plain_log_axis(ax.yaxis)
-        _defer(ax.figure, lambda: _robust_log_ylim(ax), early=True)
 
 
 def _robust_log_ylim(ax: Any, *, percentile: float = 0.5, margin: float = 1.6) -> None:

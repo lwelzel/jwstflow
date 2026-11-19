@@ -1,4 +1,4 @@
-"""QA figures of IFU cubes (``*_s3d.fits``): what is in a cube beyond its collapsed image.
+"""QA figures of IFU cubes (``*_s3d.fits``, joint ``*_s3dcomb.fits``): what is in a cube beyond its collapsed image.
 
 ``quicklook_image`` shows the nan-median of a cube and nothing else. The two
 steps here answer the questions that image cannot:
@@ -62,7 +62,7 @@ class QaCubeSummary(Step):
 
     name = "qa_cube_summary"
     level = "qa"
-    inputs = ("*_s3d.fits",)
+    inputs = ("*_s3d.fits", "*_s3dcomb.fits")
     version = "2"   # 1 -> 2: sky offsets on every map, the spectra over the full width
 
     def run(self, inputs: list[Path], ctx: RunContext, *, stretch: str = "asinh", min_coverage: float = 0.5,
@@ -151,7 +151,7 @@ class QaCubeSlices(Step):
 
     name = "qa_cube_slices"
     level = "qa"
-    inputs = ("*_s3d.fits",)
+    inputs = ("*_s3d.fits", "*_s3dcomb.fits")
     version = "2"   # 1 -> 2: pixel and sky offsets on every panel
 
     def run(self, inputs: list[Path], ctx: RunContext, *, n_slices: int = 8, width: float = 0.02,

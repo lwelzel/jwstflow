@@ -101,14 +101,14 @@ class SkyFrame:
         of ``primary``, or of ``header``) is the reference when it falls
         inside the image.
         """
-        from astropy.wcs import WCS
+        from ..cubes.wcs import celestial_wcs_from_header
 
         if header is None or "CTYPE1" not in header or "CTYPE2" not in header:
             return None
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             try:
-                wcs = WCS(header).celestial
+                wcs = celestial_wcs_from_header(header)   # the two celestial axes only: a tabular wavelength axis is no obstacle
             except Exception as exc:  # noqa: BLE001 -- a broken WCS only costs the sky axes
                 log.debug("no usable celestial WCS: %s", exc)
                 return None

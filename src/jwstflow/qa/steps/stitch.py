@@ -185,74 +185,82 @@ class PlotStitchOverlaps(Step):
             qa.annotate(axes[0][0], inp.name)
             for i in range(n_pairs):
                 ax = axes[i // ncols][i % ncols]
-                self._overlap_panel(ax, i, labels, colors, segments, crossovers[i],
-                                    None if windows[i] is None else (float(windows[i][0]), float(windows[i][1])),
-                                    None if ratios[i] is None else float(ratios[i]),
-                                    None if ratio_errors[i] is None else float(ratio_errors[i]),
-                                    xscale=xscale, yscale=yscale)
+                overlap_panel(ax, i, labels, colors, segments, crossovers[i],
+                              None if windows[i] is None else (float(windows[i][0]), float(windows[i][1])),
+                              None if ratios[i] is None else float(ratios[i]),
+                              None if ratio_errors[i] is None else float(ratio_errors[i]),
+                              xscale=xscale, yscale=yscale)
                 if i % ncols == 0:
                     ax.set_ylabel(qa.FLUX_LABEL)
                 if i // ncols == nrows - 1 or i + ncols >= n_pairs:
                     ax.set_xlabel(qa.WAVE_LABEL)
             for i in range(n_pairs, nrows * ncols):
                 axes[i // ncols][i % ncols].set_axis_off()
-            first = axes[0][0]
-            first.plot([], [], color=qa.MAIN_COLOR, label="segments as extracted (color: segment)")
-            first.fill_between([], [], [], color=qa.MAIN_COLOR, alpha=0.22, lw=0, label=qa.SIGMA_BAND_LABEL)
-            first.plot([], [], color=qa.MAIN_COLOR, ls="--", label=r"bluer segment $\times$ measured factor")
-            first.plot([], [], color=qa.REF_COLOR, lw=qa.LW["reference"], ls=":", label="crossover")
-            first.fill_between([], [], [], color=qa.ROLE_COLORS["window"], alpha=0.18, lw=0, label="ratio window")
-            frac = meta.get("ratio_window_frac")
-            qa.annotate(first,
-                           rf"window: {float(frac):g} $\times$ crossover wavelength, clipped to the overlap"
-                           if frac is not None else "")
+            overlap_legend(axes[0][0], meta.get("ratio_window_frac"))
             qa.figlegend(fig)
             out.append(qa.save(fig, ctx.output_dir / f"{inp.stem}_overlaps.png", dpi=dpi))
         return out
 
-    def _overlap_panel(self, ax: Any, i: int, labels: list[str], colors: list[Any],
-                       segments: list[tuple[np.ndarray, np.ndarray, np.ndarray] | None],
-                       crossover: float, window: tuple[float, float] | None,
-                       ratio: float | None, ratio_error: float | None, *,
-                       xscale: str, yscale: str) -> None:
-        """One neighbour pair: both segments around their overlap, crossover and ratio window."""
-        seg_a, seg_b = segments[i], segments[i + 1]
-        # the region of interest: the overlap (or the gap), padded -- always
-        # containing the crossover and the measurement window
-        edges = [crossover]
-        if seg_a is not None and seg_b is not None:
-            edges += [float(seg_b[0].min()), float(seg_a[0].max())]
-        if window is not None:
-            edges += [window[0], window[1]]
-        lo, hi = min(edges), max(edges)
-        pad = 0.75 * (hi - lo) or 0.01 * crossover
-        view = (lo - pad, hi + pad)
 
-        for seg, label, color in ((seg_a, labels[i], colors[i]), (seg_b, labels[i + 1], colors[i + 1])):
-            if seg is None:
-                continue
-            w, f, e = seg
-            show = (w >= view[0]) & (w <= view[1])
-            qa.step(ax, w[show], f[show], color=color)
-            if (show & np.isfinite(e)).any():
-                qa.error_band(ax, w[show], f[show], e[show], color=color)
-        if ratio is not None and seg_a is not None and seg_b is not None:
-            w, f, _ = seg_a
-            inside = (w >= float(seg_b[0].min())) & (w <= float(seg_a[0].max()))
-            if inside.any():
-                qa.step(ax, w[inside], f[inside] * ratio, color=colors[i], ls="--")
-        qa.refline(ax, x=crossover, ls=":")
-        if window is not None:
-            qa.span(ax, window[0], window[1], role="window")
-        measured = (rf"$\times$ {qa.pm(ratio, ratio_error)}" if ratio is not None and ratio_error is not None
-                    else "ratio not measured" if ratio is None else qa.times(ratio))
-        missing = [labels[i + k] for k, seg in ((0, seg_a), (1, seg_b)) if seg is None]
-        qa.panel_note(ax, f"{labels[i]} | {labels[i + 1]}: {measured}"
-                         + (f"\nsegment file missing: {', '.join(missing)}" if missing else ""))
-        ax.set_xlim(*view)
-        if xscale != "linear":
-            qa.set_wave_scale(ax, xscale)
-        qa.set_flux_scale(ax, yscale)
+def overlap_panel(ax: Any, i: int, labels: list[str], colors: list[Any],
+                  segments: list[tuple[np.ndarray, np.ndarray, np.ndarray] | None],
+                  crossover: float, window: tuple[float, float] | None,
+                  ratio: float | None, ratio_error: float | None, *,
+                  xscale: str = "linear", yscale: str = "linear") -> None:
+    """One neighbour pair (segments ``i`` and ``i + 1``) around its overlap: both segments as
+    measured -- ``(wavelength, flux, error)`` in mJy, None for a missing one -- with their error
+    bands, the crossover, the ratio window, the bluer segment times the measured factor, and a
+    note naming the pair and the factor. Stitched spectra and joint cubes draw their overlaps
+    with it."""
+    seg_a, seg_b = segments[i], segments[i + 1]
+    # the region of interest: the overlap (or the gap), padded -- always
+    # containing the crossover and the measurement window
+    edges = [crossover]
+    if seg_a is not None and seg_b is not None:
+        edges += [float(seg_b[0].min()), float(seg_a[0].max())]
+    if window is not None:
+        edges += [window[0], window[1]]
+    lo, hi = min(edges), max(edges)
+    pad = 0.75 * (hi - lo) or 0.01 * crossover
+    view = (lo - pad, hi + pad)
+
+    for seg, label, color in ((seg_a, labels[i], colors[i]), (seg_b, labels[i + 1], colors[i + 1])):
+        if seg is None:
+            continue
+        w, f, e = seg
+        show = (w >= view[0]) & (w <= view[1])
+        qa.step(ax, w[show], f[show], color=color)
+        if (show & np.isfinite(e)).any():
+            qa.error_band(ax, w[show], f[show], e[show], color=color)
+    if ratio is not None and seg_a is not None and seg_b is not None:
+        w, f, _ = seg_a
+        inside = (w >= float(seg_b[0].min())) & (w <= float(seg_a[0].max()))
+        if inside.any():
+            qa.step(ax, w[inside], f[inside] * ratio, color=colors[i], ls="--")
+    qa.refline(ax, x=crossover, ls=":")
+    if window is not None:
+        qa.span(ax, window[0], window[1], role="window")
+    measured = (rf"$\times$ {qa.pm(ratio, ratio_error)}" if ratio is not None and ratio_error is not None
+                else "ratio not measured" if ratio is None else qa.times(ratio))
+    missing = [labels[i + k] for k, seg in ((0, seg_a), (1, seg_b)) if seg is None]
+    qa.panel_note(ax, f"{labels[i]} | {labels[i + 1]}: {measured}"
+                     + (f"\nsegment file missing: {', '.join(missing)}" if missing else ""))
+    ax.set_xlim(*view)
+    if xscale != "linear":
+        qa.set_wave_scale(ax, xscale)
+    qa.set_flux_scale(ax, yscale)
+
+
+def overlap_legend(ax: Any, ratio_window_frac: float | None, *, segments: str = "segments as extracted") -> None:
+    """The legend entries all overlap panels share (handles without data, on ``ax``), and the note
+    that says how wide the ratio window is. ``segments`` words what the two lines of a panel are."""
+    ax.plot([], [], color=qa.MAIN_COLOR, label=f"{segments} (color: segment)")
+    ax.fill_between([], [], [], color=qa.MAIN_COLOR, alpha=0.22, lw=0, label=qa.SIGMA_BAND_LABEL)
+    ax.plot([], [], color=qa.MAIN_COLOR, ls="--", label=r"bluer segment $\times$ measured factor")
+    ax.plot([], [], color=qa.REF_COLOR, lw=qa.LW["reference"], ls=":", label="crossover")
+    ax.fill_between([], [], [], color=qa.ROLE_COLORS["window"], alpha=0.18, lw=0, label="ratio window")
+    qa.annotate(ax, rf"window: {float(ratio_window_frac):g} $\times$ crossover wavelength, clipped to the overlap"
+                if ratio_window_frac is not None else "")
 
 
 class PlotStitchBackground(Step):
