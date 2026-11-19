@@ -47,19 +47,23 @@ What jwstflow enforces, and when:
 The context gives a step everything it may need: `ctx.output_dir`,
 `ctx.derived_path()`, `ctx.log`, `ctx.raw_dir`, `ctx.dir_of(stage)` (companion
 products of another stage), `ctx.target` / `ctx.target_coords` /
-`ctx.target_dir` (for `jwstflow.targets`), `ctx.reference_dir`,
-`ctx.crds_context`. Shared building blocks live in `jwstflow.spectra` (x1d
-I/O, cube wavelengths), `jwstflow.masks` (the wavelength-resolved mask-product
-contract and its geometry helpers), `jwstflow.stitching` (the generic segment
-stitcher to subclass), `jwstflow.apcorr` (CRDS aperture-correction tables for
-MIRI MRS / NIRSpec IFU extraction), `jwstflow.features` (line/band datasets),
-`jwstflow.targets` (positions) and `jwstflow.naming`. These module paths are
-stable: step packages build on them (the guide's "How the package is laid
-out" has the whole map).
+`ctx.target_dir` (for `jwstflow.data.targets`), `ctx.reference_dir`,
+`ctx.crds_context`. Shared building blocks live in two toolkits, by the kind
+of data: `jwstflow.spectra` (x1d I/O; `jwstflow.spectra.features`: line/band
+datasets; `jwstflow.spectra.stitching`: the generic segment stitcher to
+subclass) and `jwstflow.cubes` (WCS, cube wavelengths and regridding, the
+wavelength-resolved mask-product contract, CRDS aperture-correction tables
+for MIRI MRS / NIRSpec IFU extraction; `jwstflow.cubes.psf`: PSF cubes) --
+plus `jwstflow.steps.naming` (product names) and `jwstflow.data.targets`
+(positions). The guide's "How the package is laid out" has the whole map and
+the import lines.
 
 Steps that deliberately write *edited copies of official products* under the
 official name (a DQ-flagged `_cal`) set `writes_official_products = True` and
-record the edit in the header; everything else uses its own suffix.
+record the edit in the header; everything else uses its own suffix. A step
+that reads the archive's own products (`ctx.reference_dir`) sets
+`needs_reference_products = True`: the run then waits for their background
+download before the stage starts (`mast_compare` does).
 
 Tooling:
 
@@ -96,7 +100,7 @@ Register names for a package in `pyproject.toml` so workflows can use them by na
 
 ```toml
 [project.entry-points."jwstflow.steps"]
-extract_extended = "my_pkg.steps:ExtractExtended"
+extract_extended = "my_pkg.steps.extract_extended:ExtractExtended"
 ```
 
 ## Developing custom steps (the debug loop)
@@ -148,7 +152,7 @@ Scaffold one with
 `jwstflow new-package` (see the guide's "Contributed packages" section for
 the tiers, distribution and versioning conventions). Existing packages:
 `jwstflow-midas` (public: edge-on disk masks, backgrounds, extraction, QA,
-built on the `jwstflow.masks` contract) and `jwstflow-joys` (private: JOYS+
+built on the `jwstflow.cubes.masks` contract) and `jwstflow-joys` (private: JOYS+
 MIRI MRS astrometry, LSR, region masking, defringing, multi-aperture
 extraction, cleaning and band stitching).
 
