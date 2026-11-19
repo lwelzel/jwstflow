@@ -86,9 +86,15 @@ and promote it when it is reused:
    dotted path (`my_survey_steps.disks:DiskMask`) or register entry points.
 3. **A contributed package** (`jwstflow-<name>` on PyPI or a git host) --
    steps useful beyond one project. See the next section.
-4. **jwstflow itself** -- only broadly useful, dependency-free machinery
-   (`jwstflow.contrib` QA steps, the `jwstflow.masks` / `jwstflow.stitching`
-   contracts).
+4. **jwstflow itself** -- only broadly useful machinery: the toolkit steps are
+   built from (`jwstflow.spectra`, `jwstflow.masks`, `jwstflow.apcorr`, ...),
+   the shared contracts below (`jwstflow.stitching`, `jwstflow.psf`,
+   `jwstflow.clusters`) and the stock QA steps (`jwstflow.qa.steps`).
+
+There is no tier in between inside jwstflow: a step either is part of the
+package, filed with the feature it implements (see "How the package is laid
+out"), or it lives in a contributed package. "Contributed" always means a
+separate distribution.
 
 ## Contributed packages
 
@@ -193,6 +199,54 @@ derived products, `qa` for plots). This keeps runs comparable across targets,
 users and reductions; `--only`, `depends_on` and `inputs: [{stage: ...}]` use
 the derived names, and `--set stages.<name>.…` accepts the name or the step.
 
+## How the package is laid out
+
+`src/jwstflow/` holds subsystems, a toolkit, and features, and has one rule
+for where a step is defined:
+
+```
+jwstflow/
+  cli.py                the command line
+                        -- subsystems: one package each
+  config/               the YAML: schema, loader (extends, interpolation, overrides),
+                        project root and env files, presets
+  engine/               the run model: runner, executor, stage graph, checkpoints,
+                        associations, the CRDS environment, the workflow DAG figure
+  data/                 input files: MAST download, discovery by header, the MSA metafile
+  steps/                the step framework: interface, adapters for the official
+                        pipelines, registry, plugins, descriptions -- no step lives here
+  qa/                   the QA figure standard; qa/steps/ holds every QA step
+                        (qafig.py: the earlier name of qa, kept as an alias)
+  scaffold/             the templates of `new-step` and `new-package`
+  testing/              run_step, synthetic products, check_step;
+                        testing/mock/: mock observations and stub pipelines
+                        -- the step-author toolkit: single modules, stable import paths
+  naming.py  spectra.py  masks.py  apcorr.py  features.py  targets.py  stitching.py
+                        -- features with a library of their own: modules by concern + steps.py
+  psf/  clusters/
+  refdata/              reference tables shipped with the package
+```
+
+* **A data step lives with the feature it implements**: `stitch_segments` in
+  `jwstflow.stitching`, `psf_cube` in `jwstflow.psf.steps`, the cluster steps
+  in `jwstflow.clusters.steps`, `fix_msa_metafile` in `jwstflow.data.msa`.
+* **Every QA step lives in `jwstflow.qa.steps`**, one module per kind of
+  product (`spectra`, `stitch`, `images`, `cubes`, `psf`, `clusters`,
+  `mast_compare`, `summary`).
+* **`jwstflow.steps` is the framework** and defines no step.
+* **The toolkit modules keep their paths.** Step packages import them
+  (`from jwstflow.masks import ...`), and a step's checkpoints depend on the
+  content of the file that defines it -- so these paths are an interface, not
+  an implementation detail.
+
+`pyproject.toml` registers jwstflow's own steps as entry points and
+`BUNDLED_STEPS` in `jwstflow/steps/registry.py` lists the same names for a
+bare source checkout; each entry names the module that *defines* the step,
+because that file's hash enters the task ids and its docstring is what
+`jwstflow steps` prints. A contributed package follows the same pattern at
+its own scale: data steps in modules named for what they do, QA steps in a
+`qa/` subpackage, shared library code in modules of its own.
+
 ## File names
 
 Official products keep the names the pipeline gives them. Level-3 product
@@ -294,7 +348,7 @@ Positions are never read from ad-hoc files. `target:` is resolved by name
 (SIMBAD/Sesame, cached in `targets.json`) unless the workflow gives
 `target_coords: {ra, dec}`, and steps can also use the observation's own
 `TARG_RA/TARG_DEC`. Line and band lists ship as datasets in
-`jwstflow/data/spectral_features/` (`gas_lines`, `pah_bands`, `ice_bands`;
+`jwstflow/refdata/spectral_features/` (`gas_lines`, `pah_bands`, `ice_bands`;
 ECSV with per-feature label, transition, source and notes, plus file-level
 references and version). Steps select them with a small grammar:
 
@@ -444,7 +498,10 @@ with that id exists and its outputs are still present. Consequently:
 * editing the Python file that defines a custom step reruns that step's tasks
   (the file's hash is part of the task id; official jwst steps are covered by
   the jwst version instead), and editing *any* `plugins:` file reruns every
-  plugin-defined step's tasks (plugin files may import each other);
+  plugin-defined step's tasks (plugin files may import each other). The hash
+  is of the file's *content*: moving or renaming a module reruns nothing, any
+  edit to it -- a comment included -- reruns the step. Helper modules a step
+  imports are not hashed; bump the step's `version` when they change results;
 * `--force`, `force: true` on a stage, or `jwstflow clean` override this.
 
 stpipe stages write into a private `<stage>/.tmp-<task>/` directory that is

@@ -53,7 +53,9 @@ I/O, cube wavelengths), `jwstflow.masks` (the wavelength-resolved mask-product
 contract and its geometry helpers), `jwstflow.stitching` (the generic segment
 stitcher to subclass), `jwstflow.apcorr` (CRDS aperture-correction tables for
 MIRI MRS / NIRSpec IFU extraction), `jwstflow.features` (line/band datasets),
-`jwstflow.targets` (positions) and `jwstflow.naming`.
+`jwstflow.targets` (positions) and `jwstflow.naming`. These module paths are
+stable: step packages build on them (the guide's "How the package is laid
+out" has the whole map).
 
 Steps that deliberately write *edited copies of official products* under the
 official name (a DQ-flagged `_cal`) set `writes_official_products = True` and

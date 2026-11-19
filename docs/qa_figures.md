@@ -402,6 +402,7 @@ Guidelines that follow from the rules:
 | `mast_compare` | spectrum | `*_s3d` / `*_x1d` | jwstflow vs. MAST spectra and their ratio |
 | `qa_spaxel_clusters` | thumbnails | `*_clustermask.fits` | per band and region: one row per dither cube, one column per wavelength plane (`*_<region>_clusters.png`) |
 
-The steps live in `jwstflow.qa.steps` (`spectra`, `stitch`, `images`,
-`cubes`); `jwstflow.contrib.qa` re-exports them for workflows that name them
-by their first dotted path.
+All of them live in `jwstflow.qa.steps`, one module per kind of product
+(`spectra`, `stitch`, `images`, `cubes`, `psf`, `clusters`, `mast_compare`,
+`summary`). Workflows name them by their registered names; the dotted paths
+they had under `jwstflow.contrib` still resolve, with a notice.

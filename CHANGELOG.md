@@ -20,8 +20,23 @@ The format follows the principles of [Keep a Changelog](https://keepachangelog.c
 ### Changed
 
 - All stock QA steps redrawn to the standard and rebuilt on `qa.Spectrum` / `qa.Frame` (versions bumped, figures are re-rendered on the next run): `plot_spectrum`, `plot_stitch`, `plot_stitch_background` and `plot_snr` are spectrum-like figures with logarithmic axes (`plot_snr` and `plot_stitch_background` annotate the features by default); `quicklook_image` defaults to the `asinh` stretch; `qa_cube_summary` puts its spectra over the full width under the three maps; `plot_stitch_overlaps` notes pair and factor inside each panel; the background estimate of `plot_stitch_background` is drawn in its role color from the standard colormap.
-- The stock QA steps moved from `jwstflow.contrib.qa` to `jwstflow.qa.steps` (`spectra`, `stitch`, `images`, `cubes`, `summary`); entry-point names are unchanged, `jwstflow.contrib.qa` re-exports the classes, and `jwstflow.qafig` remains as an alias of `jwstflow.qa`. Reinstall the package (`pip install -e .`) so that the entry points name the new modules.
+- The stock QA steps moved from `jwstflow.contrib.qa` to `jwstflow.qa.steps` (`spectra`, `stitch`, `images`, `cubes`, `summary`); entry-point names are unchanged, and `jwstflow.qafig` remains as an alias of `jwstflow.qa`. Reinstall the package (`pip install -e .`) so that the entry points name the new modules.
+- Package layout (described in `docs/guide.md`, "How the package is laid out"). No behaviour changed and no workflow needs editing -- steps keep their registered names -- but module paths did:
+  - engine-side modules moved into their subsystem: `jwstflow.associations`, `jwstflow.crds` and `jwstflow.dagviz` are now `jwstflow.engine.associations`, `.crds`, `.dagviz`; `jwstflow.project` is `jwstflow.config.project`;
+  - `jwstflow.psf` and `jwstflow.clusters` are packages (modules by concern plus `steps.py`) exporting the same names as before; `jwstflow.testing.mock` likewise; `jwstflow.scaffold` is a package holding the templates of both `new-step` (`scaffold_step`, formerly `jwstflow.testing.scaffold`, which remains as a name for it) and `new-package`;
+  - `jwstflow.steps.base` is split into `interface`, `adapters`, `registry`, `plugins` and `descriptions`, and re-exports all of them, so `from jwstflow.steps.base import ...` is unaffected;
+  - a data step is defined with its feature and every QA step in `jwstflow.qa.steps`: `psf_cube` in `jwstflow.psf.steps`, `qa_psf_cube` in `jwstflow.qa.steps.psf`, `qa_spaxel_clusters` in `jwstflow.qa.steps.clusters`, `mast_compare` in `jwstflow.qa.steps.mast_compare`, `fix_msa_metafile` in `jwstflow.data.msa`;
+  - the toolkit modules step packages import (`naming`, `spectra`, `masks`, `apcorr`, `features`, `targets`, `stitching`) and the other QA step modules are untouched, so the checkpoints of steps defined there or in step packages stay valid. The steps whose defining file changed rerun once: `psf_cube`, `qa_psf_cube`, `flag_spaxel_clusters`, `propagate_cluster_flags`, `qa_spaxel_clusters`, `mast_compare`, `fix_msa_metafile`;
+  - `CONTRIB_ALIASES` is now `BUNDLED_STEPS` (`jwstflow.steps.registry`).
 - `qa.colorbar` takes `width`/`pad` in inches (was: fractions of the axes); `qa.imshow(axes_labels=False)` became `sides=None`.
+
+### Deprecated
+
+- The dotted step addresses under `jwstflow.contrib` (`jwstflow.contrib.qa:PlotSpectrum`, `jwstflow.contrib.psf:PsfCube`, ...) and `jwstflow.clusters:FlagSpaxelClusters` / `:PropagateClusterFlags`: a workflow naming a step that way still runs (`MOVED_STEPS` in `jwstflow.steps.registry` maps them), with a notice. Use the registered names.
+
+### Removed
+
+- The `jwstflow.contrib` package. Nothing distinguished its contents from the rest of jwstflow, and its name collided with "contributed packages" -- the separate distributions that plug into jwstflow. Its steps are filed with their features (see Changed); `import jwstflow.contrib` no longer works.
 
 ## [0.2.0] - 2026-09-29
 

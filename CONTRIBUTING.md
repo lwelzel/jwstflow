@@ -19,6 +19,16 @@ Useful contributions include:
 
 Instrument-, programme-, or science-case-specific processing steps will often fit better in a separate package that registers steps through the `jwstflow.steps` entry-point group. If you are unsure whether a contribution belongs in the core package, open an issue before doing substantial implementation work.
 
+## Where code goes
+
+The package layout is described in [`docs/guide.md`](docs/guide.md) ("How the package is laid out"). In short:
+
+- a subsystem is a package (`config`, `engine`, `data`, `steps`, `qa`, `scaffold`, `testing`); code used by one subsystem only belongs inside it, not at the top level;
+- a data step is defined with the feature it implements (a module, or `<feature>/steps.py` once the feature has a library of its own), a QA step in `jwstflow/qa/steps/`; `jwstflow/steps/` is the framework and defines no step;
+- a new bundled step is registered twice, under the same name: as an entry point in `pyproject.toml` and in `BUNDLED_STEPS` (`jwstflow/steps/registry.py`); a test keeps the two lists equal;
+- the toolkit modules step packages import (`naming`, `spectra`, `masks`, `apcorr`, `features`, `targets`, `stitching`) keep their paths;
+- a step's checkpoints depend on the content of the file that defines it: moving such a file is free, editing it reruns the step in every existing reduction -- so keep refactoring of step modules separate from functional changes.
+
 ## Development setup
 
 `jwstflow` requires Python 3.12 or later and uses `uv` for dependency management.
