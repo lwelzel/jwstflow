@@ -26,7 +26,7 @@ The package layout and its dependency rules are described in [`docs/guide.md`](d
 - the package directory holds `cli.py` and subpackages only: the step contract (`steps`), orchestration (`config`, `data`, `engine`), the science domains (`spectra`, `cubes`, `qa`) and the tools (`scaffold`, `testing`);
 - `steps` imports no other part of the package; orchestration never imports a science domain; the domains never import the engine;
 - a data step is defined with the feature it implements (`spectra/stitching.py`, `cubes/<feature>/steps.py`), a QA step in `qa/steps/`; `steps/` is the framework and defines no step;
-- a new bundled step is registered twice, under the same name: as an entry point in `pyproject.toml` and in `BUNDLED_STEPS` (`jwstflow/steps/registry.py`), each naming the module that defines the step; tests keep the two lists equal;
+- a new step of the package is registered once, as a `jwstflow.steps` entry point in `pyproject.toml` naming the module that defines it (reinstall afterwards, e.g. `uv sync`: the tests compare the installed entry points with `pyproject.toml`);
 - a step's checkpoints depend on the content of the file that defines it: moving such a file is free, editing it reruns the step in every existing reduction -- so keep refactoring of step modules separate from functional changes, and say in the changelog which steps rerun.
 
 ## Development setup

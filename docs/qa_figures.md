@@ -402,6 +402,5 @@ Guidelines that follow from the rules:
 | `qa_spaxel_clusters` | thumbnails | `*_clustermask.fits` | per band and region: one row per dither cube, one column per wavelength plane (`*_<region>_clusters.png`) |
 
 All of them live in `jwstflow.qa.steps`, one module per kind of product
-(`spectra`, `stitch`, `images`, `cubes`, `psf`, `clusters`, `mast_compare`,
-`summary`). Workflows name them by their registered names; the dotted paths
-they had under `jwstflow.contrib` still resolve, with a notice.
+(`spectra`, `stitch`, `images`, `cubes`, `psf`, `clusters`,
+`mast_compare`, `summary`); workflows name them by their registered names.

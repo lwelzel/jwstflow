@@ -27,7 +27,7 @@ import logging
 import os
 import re
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -313,10 +313,6 @@ def official(records: list[FileRecord], cfg: AssociationConfig, *, stage: str) -
     if not out:
         log.warning("official association generator produced no %s associations", which)
     return out
-
-
-def write_all(asns: Iterable[Association], directory: Path, *, relative: bool = False) -> list[Path]:
-    return [a.write(directory, relative=relative) for a in asns]
 
 
 def members_of(asn_path: Path) -> list[Path]:

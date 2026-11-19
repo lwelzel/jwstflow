@@ -119,12 +119,6 @@ def load_dataset(name: str) -> tuple[Feature, ...]:
     return tuple(out)
 
 
-def dataset_metadata(name: str) -> dict[str, Any]:
-    from astropy.table import Table
-
-    return dict(Table.read(data_dir() / "spectral_features" / f"{name}.ecsv", format="ascii.ecsv").meta)
-
-
 def all_features(datasets: tuple[str, ...] = DATASETS) -> list[Feature]:
     return [f for d in datasets for f in load_dataset(d)]
 

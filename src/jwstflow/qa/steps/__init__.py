@@ -22,7 +22,7 @@ from .mast_compare import MastCompare
 from .psf import QaPsfCube
 from .spectra import PlotSnr, PlotSpectrum, PlotSpectrumStages
 from .stitch import PlotStitch, PlotStitchBackground, PlotStitchOverlaps
-from .summary import HeaderSummary, copy_inputs
+from .summary import HeaderSummary
 
 __all__ = [
     "HeaderSummary",
@@ -38,5 +38,4 @@ __all__ = [
     "QaPsfCube",
     "QaSpaxelClusters",
     "QuicklookImage",
-    "copy_inputs",
 ]

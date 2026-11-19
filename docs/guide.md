@@ -277,12 +277,12 @@ The two columns never import each other:
   (`spectra`, `stitch`, `images`, `cubes`, `psf`, `clusters`, `mast_compare`,
   `summary`).
 
-`pyproject.toml` registers jwstflow's own steps as entry points and
-`BUNDLED_STEPS` in `jwstflow/steps/registry.py` lists the same names for a
-bare source checkout; each entry names the module that *defines* the step,
-because that file's hash enters the task ids and its docstring is what
-`jwstflow steps` prints (`jwstflow check-step <name>` tells when an address
-leads to a module that merely re-exports the class).
+jwstflow registers its own steps the way any step package does: as
+`jwstflow.steps` entry points in `pyproject.toml`, and nowhere else. Each
+entry names the module that *defines* the step, because that file's hash
+enters the task ids and its docstring is what `jwstflow steps` prints
+(`jwstflow check-step <name>` tells when an address leads to a module that
+merely re-exports the class).
 
 **What a step author imports.**
 

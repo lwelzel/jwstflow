@@ -50,15 +50,3 @@ class HeaderSummary(Step):
             for r in rows:
                 fh.write(",".join(str(r.get(k, "")) for k in ["file", *keys]) + "\n")
         return [js, csv]
-
-
-def copy_inputs(inputs: list[Path], ctx: RunContext, *, suffix: str = "_copy") -> list[Path]:
-    """Trivial function-style step (mostly for tests and as a template)."""
-    import shutil
-
-    out = []
-    for inp in inputs:
-        dst = ctx.output_dir / f"{inp.stem}{suffix}{inp.suffix}"
-        shutil.copy2(inp, dst)
-        out.append(dst)
-    return out

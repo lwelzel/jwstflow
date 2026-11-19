@@ -53,7 +53,8 @@ Issues = "https://github.com/lwelzel/jwstflow/issues"
 [project.scripts]
 jwstflow = "jwstflow.cli:app"
 
-# jwstflow's own steps, by name (the same list as BUNDLED_STEPS in jwstflow/steps/registry.py).
+# jwstflow's own steps, by name: this is the one list. Each entry names the module that *defines* the
+# step (that file is hashed into the task ids and read for `jwstflow steps`).
 [project.entry-points."jwstflow.steps"]
 # data steps: each lives with the feature it implements
 stitch_segments = "jwstflow.spectra.stitching:StitchSegments"

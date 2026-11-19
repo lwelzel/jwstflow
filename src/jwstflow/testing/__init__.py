@@ -11,23 +11,17 @@
   observations and stand-ins for the official pipelines.
 
 The names above are importable from here; the code is in :mod:`.run`,
-:mod:`.synthetic` and :mod:`.audit`. The templates of ``jwstflow new-step``
-live in :mod:`jwstflow.scaffold`.
+:mod:`.synthetic` and :mod:`.audit`.
 """
 
-from ..scaffold import scaffold_step
 from .audit import check_step
 from .run import make_context, run_step
 from .synthetic import synthetic_cube, synthetic_image, synthetic_x1d
-
-#: ``jwstflow new-step`` under the name it had while its templates lived in this module.
-scaffold = scaffold_step
 
 __all__ = [
     "check_step",
     "make_context",
     "run_step",
-    "scaffold",
     "synthetic_cube",
     "synthetic_image",
     "synthetic_x1d",

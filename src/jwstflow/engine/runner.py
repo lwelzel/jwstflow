@@ -20,8 +20,6 @@ from __future__ import annotations
 
 import fnmatch
 import inspect
-import re
-import os
 import json
 import logging
 import time
@@ -50,7 +48,7 @@ from ..steps import (
 )
 from . import crds as crds_mod
 from .associations import Association, build_associations
-from .executor import Executor, Payload, Result, default_thread_env, make_executor
+from .executor import Payload, Result, default_thread_env, make_executor
 from .graph import select_stages
 from .state import StateStore, TaskRecord, make_task_id, now_iso, stable_hash
 
@@ -695,15 +693,6 @@ def _write_if_changed(asn: Association, directory: Path, *, relative: bool) -> P
         except (json.JSONDecodeError, KeyError):
             pass
     return asn.write(directory, relative=relative)
-
-
-def _abs_members(data: dict[str, Any], base: Path) -> dict[str, Any]:
-    data = json.loads(json.dumps(data))
-    for product in data.get("products", []):
-        for m in product.get("members", []):
-            p = Path(m["expname"])
-            m["expname"] = str((base / p).resolve() if not p.is_absolute() else p.resolve())
-    return data
 
 
 def run_config(cfg: Config, **kwargs: Any) -> RunSummary:

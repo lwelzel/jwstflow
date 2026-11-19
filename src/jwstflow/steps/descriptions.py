@@ -22,7 +22,6 @@ from .registry import (
     _REGISTRY,
     BUILTIN_ALIASES,
     _registered_target,
-    current_spec,
     source_origin,
 )
 
@@ -254,7 +253,7 @@ def _docstring_from_source(spec: str) -> str | None:
         target = obj if isinstance(obj, type) or callable(obj) else type(obj)
         return inspect.getdoc(target)
     if not is_path_spec(spec):
-        dotted = _registered_target(spec) or current_spec(spec)
+        dotted = _registered_target(spec) or spec
         attr = dotted.rpartition(":")[2] if ":" in dotted else dotted.rpartition(".")[2]
     origin = source_origin(spec)
     if origin is None or not attr:

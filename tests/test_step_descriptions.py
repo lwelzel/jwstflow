@@ -7,14 +7,13 @@ from pathlib import Path
 
 from jwstflow.steps import (
     BUILTIN_ALIASES,
-    BUNDLED_STEPS,
     Step,
     register_step,
     split_description,
     step_description,
 )
-from jwstflow.steps.registry import _REGISTRY
 from jwstflow.steps.descriptions import BUILTIN_DESCRIPTIONS
+from jwstflow.steps.registry import _REGISTRY
 
 
 def test_every_builtin_alias_is_described():
@@ -33,25 +32,34 @@ def test_builtin_lookup():
     assert "\n" in long  # multi-line detail
 
 
-def test_bundled_docstrings_have_short_and_detail():
-    for name in BUNDLED_STEPS:
+def own_steps() -> dict[str, str]:
+    """jwstflow's own steps as pyproject.toml registers them: name -> module:object (the one list)."""
+    import tomllib
+
+    pyproject = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
+    return pyproject["project"]["entry-points"]["jwstflow.steps"]
+
+
+def test_own_steps_have_short_and_detailed_descriptions():
+    for name in own_steps():
         short, long = step_description(name)
         assert short, f"{name}: no short description (docstring missing?)"
         assert long, f"{name}: no detailed description (single-paragraph docstring)"
         assert "\n" not in short  # collapsed to one line
 
 
-def test_bundled_steps_are_the_entry_points_of_the_package():
-    """One list, kept twice: pyproject.toml registers jwstflow's own steps for an install, and
-    BUNDLED_STEPS resolves them from a bare source checkout. Each names the module that *defines*
-    the step (its file is fingerprinted into the task ids and parsed for the description)."""
-    import tomllib
+def test_own_steps_are_installed_and_registered_from_their_defining_modules():
+    """pyproject.toml is the one list of jwstflow's own steps. The installed metadata must agree with
+    it (an editable install made before a step moved is stale: reinstall, e.g. `uv sync`), and each
+    entry must name the module that *defines* the step -- its file is fingerprinted into the task ids
+    and parsed for the description."""
+    from importlib.metadata import distribution
 
-    from jwstflow.steps import resolve_target
+    from jwstflow.steps import ENTRY_POINT_GROUP, resolve_target
 
-    pyproject = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
-    assert pyproject["project"]["entry-points"]["jwstflow.steps"] == BUNDLED_STEPS
-    for name, target in BUNDLED_STEPS.items():
+    installed = {ep.name: ep.value for ep in distribution("jwstflow").entry_points if ep.group == ENTRY_POINT_GROUP}
+    assert installed == own_steps(), "the installed entry points differ from pyproject.toml: reinstall jwstflow"
+    for name, target in own_steps().items():
         obj = resolve_target(name)
         assert f"{obj.__module__}:{obj.__qualname__}" == target, name
 
@@ -123,7 +131,7 @@ def test_check_step_tells_when_an_address_is_not_the_defining_module(tmp_path: P
     """An entry point (or dotted path) through a re-exporting module would fingerprint the wrong file."""
     from jwstflow.testing import check_step
 
-    for name in BUNDLED_STEPS:                                  # jwstflow's own registrations are clean
+    for name in own_steps():                                    # jwstflow's own registrations are clean
         _, problems = check_step(name)
         assert problems == [], (name, problems)
     _, problems = check_step("jwstflow.cubes.psf:PsfCube")            # the package re-exports the class from psf/steps.py

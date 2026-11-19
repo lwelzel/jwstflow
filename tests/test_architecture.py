@@ -9,10 +9,11 @@ for the import rules: they hold for every module, also the ones a test run never
 from __future__ import annotations
 
 import ast
+import tomllib
 from pathlib import Path
 
 import jwstflow
-from jwstflow.steps import BUNDLED_STEPS, resolve_target
+from jwstflow.steps import resolve_target
 
 PACKAGE = Path(jwstflow.__file__).parent
 
@@ -21,7 +22,7 @@ PACKAGE = Path(jwstflow.__file__).parent
 CONTRACT = {"steps"}                                     # the step framework
 ORCHESTRATION = {"config", "data", "engine"}             # the YAML, the input files, the run model
 TOOLKIT = {"spectra", "cubes", "qa"}                     # what steps are built from, by domain
-FEATURES = {"spectra.stitching", "cubes.psf", "cubes.clusters", "qa.steps"}   # where the bundled steps are
+FEATURES = {"spectra.stitching", "cubes.psf", "cubes.clusters", "qa.steps"}   # where the steps are
 TOOLS = {"cli", "testing", "scaffold", "__init__"}
 SCIENCE = TOOLKIT | FEATURES
 
@@ -32,6 +33,12 @@ DATA_STEP_MODULES = {"jwstflow.spectra.stitching", "jwstflow.cubes.psf.steps", "
 QA_STEP_PACKAGE = "jwstflow.qa.steps"
 #: Step subclasses that are not steps of the package: the framework's own, and the test stand-ins.
 NOT_BUNDLED = {"jwstflow.steps.interface", "jwstflow.steps.adapters", "jwstflow.testing.mock.stubs"}
+
+
+def own_steps() -> dict[str, str]:
+    """jwstflow's own steps as pyproject.toml registers them: name -> module:object (the one list)."""
+    pyproject = tomllib.loads((PACKAGE.parents[1] / "pyproject.toml").read_text())
+    return pyproject["project"]["entry-points"]["jwstflow.steps"]
 
 
 def unit_of(module: str) -> str | None:
@@ -147,13 +154,14 @@ def test_steps_are_defined_where_the_layout_says():
                 f"DATA_STEP_MODULES), or in {QA_STEP_PACKAGE} if it draws")
 
 
-def test_every_bundled_step_is_registered_from_its_defining_module():
-    """BUNDLED_STEPS covers every step class of the package, and each name leads to an allowed module."""
-    registered = {target.rpartition(":")[2]: target.partition(":")[0] for target in BUNDLED_STEPS.values()}
+def test_every_step_is_registered_from_its_defining_module():
+    """The entry points in pyproject.toml cover every step class of the package, and each name leads to
+    an allowed module."""
+    registered = {target.rpartition(":")[2]: target.partition(":")[0] for target in own_steps().values()}
     for name, (module, _) in _step_classes().items():
         if module not in NOT_BUNDLED:
-            assert registered.get(name) == module, f"{name} ({module}) is missing from BUNDLED_STEPS / pyproject.toml"
-    for name, target in BUNDLED_STEPS.items():
+            assert registered.get(name) == module, f"{name} ({module}) is not an entry point in pyproject.toml"
+    for name, target in own_steps().items():
         module = target.partition(":")[0]
         is_qa = getattr(resolve_target(name), "level", 4) == "qa"
         assert module.startswith(QA_STEP_PACKAGE + ".") if is_qa else module in DATA_STEP_MODULES, (name, target)

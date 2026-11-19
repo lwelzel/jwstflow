@@ -21,7 +21,7 @@ The format follows the principles of [Keep a Changelog](https://keepachangelog.c
 
 - All stock QA steps redrawn to the standard and rebuilt on `qa.Spectrum` / `qa.Frame` (versions bumped, figures are re-rendered on the next run): `plot_spectrum`, `plot_stitch`, `plot_stitch_background` and `plot_snr` are spectrum-like figures with logarithmic axes (`plot_snr` and `plot_stitch_background` annotate the features by default); `quicklook_image` defaults to the `asinh` stretch; `qa_cube_summary` puts its spectra over the full width under the three maps; `plot_stitch_overlaps` notes pair and factor inside each panel; the background estimate of `plot_stitch_background` is drawn in its role color from the standard colormap.
 - The stock QA steps moved from `jwstflow.contrib.qa` to `jwstflow.qa.steps` (`spectra`, `stitch`, `images`, `cubes`, `summary`); entry-point names are unchanged. Reinstall the package (`pip install -e .`) so that the entry points name the new modules.
-- Package layout (`docs/guide.md`, "How the package is laid out"; the dependency rules are checked by `tests/test_architecture.py`). No behaviour changed and no workflow needs editing -- steps keep their registered names -- but the package directory now holds `cli.py` and subpackages only, so most module paths moved:
+- Package layout (`docs/guide.md`, "How the package is laid out"; the dependency rules are checked by `tests/test_architecture.py`). No behaviour changed, and a workflow that names its steps by their registered names needs no editing, but the package directory now holds `cli.py` and subpackages only, so most module paths moved:
 
   | was | is now |
   |---|---|
@@ -39,24 +39,22 @@ The format follows the principles of [Keep a Changelog](https://keepachangelog.c
   | `jwstflow.targets` | `jwstflow.data.targets` |
   | `jwstflow.associations`, `jwstflow.crds`, `jwstflow.dagviz` | `jwstflow.engine.associations`, `.crds`, `.dagviz` |
   | `jwstflow.project` | `jwstflow.config.project` |
-  | `jwstflow.scaffold` (module) | `jwstflow.scaffold` (package: `package`, and `step` with `scaffold_step`, formerly `jwstflow.testing.scaffold`, which remains as a name for it) |
+  | `jwstflow.scaffold` (module) | `jwstflow.scaffold` (package: `package`, and `step` with `scaffold_step`, formerly `jwstflow.testing.scaffold`) |
   | `jwstflow.testing.mock` (module) | `jwstflow.testing.mock` (package, same names) |
 
-  A data step is defined with its feature and every QA step in `jwstflow.qa.steps`: `stitch_segments` in `jwstflow.spectra.stitching`, `psf_cube` in `jwstflow.cubes.psf.steps`, the cluster steps in `jwstflow.cubes.clusters.steps`, `fix_msa_metafile` in `jwstflow.data.msa`; `qa_psf_cube`, `qa_spaxel_clusters` and `mast_compare` in `jwstflow.qa.steps`. `CONTRIB_ALIASES` is now `BUNDLED_STEPS` (`jwstflow.steps.registry`).
+  A data step is defined with its feature and every QA step in `jwstflow.qa.steps`: `stitch_segments` in `jwstflow.spectra.stitching`, `psf_cube` in `jwstflow.cubes.psf.steps`, the cluster steps in `jwstflow.cubes.clusters.steps`, `fix_msa_metafile` in `jwstflow.data.msa`; `qa_psf_cube`, `qa_spaxel_clusters` and `mast_compare` in `jwstflow.qa.steps`.
+- jwstflow's own steps are registered in one place, the `jwstflow.steps` entry points in `pyproject.toml`; the second, in-package table of the same names (`CONTRIB_ALIASES`) is gone. A source tree therefore has to be installed (`uv sync`, `pip install -e .`) for its step names to resolve -- as was always the case for step packages.
 - Checkpoints: the task ids contain a hash of the file that defines a step, and the file of every step defined in jwstflow changed (its imports at least). In an existing reduction all custom stages therefore run again on the next `jwstflow run`, and so does every stage downstream of a product they rewrite -- in practice everything after the first custom stage of a workflow; the official pipeline stages before it (addressed by their built-in aliases) keep their checkpoints. Reinstall editable installs (`uv sync`): the entry points name new modules.
 - A step that reads MAST's own products declares it (`needs_reference_products = True`); the run waits for their background download before such a stage instead of recognising `mast_compare` by its stage name.
 - `jwstflow check-step <name>` (and `jwstflow.testing.check_step`) reports when a name or dotted path leads to a module that only re-exports the step: the defining file is what is hashed into the task ids.
 - `jwstflow.__version__` is read from the installed package metadata (it had stayed at 0.1.0).
 - `qa.colorbar` takes `width`/`pad` in inches (was: fractions of the axes); `qa.imshow(axes_labels=False)` became `sides=None`.
 
-### Deprecated
-
-- Dotted step addresses from before the reorganisation (`jwstflow.contrib.qa:PlotSpectrum`, `jwstflow.contrib.psf:PsfCube`, `jwstflow.stitching:StitchSegments`, `jwstflow.clusters:FlagSpaxelClusters`, ...): a workflow naming a step that way still runs (`MOVED_STEPS` in `jwstflow.steps.registry` maps them), with a notice. Use the registered names.
-
 ### Removed
 
 - The `jwstflow.contrib` package. Nothing distinguished its contents from the rest of jwstflow, and its name collided with "contributed packages" -- the separate distributions that plug into jwstflow. Its steps are filed with their features (see Changed).
-- The old module paths in the table above, and the `jwstflow.qafig` alias of `jwstflow.qa`: importing them fails; step packages import the new paths (jwstflow-midas and jwstflow-joys were updated in step).
+- The old module paths in the table above and the `jwstflow.qafig` alias of `jwstflow.qa`: importing them fails; step packages import the new paths (jwstflow-midas and jwstflow-joys were updated in step). The same holds for dotted *step addresses* in workflows (`jwstflow.contrib.qa:PlotSpectrum`, `jwstflow.stitching:StitchSegments`, ...): name steps by their registered names.
+- `jwstflow.testing.scaffold` (it is `jwstflow.scaffold.scaffold_step`), and code nothing used: `copy_inputs` (a function-step template among the QA steps), `features.dataset_metadata`, `associations.write_all`.
 
 ## [0.2.0] - 2026-09-29
 
