@@ -232,7 +232,7 @@ def asn(config: ConfigArg, stage: Annotated[str, typer.Argument(help="Stage with
     if st.association is None:
         err.print(f"[red]stage {stage!r} has no association section[/red]")
         raise typer.Exit(2)
-    from .associations import summarize
+    from .engine.associations import summarize
 
     tasks = runner.plan_stage(st)
     for t in tasks:
@@ -300,7 +300,7 @@ def graph(
     set_: Annotated[list[str] | None, typer.Option("--set", help="Override config values (key=value).")] = None,
 ) -> None:
     """Render the workflow DAG (data patterns -> steps -> products) without running anything."""
-    from .dagviz import render
+    from .engine.dagviz import render
     from .steps.base import LEVEL_DIRS
 
     setup_logging("WARNING")

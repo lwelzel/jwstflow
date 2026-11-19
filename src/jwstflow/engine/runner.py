@@ -32,8 +32,6 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
-from .. import crds as crds_mod
-from ..associations import Association, build_associations
 from ..config.loader import dump_config
 from ..config.schema import RAW_STAGE, Config, StageConfig
 from ..data.discovery import FileRecord, HeaderCache, discover, fingerprint
@@ -43,7 +41,6 @@ from ..steps.base import (
     LEVEL_DIRS,
     Step,
     activate_plugins,
-    default_thread_env,
     is_stpipe_step,
     plugins_fingerprint,
     resolve_target,
@@ -51,7 +48,9 @@ from ..steps.base import (
     source_origin,
     step_package_versions,
 )
-from .executor import Executor, Payload, Result, make_executor
+from . import crds as crds_mod
+from .associations import Association, build_associations
+from .executor import Executor, Payload, Result, default_thread_env, make_executor
 from .graph import select_stages
 from .state import StateStore, TaskRecord, make_task_id, now_iso, stable_hash
 
@@ -615,7 +614,7 @@ class Runner:
         log.info("run %r in %s  (%s)", self.cfg.name, self.cfg.run_dir, " -> ".join(s.name for s in stages))
         if self.cfg.workflow_graph and not self.dry_run:
             try:
-                from ..dagviz import render as render_graph
+                from .dagviz import render as render_graph
 
                 files = render_graph(self.cfg, self.cfg.run_dir / LEVEL_DIRS["qa"] / "workflow_graph")
                 log.info("workflow graph: %s", ", ".join(f.name for f in files))

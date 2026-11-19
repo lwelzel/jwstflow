@@ -52,7 +52,7 @@ def data_dir() -> Path:
     ``data/spectral_features/`` directory at its project root, or by setting
     ``$JWSTFLOW_DATA_DIR``. Lookup order: env var, project override, package.
     """
-    from .project import find_project_root
+    from .config.project import find_project_root
 
     candidates = []
     if os.environ.get("JWSTFLOW_DATA_DIR"):

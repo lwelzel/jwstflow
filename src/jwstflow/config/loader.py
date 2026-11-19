@@ -286,7 +286,7 @@ def load_env_files(
     """
     from dotenv import dotenv_values
 
-    from ..project import candidate_env_files
+    from .project import candidate_env_files
 
     candidates: list[tuple[Path, str]] = candidate_env_files(base_dir)
     explicit_paths: list[tuple[Path, str]] = []
@@ -339,7 +339,7 @@ def _derive_stage_identity(stages: list[Any]) -> None:
 
 def config_from_dict(data: dict[str, Any], *, base_dir: Path | None = None) -> Config:
     """Validate an already-composed dict (e.g. from OmegaConf/Hydra)."""
-    from ..project import find_project_root
+    from .project import find_project_root
 
     data = dict(data)
     project_root = find_project_root(base_dir or Path.cwd())

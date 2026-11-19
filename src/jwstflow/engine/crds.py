@@ -20,7 +20,7 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
-from .config.schema import CRDSConfig
+from ..config.schema import CRDSConfig
 
 log = logging.getLogger(__name__)
 

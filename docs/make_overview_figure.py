@@ -19,7 +19,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch
 
-from jwstflow.dagviz import LEVEL_COLORS
+from jwstflow.engine.dagviz import LEVEL_COLORS
 
 GREY = "#6f6f6f"
 ANN = "#555555"

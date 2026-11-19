@@ -49,6 +49,22 @@ def init_worker(env: dict[str, str], sys_path: list[str] | None = None) -> None:
             sys.path.insert(0, d)
 
 
+def default_thread_env(n: int) -> dict[str, str]:
+    """Environment limiting BLAS/OpenMP threads (exported into workers)."""
+    n = max(1, int(n))
+    return {
+        k: str(n)
+        for k in (
+            "OMP_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+            "VECLIB_MAXIMUM_THREADS",
+        )
+        if k not in os.environ or os.environ.get("JWSTFLOW_FORCE_THREAD_ENV")
+    }
+
+
 def execute_task(payload: Payload) -> Result:
     """Run one task. Never raises; failures are reported in the result dict."""
     from ..steps.base import RunContext, check_outputs, make_step

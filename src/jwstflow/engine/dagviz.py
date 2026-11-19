@@ -23,8 +23,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .config.schema import RAW_STAGE, Config, StageConfig
-from .steps.base import LEVEL_DIRS
+from ..config.schema import RAW_STAGE, Config, StageConfig
+from ..steps.base import LEVEL_DIRS
 
 log = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ def _declared_products(stage: StageConfig) -> tuple[str, ...]:
     if stage.name.split("-")[0] in PIPELINE_PRODUCTS:
         return PIPELINE_PRODUCTS[stage.name.split("-")[0]]
     try:
-        from .steps.base import resolve_target
+        from ..steps.base import resolve_target
 
         outputs = tuple(getattr(resolve_target(stage.step), "outputs", ()) or ())
     except Exception:

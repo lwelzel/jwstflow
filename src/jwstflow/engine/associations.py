@@ -33,8 +33,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .config.schema import AssociationConfig, MemberRule
-from .data.discovery import FileRecord, match_filters
+from ..config.schema import AssociationConfig, MemberRule
+from ..data.discovery import FileRecord, match_filters
 
 log = logging.getLogger(__name__)
 
