@@ -15,15 +15,14 @@ reference is https://jwst-pipeline.readthedocs.io.
 from __future__ import annotations
 
 import inspect
-from importlib.metadata import entry_points
 
 from .interface import split_description
 from .plugins import is_path_spec
 from .registry import (
     _REGISTRY,
     BUILTIN_ALIASES,
-    CONTRIB_ALIASES,
-    ENTRY_POINT_GROUP,
+    _registered_target,
+    current_spec,
     source_origin,
 )
 
@@ -255,11 +254,7 @@ def _docstring_from_source(spec: str) -> str | None:
         target = obj if isinstance(obj, type) or callable(obj) else type(obj)
         return inspect.getdoc(target)
     if not is_path_spec(spec):
-        dotted = CONTRIB_ALIASES.get(spec, spec)
-        for ep in entry_points(group=ENTRY_POINT_GROUP):
-            if ep.name == spec:
-                dotted = ep.value
-                break
+        dotted = _registered_target(spec) or current_spec(spec)
         attr = dotted.rpartition(":")[2] if ":" in dotted else dotted.rpartition(".")[2]
     origin = source_origin(spec)
     if origin is None or not attr:

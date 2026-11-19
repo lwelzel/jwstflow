@@ -64,28 +64,76 @@ BUILTIN_ALIASES: dict[str, str] = {
 }
 
 
-# jwstflow's own QA steps; also exposed as `jwstflow.steps` entry points, this table
-# is the fallback when a package was installed without them.
-CONTRIB_ALIASES: dict[str, str] = {
+# jwstflow's own steps, by name. The distribution registers the same names as `jwstflow.steps`
+# entry points (pyproject.toml; a test keeps the two lists equal); this table is what resolves
+# them when the package metadata is missing -- a source checkout on PYTHONPATH.
+BUNDLED_STEPS: dict[str, str] = {
+    # data steps: each lives with the feature it implements
+    "stitch_segments": "jwstflow.stitching:StitchSegments",
+    "psf_cube": "jwstflow.psf.steps:PsfCube",
+    "flag_spaxel_clusters": "jwstflow.clusters.steps:FlagSpaxelClusters",
+    "propagate_cluster_flags": "jwstflow.clusters.steps:PropagateClusterFlags",
+    "fix_msa_metafile": "jwstflow.data.msa:fix_msa_metafile",
+    # QA steps: jwstflow.qa.steps
     "plot_spectrum": "jwstflow.qa.steps.spectra:PlotSpectrum",
-    "quicklook_image": "jwstflow.qa.steps.images:QuicklookImage",
+    "plot_snr": "jwstflow.qa.steps.spectra:PlotSnr",
+    "plot_spectrum_stages": "jwstflow.qa.steps.spectra:PlotSpectrumStages",
     "plot_stitch": "jwstflow.qa.steps.stitch:PlotStitch",
     "plot_stitch_overlaps": "jwstflow.qa.steps.stitch:PlotStitchOverlaps",
     "plot_stitch_background": "jwstflow.qa.steps.stitch:PlotStitchBackground",
-    "plot_snr": "jwstflow.qa.steps.spectra:PlotSnr",
-    "plot_spectrum_stages": "jwstflow.qa.steps.spectra:PlotSpectrumStages",
+    "quicklook_image": "jwstflow.qa.steps.images:QuicklookImage",
     "qa_cube_summary": "jwstflow.qa.steps.cubes:QaCubeSummary",
     "qa_cube_slices": "jwstflow.qa.steps.cubes:QaCubeSlices",
+    "qa_psf_cube": "jwstflow.qa.steps.psf:QaPsfCube",
+    "qa_spaxel_clusters": "jwstflow.qa.steps.clusters:QaSpaxelClusters",
+    "mast_compare": "jwstflow.qa.steps.mast_compare:MastCompare",
     "header_summary": "jwstflow.qa.steps.summary:HeaderSummary",
-    "fix_msa_metafile": "jwstflow.contrib.nirspec:fix_msa_metafile",
-    "mast_compare": "jwstflow.contrib.mast_compare:MastCompare",
-    "stitch_segments": "jwstflow.stitching:StitchSegments",
-    "psf_cube": "jwstflow.contrib.psf:PsfCube",
-    "qa_psf_cube": "jwstflow.contrib.psf:QaPsfCube",
-    "flag_spaxel_clusters": "jwstflow.clusters:FlagSpaxelClusters",
-    "propagate_cluster_flags": "jwstflow.clusters:PropagateClusterFlags",
-    "qa_spaxel_clusters": "jwstflow.contrib.clusters:QaSpaxelClusters",
 }
+
+# Dotted addresses the bundled steps had before the package was reorganised (part of them
+# lived in `jwstflow.contrib`) -> where they are now. A workflow that names a step by such a
+# path keeps running, with a notice; new workflows use the registered names above.
+MOVED_STEPS: dict[str, str] = {
+    "jwstflow.contrib.qa.PlotSpectrum": "jwstflow.qa.steps.spectra:PlotSpectrum",
+    "jwstflow.contrib.qa.PlotSnr": "jwstflow.qa.steps.spectra:PlotSnr",
+    "jwstflow.contrib.qa.PlotSpectrumStages": "jwstflow.qa.steps.spectra:PlotSpectrumStages",
+    "jwstflow.contrib.qa.PlotStitch": "jwstflow.qa.steps.stitch:PlotStitch",
+    "jwstflow.contrib.qa.PlotStitchOverlaps": "jwstflow.qa.steps.stitch:PlotStitchOverlaps",
+    "jwstflow.contrib.qa.PlotStitchBackground": "jwstflow.qa.steps.stitch:PlotStitchBackground",
+    "jwstflow.contrib.qa.QuicklookImage": "jwstflow.qa.steps.images:QuicklookImage",
+    "jwstflow.contrib.qa.QaCubeSummary": "jwstflow.qa.steps.cubes:QaCubeSummary",
+    "jwstflow.contrib.qa.QaCubeSlices": "jwstflow.qa.steps.cubes:QaCubeSlices",
+    "jwstflow.contrib.qa.HeaderSummary": "jwstflow.qa.steps.summary:HeaderSummary",
+    "jwstflow.contrib.qa.copy_inputs": "jwstflow.qa.steps.summary:copy_inputs",
+    "jwstflow.contrib.psf.PsfCube": "jwstflow.psf.steps:PsfCube",
+    "jwstflow.contrib.psf.QaPsfCube": "jwstflow.qa.steps.psf:QaPsfCube",
+    "jwstflow.contrib.clusters.QaSpaxelClusters": "jwstflow.qa.steps.clusters:QaSpaxelClusters",
+    "jwstflow.contrib.mast_compare.MastCompare": "jwstflow.qa.steps.mast_compare:MastCompare",
+    "jwstflow.contrib.nirspec.fix_msa_metafile": "jwstflow.data.msa:fix_msa_metafile",
+    "jwstflow.clusters.FlagSpaxelClusters": "jwstflow.clusters.steps:FlagSpaxelClusters",
+    "jwstflow.clusters.PropagateClusterFlags": "jwstflow.clusters.steps:PropagateClusterFlags",
+}
+_MOVED_NOTICED: set[str] = set()
+
+
+def current_spec(spec: str) -> str:
+    """``spec`` itself, or the present address of a step named by a path from :data:`MOVED_STEPS`."""
+    new = MOVED_STEPS.get(spec.replace(":", "."))
+    if new is None:
+        return spec
+    if spec not in _MOVED_NOTICED:
+        _MOVED_NOTICED.add(spec)
+        log.warning("step address %r has moved to %r; update the workflow (or use the registered name)", spec, new)
+    return new
+
+
+def _registered_target(name: str) -> str | None:
+    """Dotted target behind a registered step name: the entry point of an installed package,
+    else jwstflow's own table. None when ``name`` is not a registered name."""
+    for ep in entry_points(group=ENTRY_POINT_GROUP):
+        if ep.name == name:
+            return ep.value
+    return BUNDLED_STEPS.get(name)
 
 
 # Default asn_type for association files fed to these aliases.
@@ -137,9 +185,9 @@ def step_identity(spec: str) -> tuple[str, int | str]:
         tail = spec.rpartition(":")[2] or spec.rpartition(".")[2]
         return _snake(tail), 4
     name, level = identity_of(target, spec)
-    # steps registered by name (entry points, contrib table, register_step) are known by that
+    # steps registered by name (entry points, jwstflow's own table, register_step) are known by that
     # name to users and in `jwstflow steps`; keep it unless the class declares its own `name`
-    registered = spec in _REGISTRY or spec in CONTRIB_ALIASES or any(ep.name == spec for ep in entry_points(group=ENTRY_POINT_GROUP))
+    registered = spec in _REGISTRY or _registered_target(spec) is not None
     if registered and not is_stpipe_step(target) and getattr(target, "name", None) in (None, ""):
         name = spec
     return name, level
@@ -149,6 +197,7 @@ def resolve_target(spec: str) -> Any:
     """Turn a YAML ``step:`` string into a Python object (not yet a Step instance)."""
     if spec in _REGISTRY:
         return _REGISTRY[spec]
+    spec = current_spec(spec)
     if spec in BUILTIN_ALIASES:
         return import_object(BUILTIN_ALIASES[spec])
     matches = [ep for ep in entry_points(group=ENTRY_POINT_GROUP) if ep.name == spec]
@@ -158,8 +207,8 @@ def resolve_target(spec: str) -> Any:
                         "uninstall one, or address the step by dotted path",
                         spec, ", ".join(sorted({ep.value for ep in matches})), matches[0].value)
         return matches[0].load()
-    if spec in CONTRIB_ALIASES:
-        return import_object(CONTRIB_ALIASES[spec])
+    if spec in BUNDLED_STEPS:
+        return import_object(BUNDLED_STEPS[spec])
     return import_object(spec)
 
 
@@ -199,7 +248,7 @@ def describe_target(spec: str) -> dict[str, Any]:
 def registered_steps() -> dict[str, str]:
     """All known step names -> target (built-ins, entry points, runtime registry)."""
     out = {k: v for k, v in BUILTIN_ALIASES.items()}
-    out.update(CONTRIB_ALIASES)
+    out.update(BUNDLED_STEPS)
     for ep in entry_points(group=ENTRY_POINT_GROUP):
         out[ep.name] = ep.value
     for k, v in _REGISTRY.items():
@@ -241,11 +290,7 @@ def source_origin(spec: str) -> Path | None:
     if spec in _REGISTRY:
         mod_name = getattr(_REGISTRY[spec], "__module__", None)
     else:
-        dotted = CONTRIB_ALIASES.get(spec, spec)
-        for ep in entry_points(group=ENTRY_POINT_GROUP):
-            if ep.name == spec:
-                dotted = ep.value
-                break
+        dotted = _registered_target(spec) or current_spec(spec)
         mod_name = dotted.partition(":")[0] if ":" in dotted else dotted.rpartition(".")[0]
     if not mod_name:
         return None

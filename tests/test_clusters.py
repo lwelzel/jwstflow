@@ -20,8 +20,8 @@ from jwstflow.clusters import (
     read_cluster_product,
     region_aperture,
 )
-from jwstflow.contrib.clusters import QaSpaxelClusters
 from jwstflow.masks import celestial_wcs
+from jwstflow.qa.steps import QaSpaxelClusters
 from jwstflow.testing import check_step, run_step, synthetic_cube
 from jwstflow.testing.mock import (
     DEFAULT_NIRSPEC_SCENE,

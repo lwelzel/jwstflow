@@ -235,7 +235,7 @@ def test_single_segment_is_rejected(tmp_path: Path):
 
 def test_stitching_never_plots_and_plot_stitch_does(tmp_path: Path):
     pytest.importorskip("matplotlib")
-    from jwstflow.contrib.qa import PlotStitch
+    from jwstflow.qa.steps import PlotStitch
 
     segments = two_segments(tmp_path)
     outputs = run_step(StitchSegments, segments, tmp_path)
@@ -249,7 +249,7 @@ def test_stitching_never_plots_and_plot_stitch_does(tmp_path: Path):
 
 def test_plot_stitch_also_draws_the_segments_before_rescaling(tmp_path: Path):
     pytest.importorskip("matplotlib")
-    from jwstflow.contrib.qa import PlotStitch
+    from jwstflow.qa.steps import PlotStitch
 
     segments = two_segments(tmp_path)
     outputs = run_step(StitchSegments, segments, tmp_path, params={"rescale": True})
@@ -265,7 +265,7 @@ def test_plot_stitch_also_draws_the_segments_before_rescaling(tmp_path: Path):
 
 def test_plot_stitch_overlaps_draws_one_panel_per_pair(tmp_path: Path):
     pytest.importorskip("matplotlib")
-    from jwstflow.contrib.qa import PlotStitchOverlaps
+    from jwstflow.qa.steps import PlotStitchOverlaps
 
     files = [synthetic_x1d(tmp_path / f"jw001_miri_ch1-{band}_s1d.fits",
                            wave=np.linspace(lo, hi, 300), flux=np.full(300, flux),
@@ -281,7 +281,7 @@ def test_plot_stitch_overlaps_draws_one_panel_per_pair(tmp_path: Path):
 
 def test_plot_stitch_overlaps_tolerates_missing_segments_and_gaps(tmp_path: Path, caplog):
     pytest.importorskip("matplotlib")
-    from jwstflow.contrib.qa import PlotStitchOverlaps
+    from jwstflow.qa.steps import PlotStitchOverlaps
 
     # a gap between the segments (no overlap: the ratio is unmeasurable) ...
     files = [synthetic_x1d(tmp_path / "jw001_miri_ch1-short_s1d.fits",
@@ -320,7 +320,7 @@ def segments_with_background(tmp_path: Path) -> list[Path]:
 
 def test_plot_stitch_background_reassembles_the_background(tmp_path: Path):
     pytest.importorskip("matplotlib")
-    from jwstflow.contrib.qa import PlotStitchBackground
+    from jwstflow.qa.steps import PlotStitchBackground
 
     segments = segments_with_background(tmp_path)
     outputs = run_step(StitchSegments, segments, tmp_path, params={"rescale": True})
@@ -334,7 +334,7 @@ def test_plot_stitch_background_reassembles_the_background(tmp_path: Path):
 def test_plot_stitch_background_tolerates_missing_records(tmp_path: Path, caplog):
     """A segment without a background record leaves a gap and a note, never a crash."""
     pytest.importorskip("matplotlib")
-    from jwstflow.contrib.qa import PlotStitchBackground
+    from jwstflow.qa.steps import PlotStitchBackground
 
     segments = segments_with_background(tmp_path)
     # strip the record off the red segment: without SKYSUB the columns mean nothing

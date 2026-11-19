@@ -1,4 +1,4 @@
-"""NIRSpec-specific helper steps."""
+"""NIRSpec MOS: point rate files at their MSA metadata file (the ``fix_msa_metafile`` step)."""
 
 from __future__ import annotations
 

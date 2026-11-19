@@ -27,7 +27,7 @@ from typing import Any
 
 import numpy as np
 
-from ..steps.base import RunContext, Step
+from ...steps.base import RunContext, Step
 
 log = logging.getLogger(__name__)
 
@@ -180,7 +180,7 @@ def _wavelengths(hdr: Any) -> np.ndarray:
 
 
 def _plot(path: Path, w, fa, fb, ratio, name: str, prov: dict[str, Any]) -> Path:
-    from .. import qa
+    from ... import qa
 
     fig, (ax1, ax2) = qa.subplots(2, 1, figsize=qa.FIGSIZE["spectrum2"], sharex=True,
                                      gridspec_kw={"height_ratios": [3, 1]})

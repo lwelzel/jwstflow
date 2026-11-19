@@ -7,7 +7,7 @@ from pathlib import Path
 
 from jwstflow.steps.base import (
     BUILTIN_ALIASES,
-    CONTRIB_ALIASES,
+    BUNDLED_STEPS,
     Step,
     _REGISTRY,
     register_step,
@@ -33,12 +33,27 @@ def test_builtin_lookup():
     assert "\n" in long  # multi-line detail
 
 
-def test_contrib_docstrings_have_short_and_detail():
-    for name in CONTRIB_ALIASES:
+def test_bundled_docstrings_have_short_and_detail():
+    for name in BUNDLED_STEPS:
         short, long = step_description(name)
         assert short, f"{name}: no short description (docstring missing?)"
         assert long, f"{name}: no detailed description (single-paragraph docstring)"
         assert "\n" not in short  # collapsed to one line
+
+
+def test_bundled_steps_are_the_entry_points_of_the_package():
+    """One list, kept twice: pyproject.toml registers jwstflow's own steps for an install, and
+    BUNDLED_STEPS resolves them from a bare source checkout. Each names the module that *defines*
+    the step (its file is fingerprinted into the task ids and parsed for the description)."""
+    import tomllib
+
+    from jwstflow.steps.base import resolve_target
+
+    pyproject = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
+    assert pyproject["project"]["entry-points"]["jwstflow.steps"] == BUNDLED_STEPS
+    for name, target in BUNDLED_STEPS.items():
+        obj = resolve_target(name)
+        assert f"{obj.__module__}:{obj.__qualname__}" == target, name
 
 
 def test_registered_object_is_asked_directly():

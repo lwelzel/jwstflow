@@ -23,7 +23,7 @@ stages:
         jump: {expand_large_events: true}
 
   # spec2 opens the file named in MSAMETFL; make that an absolute path into the target's raw directory
-  - step: jwstflow.contrib.nirspec:fix_msa_metafile
+  - step: fix_msa_metafile
     inputs:
       - {stage: calwebb_detector1, pattern: "*_rate.fits"}
     parameters: {search: raw}

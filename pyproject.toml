@@ -53,26 +53,28 @@ Issues = "https://github.com/lwelzel/jwstflow/issues"
 [project.scripts]
 jwstflow = "jwstflow.cli:app"
 
-# QA steps shipped with the core package, by name
+# jwstflow's own steps, by name (the same list as BUNDLED_STEPS in jwstflow/steps/registry.py).
 [project.entry-points."jwstflow.steps"]
+# data steps: each lives with the feature it implements
+stitch_segments = "jwstflow.stitching:StitchSegments"
+psf_cube = "jwstflow.psf.steps:PsfCube"
+flag_spaxel_clusters = "jwstflow.clusters.steps:FlagSpaxelClusters"
+propagate_cluster_flags = "jwstflow.clusters.steps:PropagateClusterFlags"
+fix_msa_metafile = "jwstflow.data.msa:fix_msa_metafile"
+# QA steps: jwstflow.qa.steps
 plot_spectrum = "jwstflow.qa.steps.spectra:PlotSpectrum"
-quicklook_image = "jwstflow.qa.steps.images:QuicklookImage"
+plot_snr = "jwstflow.qa.steps.spectra:PlotSnr"
+plot_spectrum_stages = "jwstflow.qa.steps.spectra:PlotSpectrumStages"
 plot_stitch = "jwstflow.qa.steps.stitch:PlotStitch"
 plot_stitch_overlaps = "jwstflow.qa.steps.stitch:PlotStitchOverlaps"
 plot_stitch_background = "jwstflow.qa.steps.stitch:PlotStitchBackground"
-plot_snr = "jwstflow.qa.steps.spectra:PlotSnr"
-plot_spectrum_stages = "jwstflow.qa.steps.spectra:PlotSpectrumStages"
+quicklook_image = "jwstflow.qa.steps.images:QuicklookImage"
 qa_cube_summary = "jwstflow.qa.steps.cubes:QaCubeSummary"
 qa_cube_slices = "jwstflow.qa.steps.cubes:QaCubeSlices"
+qa_psf_cube = "jwstflow.qa.steps.psf:QaPsfCube"
+qa_spaxel_clusters = "jwstflow.qa.steps.clusters:QaSpaxelClusters"
+mast_compare = "jwstflow.qa.steps.mast_compare:MastCompare"
 header_summary = "jwstflow.qa.steps.summary:HeaderSummary"
-fix_msa_metafile = "jwstflow.contrib.nirspec:fix_msa_metafile"
-mast_compare = "jwstflow.contrib.mast_compare:MastCompare"
-stitch_segments = "jwstflow.stitching:StitchSegments"
-psf_cube = "jwstflow.contrib.psf:PsfCube"
-qa_psf_cube = "jwstflow.contrib.psf:QaPsfCube"
-flag_spaxel_clusters = "jwstflow.clusters:FlagSpaxelClusters"
-propagate_cluster_flags = "jwstflow.clusters:PropagateClusterFlags"
-qa_spaxel_clusters = "jwstflow.contrib.clusters:QaSpaxelClusters"
 
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]
