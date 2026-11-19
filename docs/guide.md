@@ -267,7 +267,7 @@ data steps, so each one lands in `qa/<step name>/` -- the subdirectory names
 the step that made it. They all follow one standard (no titles, mJy flux
 units, mid-point step plots, height-matched colorbars, nan-aware cube
 collapses, the cmasher `torch` palette with black main lines, units in
-square brackets), set in this repo and implemented by `jwstflow.qafig`;
+square brackets), set in this repo and implemented by the `jwstflow.qa` package;
 [docs/qa_figures.md](qa_figures.md) spells out the rules and shows how a QA
 step uses the module. Contributed packages build their QA figures through
 the same module, so `qa/` reads as one consistent report.

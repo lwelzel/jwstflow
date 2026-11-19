@@ -13,6 +13,13 @@ features through a small config grammar::
     features: [H2, PAH]                            # ... or species
     features: {gas_lines: [H2, NeII], pah_bands: all, ice_bands: [co2_4.27]}
     features: {ice_bands: all, wave_min: 2.8, wave_max: 5.3}  # restrict to a wavelength range
+    features: {gas_lines: all, photospheric_lines: all}       # add an opt-in dataset
+
+``all`` on its own means the default datasets (``DATASETS``). Two further tables
+are bundled but only used when named (``EXTRA_DATASETS``): ``gas_lines_extended``
+(the higher H I series members, the full H2 branches, He I, rarer forbidden
+lines) and ``photospheric_lines`` (stellar absorption lines). QA figures
+annotate them; data steps that mask ``all`` are not changed by them.
 
 ``select_features`` turns any of these into ``[(id, label, wmin, wmax), ...]``.
 Lines (``kind == 'line'``) get their mask width from ``line_width_um`` or, when
@@ -28,7 +35,13 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+#: The default datasets: what a bare ``features: all`` selects (and therefore what data
+#: steps mask with it).
 DATASETS = ("gas_lines", "pah_bands", "ice_bands")
+#: Bundled datasets that are used only when named (``features: {photospheric_lines: all}``):
+#: catalogues for annotating figures that must not change what ``all`` masks -- the further
+#: gas lines beyond the masking set of ``gas_lines``, and the stellar photospheric lines.
+EXTRA_DATASETS = ("gas_lines_extended", "photospheric_lines")
 
 
 def data_dir() -> Path:
@@ -88,12 +101,12 @@ def load_dataset(name: str) -> tuple[Feature, ...]:
     """Features of one bundled dataset (or of an external ECSV path)."""
     from astropy.table import Table
 
-    if name in DATASETS:
+    if name in DATASETS + EXTRA_DATASETS:
         table = Table.read(data_dir() / "spectral_features" / f"{name}.ecsv", format="ascii.ecsv")
     else:
         path = Path(name).expanduser()
         if not path.is_file():
-            raise FileNotFoundError(f"unknown feature dataset {name!r}; bundled: {DATASETS}")
+            raise FileNotFoundError(f"unknown feature dataset {name!r}; bundled: {DATASETS + EXTRA_DATASETS}")
         table = Table.read(path, format="ascii.ecsv")
         name = path.stem
     out = []

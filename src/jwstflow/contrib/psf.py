@@ -16,7 +16,7 @@ from typing import Any, Literal
 import numpy as np
 from pydantic import Field
 
-from .. import qafig
+from .. import qa
 from ..psf import (
     PSFCUBE_SUFFIX,
     GaussianPsfEngine,
@@ -181,7 +181,7 @@ class QaPsfCube(Step):
 
     level = "qa"
     inputs = (f"*_{PSFCUBE_SUFFIX}.fits",)
-    version = "2"   # 1 -> 2: frame/PA annotation of the library products
+    version = "4"   # 3 -> 4: PSF slices as frames (pixel and arcsec offsets from the centre)
 
     def run(self, inputs: list[Path], ctx: RunContext, *, n_slices: int = 4, dpi: int = 150,
             fmt: str = "png", xscale: str = "log", **params: Any) -> list[Path]:
@@ -194,46 +194,39 @@ class QaPsfCube(Step):
                 config = None
             n = max(2, min(int(n_slices), len(product.wavelengths)))
             picks = np.unique(np.linspace(0, len(product.wavelengths) - 1, n).round().astype(int))
-            plt = qafig.use_agg()
-            fig = plt.figure(figsize=(3.0 * len(picks), 5.6), layout="constrained")
+            fig = qa.figure(figsize=(3.0 * len(picks) + 0.8, 6.4))
             gs = fig.add_gridspec(2, len(picks))
-            half = product.pixelscale_arcsec * product.data.shape[1] / 2.0
+            sky = qa.SkyFrame.from_scale(product.pixelscale_arcsec, product.data.shape[1:], reference="PSF centre")
             for col, k in enumerate(picks):
-                ax = fig.add_subplot(gs[0, col])
-                qafig.imshow(ax, product.data[k], stretch="log", cbar=(col == len(picks) - 1),
-                             extent=(-half, half, -half, half))
-                ax.text(0.04, 0.94, f"{product.wavelengths[k]:.2f} um", transform=ax.transAxes,
-                        color="white", fontsize=8, va="top",
-                        bbox={"facecolor": "black", "alpha": 0.55, "pad": 1.5, "edgecolor": "none"})
-                ax.set_xlabel("x offset [arcsec]")
-                if col == 0:
-                    ax.set_ylabel("y offset [arcsec]")
-                else:
-                    ax.set_yticklabels([])
+                last = col == len(picks) - 1
+                frame = qa.Frame(fig.add_subplot(gs[0, col]))
+                frame.image(product.data[k], sky=sky, stretch="log", cbar=last, cbar_label="PSF (normalised to unit sum)",
+                            sides="bt" + ("l" if col == 0 else "") + ("r" if last else ""))
+                qa.tag(frame.ax, qa.um(float(product.wavelengths[k])))
             ax_fwhm = fig.add_subplot(gs[1, : max(1, len(picks) // 2)])
             ax_sum = fig.add_subplot(gs[1, max(1, len(picks) // 2):])
             wave, fwhm = product.wavelengths, product.fwhm_arcsec()
-            qafig.step(ax_fwhm, wave, fwhm, color=qafig.MAIN_COLOR, label="measured")
+            qa.step(ax_fwhm, wave, fwhm, color=qa.MAIN_COLOR, label="measured")
             fine = np.geomspace(wave[0], wave[-1], 200)
-            ax_fwhm.plot(fine, diffraction_fwhm_arcsec(fine), color="gray", lw=0.8, ls="--",
-                         label="diffraction 1.025$\\lambda$/D")
+            ax_fwhm.plot(fine, diffraction_fwhm_arcsec(fine), color=qa.REF_COLOR, lw=qa.LW["main"], ls="--",
+                         label=r"diffraction limit 1.025 $\lambda/D$")
             if config is not None and config.instrument == "MIRI":
-                ax_fwhm.plot(fine, approx_fwhm_arcsec(config, fine), color="gray", lw=0.8, ls=":",
-                             label="Law+2023 empirical")
-            ax_fwhm.set_xlabel(qafig.WAVE_LABEL)
-            ax_fwhm.set_ylabel("PSF FWHM [arcsec]")
-            qafig.set_wave_scale(ax_fwhm, xscale)
-            qafig.step(ax_sum, wave, product.sums(), color=qafig.MAIN_COLOR)
-            ax_sum.set_xlabel(qafig.WAVE_LABEL)
+                ax_fwhm.plot(fine, approx_fwhm_arcsec(config, fine), color=qa.REF_COLOR, lw=qa.LW["main"], ls=":",
+                             label="Law et al. (2023), empirical")
+            ax_fwhm.set_xlabel(qa.WAVE_LABEL)
+            ax_fwhm.set_ylabel(qa.label("FWHM", "arcsec"))
+            qa.set_wave_scale(ax_fwhm, xscale)
+            qa.step(ax_sum, wave, product.sums(), color=qa.MAIN_COLOR)
+            ax_sum.set_xlabel(qa.WAVE_LABEL)
             ax_sum.set_ylabel("in-field energy fraction")
             ax_sum.set_ylim(0, 1.05)
-            qafig.set_wave_scale(ax_sum, xscale)
+            qa.set_wave_scale(ax_sum, xscale)
             pa = product.position_angle_deg
-            qafig.annotate(ax_fwhm, inp.name,
-                           f"{product.data.shape[2]} px of {product.pixelscale_arcsec:.4f}\", "
+            qa.annotate(ax_fwhm, inp.name,
+                           f"{product.data.shape[2]} pix of {product.pixelscale_arcsec:.4f} arcsec, "
                            f"frame {product.frame or '?'}, PA {f'{pa:.1f}' if pa is not None else 'n/a'}",
                            f"engine {product.meta_value('JWFPSFEN') or '?'} "
                            f"({product.meta_value('JWFPSFMD') or '?'})")
-            qafig.figlegend(fig)
-            out.append(qafig.save(fig, ctx.output_dir / f"{inp.stem}.{fmt}", dpi=dpi))
+            qa.figlegend(fig)
+            out.append(qa.save(fig, ctx.output_dir / f"{inp.stem}.{fmt}", dpi=dpi))
         return out

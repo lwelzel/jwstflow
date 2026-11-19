@@ -180,21 +180,20 @@ def _wavelengths(hdr: Any) -> np.ndarray:
 
 
 def _plot(path: Path, w, fa, fb, ratio, name: str, prov: dict[str, Any]) -> Path:
-    from .. import qafig
+    from .. import qa
 
-    fig, (ax1, ax2) = qafig.subplots(2, 1, figsize=(11, 6), sharex=True,
+    fig, (ax1, ax2) = qa.subplots(2, 1, figsize=qa.FIGSIZE["spectrum2"], sharex=True,
                                      gridspec_kw={"height_ratios": [3, 1]})
-    # both spectra are in Jy; jwstflow's is the main product -> black, MAST a palette color
-    (mast_color,) = qafig.line_colors(2)[1:]
-    qafig.step(ax1, w, fb * 1e3, color=mast_color, alpha=0.8, lw=0.7,
+    # both spectra are in Jy; jwstflow's is the main product -> black, MAST the reference -> the model accent
+    qa.step(ax1, w, fb * 1e3, color=qa.ROLE_COLORS["model"], lw=qa.LW["thin"],
                label=f"MAST (jwst {prov['MASTCAL'][0]}, {prov['MASTCTX'][0]})")
-    qafig.step(ax1, w, fa * 1e3, color=qafig.MAIN_COLOR, lw=0.7,
+    qa.step(ax1, w, fa * 1e3, color=qa.MAIN_COLOR, lw=qa.LW["thin"],
                label=f"jwstflow (jwst {prov['JWFCAL'][0]}, {prov['JWFCTX'][0]})")
-    ax1.set_ylabel(qafig.FLUX_LABEL)
-    qafig.step(ax2, w, ratio, color=qafig.MAIN_COLOR, lw=0.7)
-    ax2.axhline(1, color="0.6", lw=0.5)
-    ax2.set(xlabel=qafig.WAVE_LABEL, ylabel="jwstflow / MAST", ylim=(0.5, 1.5))
-    qafig.set_wave_scale(ax2)   # shared x: sets both panels
-    qafig.annotate(ax1, name)
-    qafig.figlegend(fig)
-    return qafig.save(fig, path, dpi=150)
+    ax1.set_ylabel(qa.FLUX_LABEL)
+    qa.step(ax2, w, ratio, color=qa.MAIN_COLOR, lw=qa.LW["thin"])
+    qa.refline(ax2, y=1.0)
+    ax2.set(xlabel=qa.WAVE_LABEL, ylabel=r"$F_\nu$ / $F_{\nu,\,\mathrm{MAST}}$", ylim=(0.5, 1.5))
+    qa.set_wave_scale(ax2)   # shared x: sets both panels
+    qa.annotate(ax1, name)
+    qa.figlegend(fig)
+    return qa.save(fig, path, dpi=150)

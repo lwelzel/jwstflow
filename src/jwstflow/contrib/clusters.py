@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from .. import qafig
+from .. import qa
 from ..clusters import CLUSTERMASK_SUFFIX, band_key, read_cluster_product
 from ..naming import slug
 from ..steps.base import RunContext, Step
@@ -41,7 +41,7 @@ class QaSpaxelClusters(Step):
     level = "qa"
     batch = "all"
     inputs = (f"*_{CLUSTERMASK_SUFFIX}.fits",)
-    version = "1"
+    version = "2"   # 1 -> 2: QA figure standard v2 (NaN in grey, in-panel tags, mathtext labels)
 
     def run(self, inputs: list[Path], ctx: RunContext, *, panel: float = 2.6, percentiles: tuple[float, float] | list[float] = (1.0, 99.5),
             dpi: int = 150, **params: Any) -> list[Path]:
@@ -70,24 +70,25 @@ class QaSpaxelClusters(Step):
         first, i0 = rows[0]
         col_waves = first["slices"][i0]["wave"]
         nrows, ncols = len(rows), len(col_waves)
-        fig, axes = qafig.subplots(nrows, ncols, figsize=(panel * ncols + 1.2, panel * nrows + 0.8), squeeze=False)
+        fig, axes = qa.subplots(nrows, ncols, figsize=(panel * ncols + 1.2, panel * nrows + 0.8), squeeze=False)
         # shared limits from the reference images (the other dithers), in display units
-        refs = np.concatenate([qafig.to_mjy(p["slices"][i]["ref"], IMAGE_UNIT)[0].ravel() for p, i in rows])
+        refs = np.concatenate([qa.to_mjy(p["slices"][i]["ref"], IMAGE_UNIT)[0].ravel() for p, i in rows])
         refs = refs[np.isfinite(refs)]
         if refs.size == 0:
-            refs = np.concatenate([qafig.to_mjy(p["slices"][i]["data"], IMAGE_UNIT)[0].ravel() for p, i in rows])
+            refs = np.concatenate([qa.to_mjy(p["slices"][i]["data"], IMAGE_UNIT)[0].ravel() for p, i in rows])
             refs = refs[np.isfinite(refs)]
         vmin, vmax = (np.percentile(refs, percentiles) if refs.size else (0.0, 1.0))
         if not vmax > vmin:
             vmax = vmin + 1.0
-        aper_c, flag_c = qafig.OVERLAY_COLORS[:2]
+        aper_c, flag_c = qa.OVERLAY_COLORS[:2]
         region = first["regions"][i0]
         shape = str(region["shape"])
-        size = f"r = {float(region['radius']):.3f}\"" if shape == "circle" else shape
-        qafig.annotate(axes[0, 0], f"region {rid}: RA {float(region['ra']):.6f} Dec {float(region['dec']):.6f} ({size}), "
-                                   f"{float(region['wave_min']):.4f}-{float(region['wave_max']):.4f} um")
-        qafig.contour_proxy(axes[0, 0], aper_c, ls="dashed", label="search aperture")
-        qafig.contour_proxy(axes[0, 0], flag_c, label="flagged spaxels (included dithers)")
+        size = f"r = {float(region['radius']):.3f} arcsec" if shape == "circle" else shape
+        qa.annotate(axes[0, 0], rf"region {rid}: $\alpha$ = {float(region['ra']):.6f}$\degree$, "
+                                   rf"$\delta$ = {float(region['dec']):+.6f}$\degree$ ({size}), "
+                                   f"{qa.um_range(float(region['wave_min']), float(region['wave_max']), '.4f')}")
+        qa.contour_proxy(axes[0, 0], aper_c, ls="dashed", label="search aperture")
+        qa.contour_proxy(axes[0, 0], flag_c, label="flagged spaxels (included dithers)")
         for r, (p, i) in enumerate(rows):
             row = p["regions"][i]
             sl = p["slices"][i]
@@ -99,27 +100,25 @@ class QaSpaxelClusters(Step):
                 if abs(sl["wave"][k] - wave) > 0.5 * step:
                     ax.set_axis_off()
                     continue
-                qafig.imshow(ax, sl["data"][k], unit=IMAGE_UNIT, vmin=vmin, vmax=vmax, cbar=(c == ncols - 1),
-                             cbar_label=qafig.SB_LABEL if c == ncols - 1 else None)
-                if sl["aperture"].any():
-                    ax.contour(sl["aperture"], levels=[0.5], colors=aper_c, linewidths=0.9, linestyles="dashed")
+                qa.imshow(ax, sl["data"][k], unit=IMAGE_UNIT, vmin=vmin, vmax=vmax, cbar=(c == ncols - 1),
+                             cbar_label=qa.SB_LABEL if c == ncols - 1 else None, sides=None)
+                qa.contour_mask(ax, sl["aperture"], aper_c, ls="dashed")
                 in_window = int(row["plane_min"]) <= int(np.argmin(np.abs(p["waves"] - sl["wave"][k]))) <= int(row["plane_max"])
                 plane_idx = int(np.argmin(np.abs(p["waves"] - sl["wave"][k])))
-                if included and p["mask"][plane_idx].any():
-                    ax.contour(p["mask"][plane_idx], levels=[0.5], colors=flag_c, linewidths=1.2)
-                ax.text(0.03, 0.97, f"{sl['wave'][k]:.4f} um" + ("" if in_window else " (context)"),
-                        transform=ax.transAxes, ha="left", va="top", fontsize=6.5, color="white",
-                        bbox={"boxstyle": "round,pad=0.2", "fc": "black", "alpha": 0.5, "lw": 0})
+                if included:
+                    qa.contour_mask(ax, p["mask"][plane_idx], flag_c)
+                qa.tag(ax, qa.um(float(sl["wave"][k]), ".4f") + ("" if in_window else " (context)"))
                 ax.set_xticks([])
                 ax.set_yticks([])
+                ax.minorticks_off()
                 if c == 0:
-                    ax.set_ylabel(f"dither {int(row['dither'])} ({'in' if included else 'out'})\ny [pix]", fontsize=7)
+                    ax.set_ylabel(f"dither {int(row['dither'])} ({'in' if included else 'out'})\n{qa.Y_PIX_LABEL}")
                 if r == nrows - 1:
-                    ax.set_xlabel("x [pix]", fontsize=7)
+                    ax.set_xlabel(qa.X_PIX_LABEL)
             verdict = "included" if included else "excluded"
-            qafig.annotate(axes[r, 0], f"dither {int(row['dither'])} [{p['path'].name}]: {verdict} -- "
-                                       f"peak {float(row['score']):.1f} sigma, {int(row['n_deviant'])} deviant, "
+            qa.annotate(axes[r, 0], f"dither {int(row['dither'])} [{p['path'].name}]: {verdict} -- "
+                                       rf"peak {float(row['score']):.1f}$\sigma$, {int(row['n_deviant'])} deviant, "
                                        f"{int(row['n_flagged'])} flagged spaxel-planes ({row['reason']})")
-        qafig.figlegend(fig, ncol=1)
+        qa.figlegend(fig, ncol=1)
         base = re.sub(r"_dither\d+", "", first["path"].stem.replace(f"_{CLUSTERMASK_SUFFIX}", ""))
-        return qafig.save(fig, ctx.output_dir / f"{base}_{slug(rid)}_clusters.png", dpi=dpi)
+        return qa.save(fig, ctx.output_dir / f"{base}_{slug(rid)}_clusters.png", dpi=dpi)

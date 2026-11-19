@@ -147,11 +147,16 @@ def step_identity(spec: str) -> tuple[str, int | str]:
 # jwstflow's own QA steps; also exposed as `jwstflow.steps` entry points, this table
 # is the fallback when a package was installed without them.
 CONTRIB_ALIASES: dict[str, str] = {
-    "plot_spectrum": "jwstflow.contrib.qa:PlotSpectrum",
-    "quicklook_image": "jwstflow.contrib.qa:QuicklookImage",
-    "plot_stitch": "jwstflow.contrib.qa:PlotStitch",
-    "plot_stitch_background": "jwstflow.contrib.qa:PlotStitchBackground",
-    "header_summary": "jwstflow.contrib.qa:HeaderSummary",
+    "plot_spectrum": "jwstflow.qa.steps.spectra:PlotSpectrum",
+    "quicklook_image": "jwstflow.qa.steps.images:QuicklookImage",
+    "plot_stitch": "jwstflow.qa.steps.stitch:PlotStitch",
+    "plot_stitch_overlaps": "jwstflow.qa.steps.stitch:PlotStitchOverlaps",
+    "plot_stitch_background": "jwstflow.qa.steps.stitch:PlotStitchBackground",
+    "plot_snr": "jwstflow.qa.steps.spectra:PlotSnr",
+    "plot_spectrum_stages": "jwstflow.qa.steps.spectra:PlotSpectrumStages",
+    "qa_cube_summary": "jwstflow.qa.steps.cubes:QaCubeSummary",
+    "qa_cube_slices": "jwstflow.qa.steps.cubes:QaCubeSlices",
+    "header_summary": "jwstflow.qa.steps.summary:HeaderSummary",
     "fix_msa_metafile": "jwstflow.contrib.nirspec:fix_msa_metafile",
     "mast_compare": "jwstflow.contrib.mast_compare:MastCompare",
     "stitch_segments": "jwstflow.stitching:StitchSegments",
