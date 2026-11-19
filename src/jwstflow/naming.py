@@ -35,6 +35,7 @@ CUSTOM_SUFFIXES: set[str] = {
     "s1dcomb",   # stitched / combined 1-D spectrum
     "psfcube",   # spectrally sub-sampled instrument PSF matching an s3d cube (jwstflow.psf)
     "clustermask",  # bad spaxel clusters found in a per-dither cube (jwstflow.clusters)
+    "gapcov",    # coverage next to the NIRSpec detector gap, per group of exposures (jwstflow.gaps)
 }
 
 _SUFFIX_RE = re.compile(r"^(?P<base>.+)_(?P<suffix>[a-z0-9]+(?:-[a-z0-9]+)?)$")

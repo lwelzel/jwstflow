@@ -594,6 +594,10 @@ def detector_sky_coordinates(model: Any, windows: list[tuple[float, float]], *, 
         idx = np.flatnonzero(keep)
         x_lo = int(np.floor(cols[max(0, idx.min() - 2)]))
         x_hi = int(np.ceil(cols[min(len(cols) - 1, idx.max() + 2)]))
+        if idx.max() + 2 > len(cols) - 1:
+            # the coarse grid stops up to coarse_step - 1 columns short of the box's end (on NRS1 the
+            # detector gap): evaluate to the detector edge, the bounding box masks what lies beyond
+            x_hi = nx_det - 1
         y_lo, y_hi = int(np.floor(np.nanmin(yc))), int(np.ceil(np.nanmax(yc)))
         x_lo, x_hi = max(0, x_lo), min(nx_det - 1, x_hi)
         y_lo, y_hi = max(0, y_lo), min(ny_det - 1, y_hi)

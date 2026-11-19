@@ -178,6 +178,36 @@ fixed in core and plugins build on them instead of inventing variants:
   every later stage consumes). `qa_spaxel_clusters` draws every dither at the
   affected wavelengths. The product carries the mask contract plus the
   per-region decisions and QA slices.
+* **The NIRSpec detector gap** (`jwstflow.gaps`): every IFU slice crosses
+  the NRS1/NRS2 gap at its own wavelength and every dither moves a sky
+  position onto other slices, so in a combined cube the exposures drop out
+  one after another approaching the gap: the voxels of that staircase (some
+  15-30 planes on each side, more at the field edges) are built from a few
+  exposures down to single pixels, and are 2-5 times noisier than the same
+  spaxels away from the gap. Their content is physical, though -- the part
+  of the disk the moving gap has not yet covered, lines included -- so
+  nothing is masked for coverage. `flag_gap_outliers` (after stage 2,
+  `batch: all`) finds the detector pixels that build those voxels and tests
+  each against the other exposures at its sky position and wavelength
+  (where `outlier_detection` has the fewest exposures to compare): only
+  pixels deviating by more than 5 sigma from at least two other exposures
+  are flagged `DO_NOT_USE | OUTLIER` in DQ-edited `_cal` copies; untestable
+  pixels are kept. One `*_gapcov.fits` product per group of exposures maps
+  the coverage on the sky (`jwstflow.gaps.gap_limits_at` looks a position up:
+  where only some exposures contribute at a wavelength), drawn by
+  `qa_gap_coverage`. Files without a detector gap (MIRI, PRISM, medium
+  gratings) pass unchanged:
+
+  ```yaml
+  - step: flag_gap_outliers            # -> stage2/flag_gap_outliers
+    inputs: [{stage: calwebb_spec2, pattern: "*_cal.fits"}]
+  - step: spec3
+    inputs: [{stage: flag_gap_outliers, pattern: "*_cal.fits"}]
+    # ...
+  - step: qa_gap_coverage
+    inputs: [{stage: flag_gap_outliers, pattern: "*_gapcov.fits"}]
+    tags: [qa]
+  ```
 
 Extraction steps additionally share `jwstflow.apcorr`: the CRDS
 aperture-correction reference (MIRI MRS and NIRSpec IFU layouts) normalised
@@ -202,7 +232,8 @@ in the archive. Custom steps derive names with `jwstflow.naming.derived_name()`
 and may not use a suffix the pipeline reserves (`_x1d`, `_s3d`, `_cal`, …);
 jwstflow's own product types are `_s1d` (extracted spectra), `_s1dcomb`
 (stitched), `_bkgspec` (background spectra), `_lsr`, `_psfcube` (PSF
-cubes) and `_clustermask` (bad spaxel clusters of a per-dither cube). Edited copies of an official product (a DQ-flagged `_cal`) keep the
+cubes), `_clustermask` (bad spaxel clusters of a per-dither cube) and
+`_gapcov` (coverage at the NIRSpec detector gap). Edited copies of an official product (a DQ-flagged `_cal`) keep the
 official name and record the edit in the header.
 
 ## Data products shipped with jwstflow

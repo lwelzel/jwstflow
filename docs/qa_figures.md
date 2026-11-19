@@ -401,6 +401,7 @@ Guidelines that follow from the rules:
 | `qa_psf_cube` | frames + lines | `*_psfcube.fits` | PSF slices across wavelength, FWHM against the diffraction limit, in-field energy |
 | `mast_compare` | spectrum | `*_s3d` / `*_x1d` | jwstflow vs. MAST spectra and their ratio |
 | `qa_spaxel_clusters` | thumbnails | `*_clustermask.fits` | per band and region: one row per dither cube, one column per wavelength plane (`*_<region>_clusters.png`) |
+| `qa_gap_coverage` | frames | `*_gapcov.fits` | the coverage next to the NIRSpec detector gap on the sky: where all exposures stop before and after it, and how long the partially covered stretch beyond is (nm), per group of exposures |
 
 The steps live in `jwstflow.qa.steps` (`spectra`, `stitch`, `images`,
 `cubes`); `jwstflow.contrib.qa` re-exports them for workflows that name them

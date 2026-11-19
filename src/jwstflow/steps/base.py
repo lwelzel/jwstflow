@@ -165,6 +165,8 @@ CONTRIB_ALIASES: dict[str, str] = {
     "flag_spaxel_clusters": "jwstflow.clusters:FlagSpaxelClusters",
     "propagate_cluster_flags": "jwstflow.clusters:PropagateClusterFlags",
     "qa_spaxel_clusters": "jwstflow.contrib.clusters:QaSpaxelClusters",
+    "flag_gap_outliers": "jwstflow.gaps:FlagGapOutliers",
+    "qa_gap_coverage": "jwstflow.contrib.gaps:QaGapCoverage",
 }
 
 ALIAS_ASN_TYPE: dict[str, str] = {
@@ -592,7 +594,8 @@ def check_outputs(outputs: Iterable[Path] | None, ctx: RunContext, step: Any) ->
                     "suffix via ctx.derived_path(), or set `writes_official_products = True` on the step "
                     "if it deliberately produces edited copies of official products"
                 )
-            if declared and suffix is not None and suffix not in declared:
+            official_copy = suffix in JWST_PRODUCT_SUFFIXES and getattr(step, "writes_official_products", False)
+            if declared and suffix is not None and suffix not in declared and not official_copy:
                 log.warning("%s: output %s has suffix %r, not among the declared outputs %s", type(step).__name__, p.name, suffix, declared)
     return paths
 
