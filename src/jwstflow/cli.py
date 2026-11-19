@@ -385,8 +385,9 @@ def new_package(
     private: Annotated[bool, typer.Option("--private", help="Proprietary flavour: restrictive LICENSE, 'Private :: Do Not Upload' classifier, private-repo instructions")] = False,
     git: Annotated[bool, typer.Option("--git/--no-git", help="Initialise a git repository with an initial commit")] = True,
 ) -> None:
-    """Scaffold a contributed step package: pyproject with `jwstflow.steps` entry points, src layout,
-    step stubs, a passing declaration test, README (with a publish-to-GitHub walkthrough), CI and git.
+    """Scaffold a contributed step package: pyproject with `jwstflow.steps` entry points, src layout
+    (`steps/` with one module per step), step stubs, a passing declaration test, README (with a
+    publish-to-GitHub walkthrough), CI and git.
     Only scaffolding is generated -- each step's run() awaits your science."""
     from .scaffold import scaffold_package
 
@@ -404,7 +405,7 @@ def new_package(
         f"\nnext:\n"
         f"  cd {root}\n"
         f"  uv sync && uv run python -m pytest     # green before any science exists\n"
-        f"  edit src/{name.replace('-', '_')}/steps.py   # implement each step's run()\n"
+        f"  edit src/{name.replace('-', '_')}/steps/<step>.py   # one module per step: implement its run()\n"
         f"  README.md walks through publishing to GitHub ({'private' if private else 'public'})"
     )
 
