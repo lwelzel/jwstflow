@@ -1,4 +1,5 @@
-"""Tests of the contributed-package generator (jwstflow new-package)."""
+"""Tests of the scaffolding (jwstflow.scaffold): the contributed-package generator (jwstflow new-package)
+and the single-step generator (jwstflow new-step)."""
 
 from __future__ import annotations
 
@@ -62,3 +63,22 @@ def test_bad_inputs_are_rejected(tmp_path: Path):
     scaffold_package("jwstflow-dup", tmp_path, git=False)
     with pytest.raises(FileExistsError):
         scaffold_package("jwstflow-dup", tmp_path, git=False)
+
+
+def test_generated_step_runs_and_passes_the_audit(tmp_path: Path):
+    """`jwstflow new-step` (jwstflow.scaffold.scaffold_step): the step works as generated."""
+    from astropy.io import fits
+
+    from jwstflow.scaffold import scaffold_step
+    from jwstflow.testing import run_step, synthetic_image
+
+    module_file, test_file = scaffold_step("ScaleFlux", tmp_path / "steps", level=2, suffix="scaled")
+    assert (module_file.name, test_file.name) == ("scale_flux.py", "test_scale_flux.py")
+    cls = import_file(module_file).ScaleFlux
+    desc, problems = check_step(cls)
+    assert problems == [] and (desc["level"], desc["outputs"]) == (2, ["scaled"])
+    src = synthetic_image(tmp_path / "jw00001001001_01101_00001_nrs1_cal.fits", value=2.0)
+    (out,) = run_step(cls, [src], tmp_path, params={"scale": 3.0})
+    assert out.name == "jw00001001001_01101_00001_nrs1_scaled.fits" and fits.getdata(out, "SCI")[0, 0] == 6.0
+    with pytest.raises(FileExistsError):
+        scaffold_step("ScaleFlux", tmp_path / "steps")

@@ -365,10 +365,10 @@ def new_step(
     suffix: Annotated[str | None, typer.Option("--suffix", help="Product suffix written (lowercase alphanumeric)")] = None,
 ) -> None:
     """Scaffold a custom step (documented class + a passing test) following the step contract."""
-    from .testing import scaffold
+    from .scaffold import scaffold_step
 
     lvl: int | str = int(level) if level.isdigit() else level
-    for f in scaffold(class_name, directory, level=lvl, inputs=inputs, suffix=suffix):
+    for f in scaffold_step(class_name, directory, level=lvl, inputs=inputs, suffix=suffix):
         console.print(f"wrote {f}")
     console.print(f"next: edit the run() method, then `python -m pytest {directory}` and `jwstflow check-step {directory}/<module>.py:{class_name}`")
 

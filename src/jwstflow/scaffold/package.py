@@ -20,7 +20,7 @@ import subprocess
 from pathlib import Path
 from string import Template
 
-from .naming import JWST_PRODUCT_SUFFIXES
+from ..naming import JWST_PRODUCT_SUFFIXES
 
 log = logging.getLogger(__name__)
 
