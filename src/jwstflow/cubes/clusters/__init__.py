@@ -32,7 +32,7 @@ three steps that any workflow can insert between stage 2 and stage 3:
 at the affected wavelengths from the products alone.
 
 The product (``<cube base>_clustermask.fits``) follows the mask contract of
-:mod:`jwstflow.masks` (MASK/CONT/CONTIMG on the cube's own grid) and adds:
+:mod:`jwstflow.cubes.masks` (MASK/CONT/CONTIMG on the cube's own grid) and adds:
 
     WAVES     f8 (nw,)         wavelength [um] of every cube plane
     REGIONS   bintable         one row per region evaluated on this cube (see REGION_COLUMNS)

@@ -69,10 +69,10 @@ BUILTIN_ALIASES: dict[str, str] = {
 # them when the package metadata is missing -- a source checkout on PYTHONPATH.
 BUNDLED_STEPS: dict[str, str] = {
     # data steps: each lives with the feature it implements
-    "stitch_segments": "jwstflow.stitching:StitchSegments",
-    "psf_cube": "jwstflow.psf.steps:PsfCube",
-    "flag_spaxel_clusters": "jwstflow.clusters.steps:FlagSpaxelClusters",
-    "propagate_cluster_flags": "jwstflow.clusters.steps:PropagateClusterFlags",
+    "stitch_segments": "jwstflow.spectra.stitching:StitchSegments",
+    "psf_cube": "jwstflow.cubes.psf.steps:PsfCube",
+    "flag_spaxel_clusters": "jwstflow.cubes.clusters.steps:FlagSpaxelClusters",
+    "propagate_cluster_flags": "jwstflow.cubes.clusters.steps:PropagateClusterFlags",
     "fix_msa_metafile": "jwstflow.data.msa:fix_msa_metafile",
     # QA steps: jwstflow.qa.steps
     "plot_spectrum": "jwstflow.qa.steps.spectra:PlotSpectrum",
@@ -90,9 +90,9 @@ BUNDLED_STEPS: dict[str, str] = {
     "header_summary": "jwstflow.qa.steps.summary:HeaderSummary",
 }
 
-# Dotted addresses the bundled steps had before the package was reorganised (part of them
-# lived in `jwstflow.contrib`) -> where they are now. A workflow that names a step by such a
-# path keeps running, with a notice; new workflows use the registered names above.
+# Dotted addresses the bundled steps had before the package was reorganised (top-level modules
+# and `jwstflow.contrib`) -> where they are now. A workflow that names a step by such a path
+# keeps running, with a notice; new workflows use the registered names above.
 MOVED_STEPS: dict[str, str] = {
     "jwstflow.contrib.qa.PlotSpectrum": "jwstflow.qa.steps.spectra:PlotSpectrum",
     "jwstflow.contrib.qa.PlotSnr": "jwstflow.qa.steps.spectra:PlotSnr",
@@ -105,13 +105,14 @@ MOVED_STEPS: dict[str, str] = {
     "jwstflow.contrib.qa.QaCubeSlices": "jwstflow.qa.steps.cubes:QaCubeSlices",
     "jwstflow.contrib.qa.HeaderSummary": "jwstflow.qa.steps.summary:HeaderSummary",
     "jwstflow.contrib.qa.copy_inputs": "jwstflow.qa.steps.summary:copy_inputs",
-    "jwstflow.contrib.psf.PsfCube": "jwstflow.psf.steps:PsfCube",
+    "jwstflow.contrib.psf.PsfCube": "jwstflow.cubes.psf.steps:PsfCube",
     "jwstflow.contrib.psf.QaPsfCube": "jwstflow.qa.steps.psf:QaPsfCube",
     "jwstflow.contrib.clusters.QaSpaxelClusters": "jwstflow.qa.steps.clusters:QaSpaxelClusters",
     "jwstflow.contrib.mast_compare.MastCompare": "jwstflow.qa.steps.mast_compare:MastCompare",
     "jwstflow.contrib.nirspec.fix_msa_metafile": "jwstflow.data.msa:fix_msa_metafile",
-    "jwstflow.clusters.FlagSpaxelClusters": "jwstflow.clusters.steps:FlagSpaxelClusters",
-    "jwstflow.clusters.PropagateClusterFlags": "jwstflow.clusters.steps:PropagateClusterFlags",
+    "jwstflow.clusters.FlagSpaxelClusters": "jwstflow.cubes.clusters.steps:FlagSpaxelClusters",
+    "jwstflow.clusters.PropagateClusterFlags": "jwstflow.cubes.clusters.steps:PropagateClusterFlags",
+    "jwstflow.stitching.StitchSegments": "jwstflow.spectra.stitching:StitchSegments",
 }
 _MOVED_NOTICED: set[str] = set()
 

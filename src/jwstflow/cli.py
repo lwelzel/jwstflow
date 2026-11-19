@@ -21,7 +21,7 @@ from .config import Config, ConfigError, list_presets, load_config, preset_path
 from .engine.graph import select_stages
 from .engine.runner import Runner
 from .engine.state import StateStore
-from .steps.base import activate_plugins, describe_target, registered_steps
+from .steps import activate_plugins, describe_target, registered_steps
 
 app = typer.Typer(
     help="Lightweight YAML-driven orchestrator for the JWST calibration pipeline.",
@@ -301,7 +301,7 @@ def graph(
 ) -> None:
     """Render the workflow DAG (data patterns -> steps -> products) without running anything."""
     from .engine.dagviz import render
-    from .steps.base import LEVEL_DIRS
+    from .steps import LEVEL_DIRS
 
     setup_logging("WARNING")
     cfg = _load(config, set_)
@@ -419,7 +419,7 @@ def steps(
     from rich.padding import Padding
     from rich.text import Text
 
-    from .steps.base import step_description
+    from .steps import step_description
 
     known = registered_steps()
     if name is not None:

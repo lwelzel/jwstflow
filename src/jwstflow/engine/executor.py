@@ -67,7 +67,7 @@ def default_thread_env(n: int) -> dict[str, str]:
 
 def execute_task(payload: Payload) -> Result:
     """Run one task. Never raises; failures are reported in the result dict."""
-    from ..steps.base import RunContext, check_outputs, make_step
+    from ..steps import RunContext, check_outputs, make_step
 
     init_worker(payload.get("env", {}), payload.get("sys_path"))
     t0 = time.time()

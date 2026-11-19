@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from ...data.discovery import read_metadata
-from ...steps.base import RunContext, Step
+from ...steps import RunContext, Step
 
 
 class HeaderSummary(Step):

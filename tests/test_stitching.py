@@ -1,4 +1,4 @@
-"""Tests of the generic segment stitcher (jwstflow.stitching.StitchSegments)."""
+"""Tests of the generic segment stitcher (jwstflow.spectra.stitching.StitchSegments)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from jwstflow.stitching import StitchSegments
+from jwstflow.spectra.stitching import StitchSegments
 from jwstflow.testing import check_step, make_context, run_step, synthetic_x1d
 
 

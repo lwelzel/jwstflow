@@ -81,6 +81,7 @@ from .instrument import (
     IfuConfig,
     approx_fwhm_arcsec,
     diffraction_fwhm_arcsec,
+    mrs_psf_fwhm_arcsec,
     read_cube_geometry,
 )
 from .product import (
@@ -112,6 +113,7 @@ __all__ = [
     "find_psf_product",
     "measure_fwhm_arcsec",
     "model_pixel_scale",
+    "mrs_psf_fwhm_arcsec",
     "psf_from_stage",
     "read_cube_geometry",
     "rotate_cube_to_sky",

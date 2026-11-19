@@ -1,11 +1,11 @@
-"""Tests of the shared aperture-correction helpers (jwstflow.apcorr)."""
+"""Tests of the shared aperture-correction helpers (jwstflow.cubes.apcorr)."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from jwstflow.apcorr import apcorr_factor, mrs_apcorr_table, nrs_apcorr_table
+from jwstflow.cubes import apcorr_factor, mrs_apcorr_table, nrs_apcorr_table
 
 
 def test_apcorr_factor_interpolates_and_clamps():
@@ -62,7 +62,7 @@ def test_nrs_table_reads_the_node_and_checks_the_config():
 def test_load_apcorr_reads_a_nrsifu_reference(tmp_path):
     datamodels = pytest.importorskip("stdatamodels.jwst.datamodels")
 
-    from jwstflow.apcorr import load_apcorr
+    from jwstflow.cubes import load_apcorr
     from jwstflow.testing import synthetic_cube
 
     ref = datamodels.NrsIfuApcorrModel()
@@ -86,7 +86,7 @@ def test_load_apcorr_reads_a_nrsifu_reference(tmp_path):
 def test_load_apcorr_reads_a_mirmrs_reference(tmp_path):
     datamodels = pytest.importorskip("stdatamodels.jwst.datamodels")
 
-    from jwstflow.apcorr import load_apcorr
+    from jwstflow.cubes import load_apcorr
     from jwstflow.testing import synthetic_cube
 
     ref = datamodels.MirMrsApcorrModel()

@@ -1,6 +1,6 @@
 """The ``*_clustermask.fits`` product: writing, reading, and finding the ones of a cal file.
 
-The layout is described in :mod:`jwstflow.clusters`.
+The layout is described in :mod:`jwstflow.cubes.clusters`.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from typing import Any
 
 import numpy as np
 
-from ..masks import strip_wave_axis
+from ..wcs import strip_wave_axis
 from .regions import band_key, dither_of
 
 CLUSTERMASK_SUFFIX = "clustermask"   # *_clustermask.fits: the per-dither cluster product

@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from jwstflow.psf import (
+from jwstflow.cubes.psf import (
     GaussianPsfEngine,
     IfuConfig,
     PsfCubeProduct,
@@ -256,7 +256,7 @@ def test_read_cube_geometry_plain_fits_and_roll_ref(tmp_path: Path):
 
 # --------------------------------------------------------------------------- the steps
 def test_step_declarations():
-    from jwstflow.psf import PsfCube
+    from jwstflow.cubes.psf import PsfCube
     from jwstflow.qa.steps import QaPsfCube
 
     for cls in (PsfCube, QaPsfCube):
@@ -265,7 +265,7 @@ def test_step_declarations():
 
 
 def test_psf_cube_step_runs_with_defaults_validated():
-    from jwstflow.psf import PsfCube
+    from jwstflow.cubes.psf import PsfCube
 
     assert PsfCube.validate_params({}) == {}                       # a library needs no target knowledge
     assert PsfCube.validate_params({"pixelscale_arcsec": 0.02})["pixelscale_arcsec"] == 0.02

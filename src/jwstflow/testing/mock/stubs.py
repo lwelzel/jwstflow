@@ -17,7 +17,8 @@ from typing import Any
 
 import numpy as np
 
-from ...steps.base import _REGISTRY, RunContext, Step
+from ...steps import RunContext, Step
+from ...steps.registry import _REGISTRY
 from .detector import _mock_flagged_voxels, mock_cal_layout, mock_cal_wcs
 from .instruments import MRS_BANDS, MRS_PIX_ARCSEC, NRS_GRATINGS
 from .observations import _imager_wcs, star_field

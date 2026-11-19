@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from ..steps.base import RunContext
+from ..steps import RunContext
 
 log = logging.getLogger(__name__)
 

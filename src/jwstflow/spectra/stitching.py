@@ -42,8 +42,8 @@ from typing import Any, NamedTuple
 import numpy as np
 from pydantic import Field
 
-from .naming import derived_name
-from .steps.base import RunContext, Step, StepParams
+from ..steps import RunContext, Step, StepParams
+from ..steps.naming import derived_name
 
 log = logging.getLogger(__name__)
 

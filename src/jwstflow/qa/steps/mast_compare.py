@@ -27,7 +27,7 @@ from typing import Any
 
 import numpy as np
 
-from ...steps.base import RunContext, Step
+from ...steps import RunContext, Step
 
 log = logging.getLogger(__name__)
 

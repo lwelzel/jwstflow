@@ -1,6 +1,6 @@
 """The PSF-cube product: slices in memory, on disk, resampled, convolved -- and how to find one.
 
-The file layout and the design choices are described in :mod:`jwstflow.psf`.
+The file layout and the design choices are described in :mod:`jwstflow.cubes.psf`.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from ..steps.base import RunContext
+from ...steps import RunContext
 
 log = logging.getLogger(__name__)
 
@@ -301,14 +301,14 @@ def find_psf_product(cube_path: Path | str, directory: Path | str) -> PsfCubePro
     """The ``*_psfcube.fits`` in ``directory`` matching the cube's instrument configuration."""
     from astropy.io import fits
 
-    from ..masks import matches_instrument
+    from ..instrument import matches_instrument
 
     cube_hdr = fits.getheader(cube_path)
     candidates = sorted(Path(directory).glob(f"*_{PSFCUBE_SUFFIX}.fits"))
     for f in candidates:
         if matches_instrument(cube_hdr, fits.getheader(f)):
             return PsfCubeProduct.read(f)
-    from ..masks import INSTRUMENT_KEYS
+    from ..instrument import INSTRUMENT_KEYS
 
     config = {k: cube_hdr.get(k) for k in INSTRUMENT_KEYS if cube_hdr.get(k) is not None}
     raise FileNotFoundError(
@@ -319,7 +319,7 @@ def find_psf_product(cube_path: Path | str, directory: Path | str) -> PsfCubePro
 def psf_from_stage(cube_path: Path, ctx: RunContext, stage: str | None) -> PsfCubeProduct | None:
     """The PSF product of another stage for this cube, or None when the stage is absent.
 
-    Mirrors :func:`jwstflow.masks.mask_from_stage`: None (with a warning) when
+    Mirrors :func:`jwstflow.cubes.masks.mask_from_stage`: None (with a warning) when
     ``stage`` is empty or not in the workflow; raises when the stage exists
     but holds no matching product (declare ``depends_on`` on the consumer).
     """

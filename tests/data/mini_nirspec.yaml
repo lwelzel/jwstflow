@@ -19,7 +19,7 @@ stages:
       - {stage: calwebb_detector1, pattern: "*_rate.fits"}
     association: {mode: per_exposure, level: 2, asn_type: spec2}
 
-  # the bad-cluster chain (jwstflow.clusters): per-dither cubes -> which dither / which
+  # the bad-cluster chain (jwstflow.cubes.clusters): per-dither cubes -> which dither / which
   # spaxels -> DQ flags on the detector pixels behind them; spec3 consumes the flagged frames
   - step: jwstflow.testing.mock:StubCubeBuild
     variant: perdither

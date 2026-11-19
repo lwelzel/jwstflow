@@ -35,7 +35,7 @@ from typing import Any
 from ..config.loader import dump_config
 from ..config.schema import RAW_STAGE, Config, StageConfig
 from ..data.discovery import FileRecord, HeaderCache, discover, fingerprint
-from ..steps.base import (
+from ..steps import (
     ALIAS_ASN_TYPE,
     BUILTIN_ALIASES,
     LEVEL_DIRS,
@@ -218,7 +218,7 @@ class Runner:
 
     def _uses_stpipe(self) -> bool:
         """True when any enabled stage runs an official pipeline/step (i.e. will need CRDS)."""
-        from ..steps.base import is_stpipe_step
+        from ..steps import is_stpipe_step
 
         for stage in self.cfg.stages:
             if not stage.enabled:
@@ -577,7 +577,7 @@ class Runner:
         step is resolved in *this* process and nothing is recorded in the
         checkpoint store.
         """
-        from ..steps.base import RunContext, make_step
+        from ..steps import RunContext, make_step
 
         self.prepare()
         st = self.cfg.stage(stage)

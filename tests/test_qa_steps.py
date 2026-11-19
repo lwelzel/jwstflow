@@ -15,7 +15,7 @@ from jwstflow.qa.steps import (
     QaCubeSummary,
     QuicklookImage,
 )
-from jwstflow.steps.base import resolve_target
+from jwstflow.steps import resolve_target
 from jwstflow.testing import make_context, run_step, synthetic_cube, synthetic_x1d
 
 
@@ -32,7 +32,7 @@ def test_stock_steps_resolve_by_name_and_by_path():
 
 def test_addresses_of_older_workflows_still_resolve(caplog):
     """Dotted paths from before the package was reorganised (MOVED_STEPS): same object, same fingerprint, a notice."""
-    from jwstflow.steps.base import MOVED_STEPS, source_fingerprint, step_description
+    from jwstflow.steps import MOVED_STEPS, source_fingerprint, step_description
 
     assert resolve_target("jwstflow.contrib.qa:PlotSpectrum") is PlotSpectrum
     assert resolve_target("jwstflow.contrib.qa.PlotSpectrum") is PlotSpectrum          # the dotted form as well

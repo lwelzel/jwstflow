@@ -1,6 +1,6 @@
 """The cluster steps: ``flag_spaxel_clusters`` (the cubes) and ``propagate_cluster_flags`` (the cal files).
 
-The chain they belong to is described in :mod:`jwstflow.clusters`; the figure of it,
+The chain they belong to is described in :mod:`jwstflow.cubes.clusters`; the figure of it,
 ``qa_spaxel_clusters``, is in :mod:`jwstflow.qa.steps.clusters`.
 """
 
@@ -14,9 +14,10 @@ from typing import Any
 import numpy as np
 from pydantic import Field
 
-from ..masks import celestial_wcs, dilate
-from ..naming import derived_name
-from ..steps.base import RunContext, Step, StepParams
+from ...steps import RunContext, Step, StepParams
+from ...steps.naming import derived_name
+from ..morphology import dilate
+from ..wcs import celestial_wcs
 from .compare import deviation_from_others, robust_sigma
 from .detector import _dq_bits, detector_pixels_in_masks
 from .product import CLUSTERMASK_SUFFIX, find_cluster_products, write_cluster_product
@@ -95,7 +96,7 @@ class FlagSpaxelClusters(Step):
         from astropy.io import fits
         from stdatamodels.jwst import datamodels
 
-        from ..spectra import cube_wavelengths
+        from ..wcs import cube_wavelengths
 
         if not inputs:
             raise ValueError("flag_spaxel_clusters received no cubes")

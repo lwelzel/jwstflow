@@ -67,7 +67,7 @@ class RunContext:
     def derived_path(self, source: str | Path, suffix: str, *, descriptor: str | None = None, ext: str = ".fits") -> Path:
         """Output path for a product derived from ``source``, following jwstflow's naming rules
         (official suffix stripped, descriptor inserted, custom suffix appended) inside ``output_dir``."""
-        from ..naming import derived_name
+        from .naming import derived_name
 
         return self.output_dir / derived_name(source, suffix, descriptor=descriptor, ext=ext)
 
@@ -217,7 +217,7 @@ def check_declaration(cls: type) -> list[str]:
     if not isinstance(cls.outputs, (tuple, list)) or not all(isinstance(p, str) for p in cls.outputs):
         problems.append("outputs must be a tuple of suffix strings")
     else:
-        from ..naming import JWST_PRODUCT_SUFFIXES
+        from .naming import JWST_PRODUCT_SUFFIXES
 
         for suffix in cls.outputs:
             if suffix in JWST_PRODUCT_SUFFIXES:
@@ -255,8 +255,8 @@ class FunctionStep(Step):
 def check_outputs(outputs: Iterable[Path] | None, ctx: RunContext, step: Any) -> list[Path]:
     """Verify what a step returned: paths exist, live in the output directory and (for custom
     steps) use no reserved jwst suffix. Raises ValueError on a violation."""
-    from ..naming import JWST_PRODUCT_SUFFIXES, split_suffix
     from .adapters import JwstStepAdapter
+    from .naming import JWST_PRODUCT_SUFFIXES, split_suffix
 
     paths = [Path(o) for o in (outputs or [])]
     out_dir = ctx.output_dir.resolve()

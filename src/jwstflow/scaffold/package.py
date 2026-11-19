@@ -20,7 +20,7 @@ import subprocess
 from pathlib import Path
 from string import Template
 
-from ..naming import JWST_PRODUCT_SUFFIXES
+from ..steps.naming import JWST_PRODUCT_SUFFIXES
 
 log = logging.getLogger(__name__)
 
@@ -188,7 +188,7 @@ _STEPS_HEADER = '''\
 The docstring of each class is the step's description in `jwstflow steps`:
 its first paragraph is the short summary (the table), the rest the detailed
 explanation (`jwstflow steps <name>`).
-See jwstflow's docs (custom steps, `jwstflow.masks`, `jwstflow.stitching`) for
+See jwstflow's docs (custom steps, `jwstflow.cubes.masks`, `jwstflow.spectra.stitching`) for
 the helpers and product contracts available to build on.
 """
 

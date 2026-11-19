@@ -9,7 +9,7 @@ from typing import Any, Literal
 import numpy as np
 from pydantic import Field, model_validator
 
-from ..steps.base import StepParams
+from ...steps import StepParams
 
 #: Header keywords that identify the *band* a dither cube belongs to (never the detector:
 #: a per-dither cube combines both NIRSpec detectors, whose cal files must both match it).
@@ -54,7 +54,7 @@ class ClusterRegion(StepParams):
 
 def region_centre(region: dict[str, Any]) -> tuple[float, float]:
     """ICRS (ra, dec) in degrees of a region (polygons: the centroid of their vertices)."""
-    from ..targets import parse_coords
+    from ...data.targets import parse_coords
 
     if region.get("shape") == "polygon" and region.get("vertices"):
         pts = np.array([parse_coords(a, b) for a, b in region["vertices"]], dtype=float)
@@ -89,7 +89,7 @@ def region_aperture(region: dict[str, Any], wcs: Any, shape: tuple[int, int]) ->
         return (u / a) ** 2 + (v / b) ** 2 <= 1.0
     from matplotlib.path import Path as MplPath
 
-    from ..targets import parse_coords
+    from ...data.targets import parse_coords
 
     verts = np.array([sky_offsets(*parse_coords(a, b), ra0, dec0) for a, b in region["vertices"]], dtype=float)
     inside = MplPath(verts).contains_points(np.column_stack([east.ravel(), north.ravel()]))

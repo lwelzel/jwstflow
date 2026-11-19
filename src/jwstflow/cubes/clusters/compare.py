@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from ..masks import resample_image
+from ..wcs import resample_image
 
 
 def robust_sigma(values: np.ndarray) -> float:

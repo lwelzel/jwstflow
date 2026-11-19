@@ -36,7 +36,7 @@ Three pieces:
   per (spaxel, plane) of the detector's half of the band (rows = spaxels,
   columns = planes; :func:`mock_cal_wcs`), so DQ flags set on a cal file
   (``OUTLIER``, what ``propagate_cluster_flags`` writes) are honoured when the
-  cubes are rendered -- the bad-cluster chain of :mod:`jwstflow.clusters`
+  cubes are rendered -- the bad-cluster chain of :mod:`jwstflow.cubes.clusters`
   runs end to end offline. Custom (jwstflow / contributed) steps then run
   *for real* on those cubes.
 

@@ -1,4 +1,4 @@
-"""The bad-cluster chain (jwstflow.clusters): regions, the per-dither comparison, the
+"""The bad-cluster chain (jwstflow.cubes.clusters): regions, the per-dither comparison, the
 back-propagation to detector pixels through a real gwcs, and the QA figure."""
 
 from __future__ import annotations
@@ -11,7 +11,8 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from jwstflow.clusters import (
+from jwstflow.cubes import celestial_wcs
+from jwstflow.cubes.clusters import (
     CLUSTERMASK_SUFFIX,
     FlagSpaxelClusters,
     PropagateClusterFlags,
@@ -20,7 +21,6 @@ from jwstflow.clusters import (
     read_cluster_product,
     region_aperture,
 )
-from jwstflow.masks import celestial_wcs
 from jwstflow.qa.steps import QaSpaxelClusters
 from jwstflow.testing import check_step, run_step, synthetic_cube
 from jwstflow.testing.mock import (

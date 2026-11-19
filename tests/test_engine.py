@@ -17,7 +17,8 @@ from jwstflow.config.loader import config_from_dict
 from jwstflow.engine.graph import ordered_stages, select_stages
 from jwstflow.engine.runner import Runner
 from jwstflow.engine.state import StateStore, TaskRecord, make_task_id
-from jwstflow.steps.base import _REGISTRY, register_step
+from jwstflow.steps import register_step
+from jwstflow.steps.registry import _REGISTRY
 
 
 @pytest.fixture()

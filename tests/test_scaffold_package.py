@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from jwstflow.scaffold import scaffold_package
-from jwstflow.steps.base import import_file
+from jwstflow.steps import import_file
 from jwstflow.testing import check_step
 
 

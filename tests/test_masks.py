@@ -1,4 +1,4 @@
-"""Tests of the mask-product contract (jwstflow.masks)."""
+"""Tests of the mask-product contract (jwstflow.cubes.masks)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from jwstflow.masks import (
+from jwstflow.cubes import (
     clean_blob,
     find_mask_product,
     matches_instrument,

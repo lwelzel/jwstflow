@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
-from ..steps.base import (
+from ..steps import (
     FunctionStep,
     Step,
     check_declaration,

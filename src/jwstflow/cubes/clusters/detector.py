@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from ..masks import dilate
+from ..morphology import dilate
 
 
 def _dq_bits() -> int:

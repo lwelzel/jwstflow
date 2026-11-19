@@ -51,19 +51,19 @@ def test_write_x1d_stamps_units_and_inherits_provenance(tmp_path: Path):
 
 def test_reference_data_ships_with_the_package(tmp_path: Path, monkeypatch):
     """The spectral-feature tables resolve without a project data/ directory or env var."""
-    import jwstflow.features as features
+    import jwstflow.spectra.features as features
 
     monkeypatch.delenv("JWSTFLOW_DATA_DIR", raising=False)
     monkeypatch.chdir(tmp_path)  # a bare directory: no project root, no data/
     d = features.data_dir()
     assert (d / "spectral_features" / "gas_lines.ecsv").is_file()
-    assert d == Path(features.__file__).resolve().parent / "refdata"
+    assert d == Path(features.__file__).resolve().parents[1] / "refdata"   # jwstflow/refdata, next to the code
     lines = features.load_dataset("gas_lines")
     assert any(f.id == "h2_1-0_s1" for f in lines)
 
 
 def test_project_data_overrides_package_data(tmp_path: Path, monkeypatch):
-    import jwstflow.features as features
+    import jwstflow.spectra.features as features
 
     monkeypatch.delenv("JWSTFLOW_DATA_DIR", raising=False)
     (tmp_path / ".jwstflow-root").touch()

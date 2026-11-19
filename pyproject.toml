@@ -56,10 +56,10 @@ jwstflow = "jwstflow.cli:app"
 # jwstflow's own steps, by name (the same list as BUNDLED_STEPS in jwstflow/steps/registry.py).
 [project.entry-points."jwstflow.steps"]
 # data steps: each lives with the feature it implements
-stitch_segments = "jwstflow.stitching:StitchSegments"
-psf_cube = "jwstflow.psf.steps:PsfCube"
-flag_spaxel_clusters = "jwstflow.clusters.steps:FlagSpaxelClusters"
-propagate_cluster_flags = "jwstflow.clusters.steps:PropagateClusterFlags"
+stitch_segments = "jwstflow.spectra.stitching:StitchSegments"
+psf_cube = "jwstflow.cubes.psf.steps:PsfCube"
+flag_spaxel_clusters = "jwstflow.cubes.clusters.steps:FlagSpaxelClusters"
+propagate_cluster_flags = "jwstflow.cubes.clusters.steps:PropagateClusterFlags"
 fix_msa_metafile = "jwstflow.data.msa:fix_msa_metafile"
 # QA steps: jwstflow.qa.steps
 plot_spectrum = "jwstflow.qa.steps.spectra:PlotSpectrum"

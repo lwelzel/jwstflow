@@ -1,4 +1,4 @@
-"""Small helpers for 1-D spectra in the jwst ``x1d`` format and IFU cubes.
+"""1-D spectra in the jwst ``x1d`` format: the in-memory spectrum, reading and writing.
 
 They are the common currency of custom extraction / stitching / cleaning steps:
 every step reads and writes the pipeline's own ``EXTRACT1D`` table layout so
@@ -183,21 +183,6 @@ def read_x1d(path: Path, index: int = 0) -> Spectrum1D:
     meta = {k: v for k, v in hdr.items() if isinstance(v, (str, int, float, bool))}
     meta["path"] = str(path)
     return Spectrum1D(wave, flux, err, dq, meta)
-
-
-def cube_wavelengths(cube: Any) -> np.ndarray:
-    """Wavelength [um] of every plane of an ``IFUCubeModel`` (linear WCS or wavetable)."""
-    wavetable = getattr(cube, "wavetable", None)
-    if wavetable is not None and len(wavetable) > 0:
-        return np.asarray(wavetable["wavelength"], dtype=float).ravel()
-    n = cube.data.shape[0]
-    w = cube.meta.wcsinfo
-    return w.crval3 + (np.arange(n) + 1 - w.crpix3) * w.cdelt3
-
-
-def mrs_psf_fwhm_arcsec(wavelength_um: np.ndarray | float) -> np.ndarray | float:
-    """MIRI MRS PSF FWHM (arcsec) versus wavelength, Law et al. 2023: 0.033 lambda + 0.106."""
-    return 0.033 * np.asarray(wavelength_um, dtype=float) + 0.106
 
 
 class _nullcontext:

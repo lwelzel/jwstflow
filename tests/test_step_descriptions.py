@@ -5,15 +5,15 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-from jwstflow.steps.base import (
+from jwstflow.steps import (
     BUILTIN_ALIASES,
     BUNDLED_STEPS,
     Step,
-    _REGISTRY,
     register_step,
     split_description,
     step_description,
 )
+from jwstflow.steps.registry import _REGISTRY
 from jwstflow.steps.descriptions import BUILTIN_DESCRIPTIONS
 
 
@@ -47,7 +47,7 @@ def test_bundled_steps_are_the_entry_points_of_the_package():
     the step (its file is fingerprinted into the task ids and parsed for the description)."""
     import tomllib
 
-    from jwstflow.steps.base import resolve_target
+    from jwstflow.steps import resolve_target
 
     pyproject = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
     assert pyproject["project"]["entry-points"]["jwstflow.steps"] == BUNDLED_STEPS

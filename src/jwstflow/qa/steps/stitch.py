@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 
 from ... import qa
-from ...steps.base import RunContext, Step
+from ...steps import RunContext, Step
 from .spectra import all_spectra_figure
 
 log = logging.getLogger(__name__)

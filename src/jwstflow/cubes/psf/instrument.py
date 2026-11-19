@@ -137,11 +137,14 @@ def approx_fwhm_arcsec(config: IfuConfig, wavelength_um: np.ndarray | float) -> 
     stpsf IFU broadening (sigma = 0.05 arcsec) in quadrature."""
     lam = np.asarray(wavelength_um, dtype=float)
     if config.instrument == "MIRI":
-        from ..spectra import mrs_psf_fwhm_arcsec
-
         return mrs_psf_fwhm_arcsec(lam)
     diffraction = diffraction_fwhm_arcsec(lam)
     return np.sqrt(diffraction**2 + (_FWHM_PER_SIGMA * NIRSPEC_IFU_BROADENING_SIGMA) ** 2)
+
+
+def mrs_psf_fwhm_arcsec(wavelength_um: np.ndarray | float) -> np.ndarray | float:
+    """MIRI MRS PSF FWHM (arcsec) versus wavelength, Law et al. 2023: 0.033 lambda + 0.106."""
+    return 0.033 * np.asarray(wavelength_um, dtype=float) + 0.106
 
 
 def diffraction_fwhm_arcsec(wavelength_um: np.ndarray | float) -> np.ndarray | float:

@@ -10,9 +10,9 @@ from typing import Any
 import numpy as np
 
 from ... import qa
-from ...clusters import CLUSTERMASK_SUFFIX, band_key, read_cluster_product
-from ...naming import slug
-from ...steps.base import RunContext, Step
+from ...cubes.clusters import CLUSTERMASK_SUFFIX, band_key, read_cluster_product
+from ...steps import RunContext, Step
+from ...steps.naming import slug
 
 log = logging.getLogger(__name__)
 

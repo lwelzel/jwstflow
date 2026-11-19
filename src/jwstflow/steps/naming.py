@@ -33,8 +33,8 @@ CUSTOM_SUFFIXES: set[str] = {
     "bkgspec",   # 1-D background spectrum in x1d format (input for master_background)
     "lsr",       # copy of a cube/spectrum with an LSRK wavelength axis
     "s1dcomb",   # stitched / combined 1-D spectrum
-    "psfcube",   # spectrally sub-sampled instrument PSF matching an s3d cube (jwstflow.psf)
-    "clustermask",  # bad spaxel clusters found in a per-dither cube (jwstflow.clusters)
+    "psfcube",   # spectrally sub-sampled instrument PSF matching an s3d cube (jwstflow.cubes.psf)
+    "clustermask",  # bad spaxel clusters found in a per-dither cube (jwstflow.cubes.clusters)
 }
 
 _SUFFIX_RE = re.compile(r"^(?P<base>.+)_(?P<suffix>[a-z0-9]+(?:-[a-z0-9]+)?)$")

@@ -6,7 +6,7 @@ import inspect
 from pathlib import Path
 from typing import Any
 
-from ..steps.base import FunctionStep, RunContext, Step, check_outputs, make_step
+from ..steps import FunctionStep, RunContext, Step, check_outputs, make_step
 
 
 def make_context(tmp_path: Path, *, stage: str = "test_step", target: str = "Test Target",

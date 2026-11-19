@@ -8,14 +8,14 @@ from typing import Any
 import numpy as np
 
 from ... import qa
-from ...psf import (
+from ...cubes.psf import (
     PSFCUBE_SUFFIX,
     IfuConfig,
     PsfCubeProduct,
     approx_fwhm_arcsec,
     diffraction_fwhm_arcsec,
 )
-from ...steps.base import RunContext, Step
+from ...steps import RunContext, Step
 
 
 class QaPsfCube(Step):

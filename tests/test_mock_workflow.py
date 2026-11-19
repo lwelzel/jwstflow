@@ -172,7 +172,7 @@ def test_mini_workflow_end_to_end(tmp_path: Path):
         assert (run / product).is_file(), product
 
     # the PSF library samples the cube's spaxels at oversample 2, on an odd grid
-    from jwstflow.psf import PsfCubeProduct
+    from jwstflow.cubes.psf import PsfCubeProduct
 
     psf = PsfCubeProduct.read(run / "stage4/psf_cube/jw01751-o006_t005_nirspec_g235h-f170lp_psfcube.fits")
     assert psf.data.shape == (5, 33, 33)                       # ceil(1.6" / 0.05") -> odd
@@ -198,7 +198,7 @@ def test_mini_workflow_end_to_end(tmp_path: Path):
         assert float(cube.data[0].max()) > 900.0  # disk peak ~1000 over sky 1
 
     # -- the bad-cluster chain: dither 2 of G395H found, its NRS2 frame flagged, cluster gone
-    from jwstflow.clusters import read_cluster_product
+    from jwstflow.cubes.clusters import read_cluster_product
 
     masks = {d: read_cluster_product(run / "stage4/flag_spaxel_clusters"
                                      / f"jw01751-o006_t005_nirspec_dither{d}_g395h-f290lp_clustermask.fits")
@@ -252,7 +252,8 @@ def test_workflow_graph_renders_when_enabled(tmp_path: Path):
 
 
 def test_stub_pipelines_registry_round_trip():
-    from jwstflow.steps.base import _REGISTRY, resolve_target
+    from jwstflow.steps import resolve_target
+    from jwstflow.steps.registry import _REGISTRY
 
     assert "detector1" not in _REGISTRY
     with stub_pipelines():

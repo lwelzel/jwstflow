@@ -28,7 +28,7 @@ from pydantic import (
 )
 
 # Name of the pseudo-stage that refers to downloaded/raw input data.
-from ..steps.base import LEVEL_DIRS  # noqa: E402
+from ..steps import LEVEL_DIRS  # noqa: E402
 
 
 def slugify(text: str) -> str:

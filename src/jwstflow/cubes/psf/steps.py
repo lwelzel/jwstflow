@@ -1,7 +1,7 @@
 """The ``psf_cube`` step: one PSF library per IFU cube.
 
 ``psf_cube`` generates one ``*_psfcube.fits`` per input ``*_s3d.fits`` (the
-psfcube-product contract, :mod:`jwstflow.psf`); ``qa_psf_cube``
+psfcube-product contract, :mod:`jwstflow.cubes.psf`); ``qa_psf_cube``
 (:mod:`jwstflow.qa.steps.psf`) plots it. The stpsf engine needs the
 ``jwstflow[psf]`` extra and the stpsf data files; everything else in the
 product path (reading, resampling, interpolation, convolution, QA) stays
@@ -17,7 +17,7 @@ from typing import Any, Literal
 import numpy as np
 from pydantic import Field
 
-from ..steps.base import RunContext, Step, StepParams
+from ...steps import RunContext, Step, StepParams
 from .engines import GaussianPsfEngine, StpsfEngine, stpsf_version
 from .grid import PsfGrid, subsample_wavelengths
 from .instrument import read_cube_geometry
@@ -35,7 +35,7 @@ class PsfCube(Step):
     so the slices describe the PSF as realised in reconstructed cubes -- at
     log-spaced wavelengths spanning the cube (adjacent wavelengths within
     ``max_fractional_step``, default 2%), and written as a ``*_psfcube.fits``
-    product (contract: ``jwstflow.psf``).
+    product (contract: ``jwstflow.cubes.psf``).
 
     The product is a **distance-independent library**: slices live on a
     fixed, fine angular grid -- the cube's own spaxel scale divided by

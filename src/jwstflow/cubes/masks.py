@@ -22,10 +22,10 @@ product of a companion stage that matches a cube's instrument configuration.
 The product is self-describing (the QA payload travels inside it), so QA steps
 never need to reopen a cube.
 
-The module also collects the geometry helpers such steps share: a celestial
-WCS from cube metadata, NaN-aware smoothing and reprojection between cube
-grids, and morphological cleanup. Everything imports its heavy dependencies
-lazily so the module stays importable without astropy/scipy.
+The helpers such steps share live next door: :mod:`.wcs` (a celestial WCS from
+cube metadata, reprojection between cube grids), :mod:`.morphology` (NaN-aware
+smoothing, morphological cleanup) and :mod:`.instrument` (matching a product
+to a cube's configuration). Heavy dependencies are imported lazily.
 """
 
 from __future__ import annotations
@@ -36,114 +36,13 @@ from typing import Any
 
 import numpy as np
 
-from .steps.base import RunContext
+from ..steps import RunContext
+from .instrument import INSTRUMENT_KEYS, matches_instrument
+from .wcs import strip_wave_axis
 
 log = logging.getLogger(__name__)
 
-#: Header keywords that identify a cube's instrument configuration; a mask
-#: product matches a cube when every keyword present in both headers agrees.
-INSTRUMENT_KEYS = ("INSTRUME", "DETECTOR", "GRATING", "FILTER", "CHANNEL", "BAND")
 
-
-# --------------------------------------------------------------------------- geometry
-def celestial_wcs(cube: Any) -> Any:
-    """Celestial (2-D) WCS of an IFU cube datamodel, built from ``meta.wcsinfo``."""
-    from astropy.io import fits
-    from astropy.wcs import WCS
-
-    w = cube.meta.wcsinfo
-    hdr = fits.Header()
-    for i, axis in ((1, "1"), (2, "2")):
-        hdr[f"CTYPE{i}"] = getattr(w, f"ctype{axis}")
-        hdr[f"CRVAL{i}"] = getattr(w, f"crval{axis}")
-        hdr[f"CRPIX{i}"] = getattr(w, f"crpix{axis}")
-        hdr[f"CDELT{i}"] = getattr(w, f"cdelt{axis}")
-        hdr[f"CUNIT{i}"] = getattr(w, f"cunit{axis}") or "deg"
-    for key in ("pc1_1", "pc1_2", "pc2_1", "pc2_2"):
-        val = getattr(w, key, None)
-        if val is not None:
-            hdr[key.upper()] = val
-    hdr["NAXIS"] = 2
-    return WCS(hdr).celestial
-
-
-def nan_smooth(img: np.ndarray, sigma: float) -> np.ndarray:
-    """NaN-aware Gaussian smoothing (weights = finite pixels)."""
-    from scipy.ndimage import gaussian_filter
-
-    if sigma <= 0:
-        return img
-    finite = np.isfinite(img)
-    v = gaussian_filter(np.where(finite, img, 0.0), sigma)
-    w = gaussian_filter(finite.astype(float), sigma)
-    return np.where(w > 0.05, v / np.maximum(w, 1e-12), np.nan)
-
-
-def pixel_map(src_wcs: Any, dst_wcs: Any, dst_shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
-    """(y, x) coordinates in `src_wcs` pixels of every pixel centre of the destination grid."""
-    yy, xx = np.indices(dst_shape)
-    ra, dec = dst_wcs.all_pix2world(xx, yy, 0)
-    sx, sy = src_wcs.all_world2pix(ra, dec, 0)
-    return np.asarray(sy, float), np.asarray(sx, float)
-
-
-def resample_image(img: np.ndarray, src_wcs: Any, dst_wcs: Any, dst_shape: tuple[int, int]) -> np.ndarray:
-    """Bilinear, NaN-aware resampling of `img` onto the destination grid (outside -> NaN)."""
-    from scipy.ndimage import map_coordinates
-
-    sy, sx = pixel_map(src_wcs, dst_wcs, dst_shape)
-    finite = np.isfinite(img)
-    v = map_coordinates(np.where(finite, img, 0.0), [sy, sx], order=1, mode="constant", cval=0.0)
-    w = map_coordinates(finite.astype(float), [sy, sx], order=1, mode="constant", cval=0.0)
-    return np.where(w > 0.5, v / np.maximum(w, 1e-12), np.nan)
-
-
-def sample_mask(mask: np.ndarray, src_wcs: Any, dst_wcs: Any, dst_shape: tuple[int, int]) -> np.ndarray:
-    """Nearest-neighbour sampling of a boolean mask onto the destination grid (outside -> False)."""
-    from scipy.ndimage import map_coordinates
-
-    sy, sx = pixel_map(src_wcs, dst_wcs, dst_shape)
-    return map_coordinates(mask.astype("u1"), [sy, sx], order=0, mode="constant", cval=0) > 0
-
-
-def dilate(mask: np.ndarray, n: int) -> np.ndarray:
-    """Binary dilation by ``n`` pixels (``n <= 0`` returns the mask unchanged)."""
-    from scipy.ndimage import binary_dilation
-
-    return binary_dilation(mask, iterations=n) if n > 0 else mask
-
-
-def clean_blob(mask: np.ndarray, anchor: np.ndarray | None = None) -> np.ndarray:
-    """Close small gaps, fill holes, and keep only structure connected to `anchor`
-    (or, without an anchor, the largest connected component)."""
-    from scipy.ndimage import binary_closing, binary_fill_holes, label
-
-    if not mask.any():
-        return mask
-    m = binary_fill_holes(binary_closing(mask, structure=np.ones((3, 3), bool)))
-    labels, n = label(m, structure=np.ones((3, 3), int))
-    if n <= 1:
-        return m
-    if anchor is not None and anchor.any():
-        keep = np.unique(labels[anchor & (labels > 0)])
-    else:
-        keep = [int(np.argmax(np.bincount(labels[labels > 0].ravel())))]
-    return np.isin(labels, [k for k in keep if k > 0])
-
-
-def strip_wave_axis(header: Any) -> Any:
-    """Copy of a cube SCI header with the 3rd (wavelength) axis removed, for 2-D extensions."""
-    hdr = header.copy()
-    for key in ("CTYPE3", "CRVAL3", "CRPIX3", "CDELT3", "CUNIT3", "CRDER3", "NAXIS3",
-                "PC1_3", "PC2_3", "PC3_1", "PC3_2", "PC3_3", "CD1_3", "CD2_3", "CD3_1", "CD3_2", "CD3_3",
-                "PS3_0", "PS3_1", "PV3_0", "PV3_1"):
-        hdr.remove(key, ignore_missing=True, remove_all=True)
-    if "WCSAXES" in hdr:
-        hdr["WCSAXES"] = 2
-    return hdr
-
-
-# --------------------------------------------------------------------------- the product
 def write_mask_product(path: Path, cube_path: Path, mask: np.ndarray, cont: np.ndarray, contimg: np.ndarray,
                        *, features: dict[str, list] | None = None, featimg: list[np.ndarray] | None = None,
                        featmask: list[np.ndarray] | None = None, keys: dict[str, Any] | None = None) -> Path:
@@ -192,15 +91,6 @@ def read_mask_product(path: Path) -> dict[str, Any]:
             "featimg": np.asarray(hdul["FEATIMG"].data, dtype=float) if "FEATIMG" in hdul else None,
             "featmask": np.asarray(hdul["FEATMASK"].data).astype(bool) if "FEATMASK" in hdul else None,
         }
-
-
-def matches_instrument(header_a: Any, header_b: Any) -> bool:
-    """True when every :data:`INSTRUMENT_KEYS` keyword present in both headers agrees."""
-    for key in INSTRUMENT_KEYS:
-        a, b = header_a.get(key), header_b.get(key)
-        if a is not None and b is not None and str(a).strip().lower() != str(b).strip().lower():
-            return False
-    return True
 
 
 def find_mask_product(cube_path: Path, directory: Path, suffix: str) -> dict[str, Any]:

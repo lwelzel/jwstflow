@@ -31,7 +31,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
-from ..steps.base import activate_plugins, step_identity
+from ..steps import activate_plugins, step_identity
 from .schema import RAW_STAGE, Config, slugify
 
 EXTENDS_KEY = "extends"
@@ -386,7 +386,7 @@ def _check_step_parameters(cfg: Config) -> None:
     a jwstflow Step that declares one (jwst steps validate their own parameters when they run)."""
     import inspect
 
-    from ..steps.base import BUILTIN_ALIASES, Step, resolve_target
+    from ..steps import BUILTIN_ALIASES, Step, resolve_target
 
     for stage in cfg.stages:
         if stage.step in BUILTIN_ALIASES:

@@ -122,7 +122,7 @@ def _spectrum(lines=(), dips=(), lo=1.7, hi=14.0, n=6000, seed=1):
 def test_annotate_features_marks_every_line_without_overlaps(tmp_path):
     import matplotlib
 
-    from jwstflow.features import select_features
+    from jwstflow.spectra.features import select_features
 
     fig, ax = qa.subplots()
     wave, flux = _spectrum(lines=(12.81355, 8.3000), dips=(2.20625,))      # [Ne II], an unknown line, Na I
@@ -253,7 +253,7 @@ def test_annotate_features_respects_the_range_and_none(tmp_path):
 
 
 def test_photospheric_lines_are_opt_in_for_masking_but_annotated(tmp_path):
-    from jwstflow.features import DATASETS, select_features
+    from jwstflow.spectra.features import DATASETS, select_features
 
     assert "photospheric_lines" not in DATASETS and "gas_lines_extended" not in DATASETS
     assert {f.dataset for f in select_features("all")} == set(DATASETS)                    # `all` is unchanged
@@ -377,8 +377,5 @@ def test_spectrum_and_frame_are_the_two_figures_to_build_on(tmp_path):
     assert frame.finish(tmp_path / "frame.png", notes=["a frame"]).exists()
 
 
-def test_qafig_remains_the_same_namespace():
-    from jwstflow import qafig
-
-    assert qafig.annotate_features is qa.annotate_features and qafig.SkyFrame is qa.SkyFrame
-    assert set(qa.__all__) <= set(dir(qafig)) and {"Spectrum", "Frame", "read_cube", "to_mjy"} <= set(qa.__all__)
+def test_the_package_exports_the_figure_classes_and_helpers():
+    assert {"Spectrum", "Frame", "SkyFrame", "annotate_features", "read_cube", "to_mjy"} <= set(qa.__all__)
