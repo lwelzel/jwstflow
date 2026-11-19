@@ -1,10 +1,11 @@
-"""What each built-in jwst alias does (hand-written, so nothing is imported).
+"""Step descriptions: what ``jwstflow steps`` prints, importing nothing heavy.
 
 ``jwstflow steps`` must stay fast and work without ``jwst`` in the parent
-process, so the aliases of :data:`~jwstflow.steps.base.BUILTIN_ALIASES` are
-documented here by hand as ``name -> (short, detailed)``. Custom steps need no
-such table: their docstring is their description (first paragraph = short,
-rest = detailed), read straight from the source file.
+process, so the aliases of :data:`~jwstflow.steps.registry.BUILTIN_ALIASES` are
+documented here by hand as ``name -> (short, detailed)``
+(:data:`BUILTIN_DESCRIPTIONS`). Custom steps need no such table: their
+docstring is their description (first paragraph = short, rest = detailed),
+read straight from the source file by :func:`step_description`.
 
 The detailed texts sketch what the official pipeline or step computes, in
 execution order, not every instrument-specific branch; the authoritative
@@ -12,6 +13,17 @@ reference is https://jwst-pipeline.readthedocs.io.
 """
 
 from __future__ import annotations
+
+import inspect
+
+from .interface import split_description
+from .plugins import is_path_spec
+from .registry import (
+    _REGISTRY,
+    BUILTIN_ALIASES,
+    _registered_target,
+    source_origin,
+)
 
 BUILTIN_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     # -- pipelines ----------------------------------------------------------
@@ -224,3 +236,48 @@ BUILTIN_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "model from every group.",
     ),
 }
+
+
+def _docstring_from_source(spec: str) -> str | None:
+    """Docstring of the object a step spec names, parsed from its source file.
+
+    The module is located like in :func:`source_origin` but never executed, so
+    listing steps stays cheap even when a step's module imports heavy packages.
+    Only top-level classes/functions are found; a re-exported object yields None.
+    """
+    import ast
+
+    attr = spec.rpartition(":")[2] if ":" in spec else spec.rpartition(".")[2]
+    if spec in _REGISTRY:
+        obj = _REGISTRY[spec]  # already imported: ask the object itself
+        target = obj if isinstance(obj, type) or callable(obj) else type(obj)
+        return inspect.getdoc(target)
+    if not is_path_spec(spec):
+        dotted = _registered_target(spec) or spec
+        attr = dotted.rpartition(":")[2] if ":" in dotted else dotted.rpartition(".")[2]
+    origin = source_origin(spec)
+    if origin is None or not attr:
+        return None
+    try:
+        tree = ast.parse(origin.read_text())
+    except (OSError, SyntaxError, ValueError):
+        return None
+    for node in tree.body:
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == attr:
+            return ast.get_docstring(node)
+    return None
+
+
+def step_description(spec: str) -> tuple[str, str]:
+    """``(short, detailed)`` description of a step name, importing nothing heavy.
+
+    Built-in jwst aliases are answered from a hand-written table (importing
+    jwst just to list steps would be slow and needless). Every other step
+    documents itself through its docstring -- first paragraph = short, rest =
+    detailed -- read from its source file without executing it, so a plugin's
+    imports (matplotlib, photutils, ...) never run either.
+    """
+    if spec in BUILTIN_ALIASES:
+        short, long = BUILTIN_DESCRIPTIONS.get(spec, ("", ""))
+        return short, inspect.cleandoc(long) if long else ""
+    return split_description(_docstring_from_source(spec))

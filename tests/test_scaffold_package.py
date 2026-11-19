@@ -1,4 +1,5 @@
-"""Tests of the contributed-package generator (jwstflow new-package)."""
+"""Tests of the scaffolding (jwstflow.scaffold): the contributed-package generator (jwstflow new-package)
+and the single-step generator (jwstflow new-step)."""
 
 from __future__ import annotations
 
@@ -8,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from jwstflow.scaffold import scaffold_package
-from jwstflow.steps.base import import_file
+from jwstflow.steps import import_file
 from jwstflow.testing import check_step
 
 
@@ -17,16 +18,19 @@ def test_generated_package_is_complete_and_valid(tmp_path: Path):
     assert root == tmp_path / "jwstflow-demo"
     rel = {str(f.relative_to(root)) for f in files}
     assert rel == {"pyproject.toml", "README.md", "LICENSE", ".gitignore",
-                   "src/jwstflow_demo/__init__.py", "src/jwstflow_demo/steps.py",
+                   "src/jwstflow_demo/__init__.py", "src/jwstflow_demo/steps/__init__.py",
+                   "src/jwstflow_demo/steps/defringe.py", "src/jwstflow_demo/steps/stitch_bands.py",
                    "tests/test_declarations.py", ".github/workflows/test.yml"}
     # pyproject parses, depends on jwstflow, and wires the entry points to the generated classes
     meta = tomllib.loads((root / "pyproject.toml").read_text())
     assert any(d.startswith("jwstflow") for d in meta["project"]["dependencies"])
     eps = meta["project"]["entry-points"]["jwstflow.steps"]
-    assert eps == {"defringe": "jwstflow_demo.steps:Defringe", "stitch_bands": "jwstflow_demo.steps:StitchBands"}
+    # the layout of every step package: steps/<step name>.py defines the step of that name
+    assert eps == {"defringe": "jwstflow_demo.steps.defringe:Defringe",
+                   "stitch_bands": "jwstflow_demo.steps.stitch_bands:StitchBands"}
     # the generated steps import and pass the step-contract audit before any science exists
-    module = import_file(root / "src/jwstflow_demo/steps.py")
     for ep, dotted in eps.items():
+        module = import_file(root / "src/jwstflow_demo/steps" / f"{ep}.py")
         cls = getattr(module, dotted.rpartition(":")[2])
         assert cls.name == ep  # canonical stage name == entry-point name
         _, problems = check_step(cls)
@@ -45,12 +49,12 @@ def test_private_flavour(tmp_path: Path):
     assert "Proprietary" in (root / "LICENSE").read_text()
     assert "--private" in (root / "README.md").read_text()
     # default step is named after the package
-    assert meta["project"]["entry-points"]["jwstflow.steps"] == {"secret_step": "jwstflow_secret.steps:SecretStep"}
+    assert meta["project"]["entry-points"]["jwstflow.steps"] == {"secret_step": "jwstflow_secret.steps.secret_step:SecretStep"}
 
 
 def test_reserved_suffixes_are_avoided(tmp_path: Path):
     root, _, _ = scaffold_package("jwstflow-x", tmp_path, steps=["cal"], git=False)  # 'cal' is an official suffix
-    module = import_file(root / "src/jwstflow_x/steps.py")
+    module = import_file(root / "src/jwstflow_x/steps/cal.py")
     assert module.Cal.outputs == ("calx",)
 
 
@@ -62,3 +66,22 @@ def test_bad_inputs_are_rejected(tmp_path: Path):
     scaffold_package("jwstflow-dup", tmp_path, git=False)
     with pytest.raises(FileExistsError):
         scaffold_package("jwstflow-dup", tmp_path, git=False)
+
+
+def test_generated_step_runs_and_passes_the_audit(tmp_path: Path):
+    """`jwstflow new-step` (jwstflow.scaffold.scaffold_step): the step works as generated."""
+    from astropy.io import fits
+
+    from jwstflow.scaffold import scaffold_step
+    from jwstflow.testing import run_step, synthetic_image
+
+    module_file, test_file = scaffold_step("ScaleFlux", tmp_path / "steps", level=2, suffix="scaled")
+    assert (module_file.name, test_file.name) == ("scale_flux.py", "test_scale_flux.py")
+    cls = import_file(module_file).ScaleFlux
+    desc, problems = check_step(cls)
+    assert problems == [] and (desc["level"], desc["outputs"]) == (2, ["scaled"])
+    src = synthetic_image(tmp_path / "jw00001001001_01101_00001_nrs1_cal.fits", value=2.0)
+    (out,) = run_step(cls, [src], tmp_path, params={"scale": 3.0})
+    assert out.name == "jw00001001001_01101_00001_nrs1_scaled.fits" and fits.getdata(out, "SCI")[0, 0] == 6.0
+    with pytest.raises(FileExistsError):
+        scaffold_step("ScaleFlux", tmp_path / "steps")

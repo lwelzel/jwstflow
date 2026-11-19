@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from jwstflow.data.discovery import FileRecord, HeaderCache, discover, match_filters
-from jwstflow.naming import check_custom_suffix, derived_name, is_official_product, split_suffix
+from jwstflow.steps.naming import (
+    check_custom_suffix,
+    derived_name,
+    is_official_product,
+    split_suffix,
+)
 from jwstflow.testing import synthetic_image
 
 

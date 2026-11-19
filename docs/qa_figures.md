@@ -79,7 +79,7 @@ before a figure is committed.
 
 10. **Features are annotated through one helper**,
     `qa.annotate_features(ax, features, wave_min=..., wave_max=...)`,
-    driven by the `features:` grammar of `jwstflow.features`. The spectrum
+    driven by the `features:` grammar of `jwstflow.spectra.features`. The spectrum
     stays the main element of the figure, and a peak is identified by the
     label standing over it:
 
@@ -261,11 +261,10 @@ marker or line style.
 | `qa.labels`, `qa.placement`, `qa.layout` | the parts of the annotation: label text and species colors and the line search; geometry along one axis; `FeatureLayout`, which places everything when the figure is saved, one method per phase |
 | `qa.plots` | **`Spectrum`** and **`Frame`** |
 | `qa.io` | `find_file`, `read_spectrum`, `read_background`, `read_cube`, `ancestor`, `short_labels` |
-| `qa.steps` | the steps shipped with jwstflow: `spectra`, `stitch`, `images`, `cubes`, `summary` |
+| `qa.steps` | the steps shipped with jwstflow: `spectra`, `stitch`, `images`, `cubes`, `psf`, `clusters`, `gaps`, `mast_compare`, `summary` |
 
 Everything public is importable from `jwstflow.qa` itself
-(`from jwstflow import qa`). `jwstflow.qafig` -- the first name of the
-standard -- remains as an alias of the same namespace.
+(`from jwstflow import qa`).
 
 ### A spectrum-like figure
 
@@ -346,7 +345,7 @@ Guidelines that follow from the rules:
 * **Never plot from a data step.** If a data step computes something worth
   seeing (a sky mask, per-star offsets), write it into the product and give
   it a QA step. Give image extensions the 2-D WCS of their cube
-  (`jwstflow.masks.strip_wave_axis`), so the QA step can draw the sky axes
+  (`jwstflow.cubes.masks.strip_wave_axis`), so the QA step can draw the sky axes
   from the product alone.
 * **Read self-describing products, not code.** A figure should not need the
   module that wrote its product: take bit tables, units and parameters from
@@ -403,6 +402,6 @@ Guidelines that follow from the rules:
 | `qa_spaxel_clusters` | thumbnails | `*_clustermask.fits` | per band and region: one row per dither cube, one column per wavelength plane (`*_<region>_clusters.png`) |
 | `qa_gap_coverage` | frames | `*_gapcov.fits` | the coverage next to the NIRSpec detector gap on the sky: where all exposures stop before and after it, and how long the partially covered stretch beyond is (nm), per group of exposures |
 
-The steps live in `jwstflow.qa.steps` (`spectra`, `stitch`, `images`,
-`cubes`); `jwstflow.contrib.qa` re-exports them for workflows that name them
-by their first dotted path.
+All of them live in `jwstflow.qa.steps`, one module per kind of product
+(`spectra`, `stitch`, `images`, `cubes`, `psf`, `clusters`, `gaps`,
+`mast_compare`, `summary`); workflows name them by their registered names.

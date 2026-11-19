@@ -15,7 +15,7 @@ from jwstflow.qa.steps import (
     QaCubeSummary,
     QuicklookImage,
 )
-from jwstflow.steps.base import resolve_target
+from jwstflow.steps import resolve_target
 from jwstflow.testing import make_context, run_step, synthetic_cube, synthetic_x1d
 
 
@@ -25,10 +25,9 @@ def _x1d(path, scale: float = 1.0):
     return synthetic_x1d(path, wave=wave, flux=flux, instrument="NIRSPEC")
 
 
-def test_stock_steps_resolve_from_both_addresses():
+def test_stock_steps_resolve_by_name_and_by_path():
     assert resolve_target("plot_snr").__name__ == "PlotSnr"
     assert resolve_target("jwstflow.qa.steps.cubes:QaCubeSummary") is QaCubeSummary
-    assert resolve_target("jwstflow.contrib.qa:PlotSpectrum") is PlotSpectrum        # the address of older workflows
 
 
 def test_spectrum_steps_draw_annotated_spectrum_like_figures(tmp_path):

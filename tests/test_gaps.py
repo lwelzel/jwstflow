@@ -1,4 +1,4 @@
-"""The detector gap (jwstflow.gaps): window, coverage, staircase, the cross-exposure test, product, QA.
+"""The detector gap (jwstflow.cubes.gaps): window, coverage, staircase, the cross-exposure test, product, QA.
 
 The tests build a small slicer with a real ``gwcs``: ``N_SLICES`` slices of
 ``N_ALONG`` pixels side by side on the sky (0.1 arcsec apart, like the
@@ -21,8 +21,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from jwstflow.contrib.gaps import QaGapCoverage
-from jwstflow.gaps import (
+from jwstflow.cubes.gaps import (
     GAPCOV_SUFFIX,
     FlagGapOutliers,
     coverage_limits,
@@ -33,6 +32,7 @@ from jwstflow.gaps import (
     read_gap_product,
     slice_edges,
 )
+from jwstflow.qa.steps import QaGapCoverage
 from jwstflow.testing import check_step, run_step
 
 N_SLICES, N_ALONG, N_COL = 8, 6, 40
@@ -141,7 +141,7 @@ def test_detector_sky_coordinates_reaches_the_last_columns(tmp_path: Path):
     """The coarse column search must not stop short of the box's end (the NRS1 gap edge)."""
     from stdatamodels.jwst import datamodels
 
-    from jwstflow.clusters import detector_sky_coordinates
+    from jwstflow.cubes import detector_sky_coordinates
 
     with datamodels.open(cal_file(tmp_path, 1, "NRS1")) as model:
         cols = np.concatenate([p[1] for p in detector_sky_coordinates(model, [(EDGE - 0.002, EDGE + 1.0)])])

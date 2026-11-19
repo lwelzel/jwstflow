@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 #: Bands of the gas catalogue narrower than this fraction of their wavelength (Q-branches,
 #: bandheads) are annotated like lines; broader ones are rectangles in the band rows.
 FEATURE_NARROW_BAND = 0.02
-#: The opt-in catalogue of stellar photospheric absorption lines (:mod:`jwstflow.features`).
+#: The opt-in catalogue of stellar photospheric absorption lines (:mod:`jwstflow.spectra.features`).
 PHOTOSPHERIC_DATASET = "photospheric_lines"
 #: The opt-in table of further gas lines, annotated together with ``gas_lines``.
 EXTENDED_DATASET = "gas_lines_extended"
@@ -31,7 +31,7 @@ def annotate_features(ax: Any, features: Any, *, wave_min: float, wave_max: floa
     """Mark the selected spectral features on a spectrum axes (x = wavelength [um]).
 
     ``features`` is a jwstflow feature selection (the ``features:`` grammar of
-    :mod:`jwstflow.features`; ``"all"`` takes every default dataset), restricted
+    :mod:`jwstflow.spectra.features`; ``"all"`` takes every default dataset), restricted
     to ``wave_min``-``wave_max`` (the plotted wavelength range). The
     annotation is laid out when the figure is saved (:func:`save`); the
     spectrum stays the main element of the figure:
@@ -101,7 +101,7 @@ def annotate_features(ax: Any, features: Any, *, wave_min: float, wave_max: floa
     nothing. The annotation adds no legend entries: every mark carries its
     own label, in the color of its class.
     """
-    from ..features import select_features
+    from ..spectra.features import select_features
 
     if features in (None, False) or not np.isfinite([wave_min, wave_max]).all() or wave_max <= wave_min:
         return

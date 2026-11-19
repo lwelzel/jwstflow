@@ -20,7 +20,7 @@ Downstream, in your modeling code -- the library is generated once, and each
 model (at each trial distance) resamples it onto its own grid in one step:
 
 ```python
-from jwstflow.psf import PsfCubeProduct, model_pixel_scale
+from jwstflow.cubes.psf import PsfCubeProduct, model_pixel_scale
 
 library = PsfCubeProduct.read("jw01751-o010_t005_miri_ch1-short_psfcube.fits")
 for d in trial_distances_pc:                        # e.g. your 256 px / +-300 AU rendering
@@ -52,11 +52,11 @@ That argues for a contributed package; but a PSF product is only useful if
 *everything* agrees on its layout: the generating step, the QA step, and the
 modeling code of every program (MIDAS and JOYS+ both consume cubes of disks).
 Shared product layouts are exactly what `jwstflow` core fixes for the
-ecosystem (the mask contract in `jwstflow.masks`, stitching in
-`jwstflow.stitching`, `jwstflow.apcorr` -- see "Shared step contracts" in the
+ecosystem (the mask contract in `jwstflow.cubes.masks`, stitching in
+`jwstflow.spectra.stitching`, `jwstflow.cubes.apcorr` -- see "Shared step contracts" in the
 guide). So the split follows the graduation ladder:
 
-* **the contract and every consumer** (`jwstflow.psf`: product I/O,
+* **the contract and every consumer** (`jwstflow.cubes.psf`: product I/O,
   resampling, wavelength interpolation, convolution, the offline Gaussian
   engine, and `qa_psf_cube`) ship with the core and add **no dependencies**
   -- the base install is unchanged;

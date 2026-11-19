@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from jwstflow.psf import (
+from jwstflow.cubes.psf import (
     GaussianPsfEngine,
     IfuConfig,
     PsfCubeProduct,
@@ -256,7 +256,8 @@ def test_read_cube_geometry_plain_fits_and_roll_ref(tmp_path: Path):
 
 # --------------------------------------------------------------------------- the steps
 def test_step_declarations():
-    from jwstflow.contrib.psf import PsfCube, QaPsfCube
+    from jwstflow.cubes.psf import PsfCube
+    from jwstflow.qa.steps import QaPsfCube
 
     for cls in (PsfCube, QaPsfCube):
         _, problems = check_step(cls)
@@ -264,7 +265,7 @@ def test_step_declarations():
 
 
 def test_psf_cube_step_runs_with_defaults_validated():
-    from jwstflow.contrib.psf import PsfCube
+    from jwstflow.cubes.psf import PsfCube
 
     assert PsfCube.validate_params({}) == {}                       # a library needs no target knowledge
     assert PsfCube.validate_params({"pixelscale_arcsec": 0.02})["pixelscale_arcsec"] == 0.02
@@ -275,7 +276,7 @@ def test_psf_cube_step_runs_with_defaults_validated():
 def test_psf_cube_step_on_synthetic_miri(tmp_path: Path):
     src = synthetic_cube(tmp_path / "jw01751-o010_t005_miri_ch1-short_s3d.fits", instrument="MIRI",
                          nwave=40, wave_min=4.9, wave_step=0.02, PA_APER=30.0)
-    outputs = run_step("jwstflow.contrib.psf:PsfCube", [src], tmp_path,
+    outputs = run_step("psf_cube", [src], tmp_path,
                        params={"engine": "gaussian", "fov_arcsec": 3.2})
     assert [o.name for o in outputs] == ["jw01751-o010_t005_miri_ch1-short_psfcube.fits"]
     product = PsfCubeProduct.read(outputs[0])
@@ -298,21 +299,21 @@ def test_psf_cube_step_on_synthetic_miri(tmp_path: Path):
 def test_psf_cube_step_sky_frame_and_qa(tmp_path: Path):
     src = synthetic_cube(tmp_path / "jw01751-o006_t005_nirspec_g235h-f170lp_s3d.fits", instrument="NIRSPEC",
                          nwave=25, wave_min=1.66, wave_step=0.05, PA_APER=110.0)
-    outputs = run_step("jwstflow.contrib.psf:PsfCube", [src], tmp_path,
+    outputs = run_step("psf_cube", [src], tmp_path,
                        params={"engine": "gaussian", "oversample": 1, "fov_arcsec": 3.0,
                                "n_wavelengths": 6, "frame": "sky"})
     product = PsfCubeProduct.read(outputs[0])
     assert product.pixelscale_arcsec == pytest.approx(0.13, rel=1e-3)   # oversample 1 = the spaxel grid
     assert product.frame == "sky" and product.position_angle_deg == pytest.approx(110.0)
     assert len(product.wavelengths) == 6
-    figures = run_step("jwstflow.contrib.psf:QaPsfCube", outputs, tmp_path)
+    figures = run_step("qa_psf_cube", outputs, tmp_path)
     assert len(figures) == 1 and figures[0].suffix == ".png" and figures[0].stat().st_size > 0
 
 
 def test_psf_from_stage(tmp_path: Path):
     src = synthetic_cube(tmp_path / "jw001_miri_ch1-short_s3d.fits", instrument="MIRI", PA_APER=0.0)
     ctx = make_context(tmp_path, stage="downstream")
-    outputs = run_step("jwstflow.contrib.psf:PsfCube", [src], tmp_path,
+    outputs = run_step("psf_cube", [src], tmp_path,
                        params={"engine": "gaussian", "fov_arcsec": 1.0})
     ctx.stage_dirs["psf_cube"] = outputs[0].parent
     product = psf_from_stage(src, ctx, "psf_cube")

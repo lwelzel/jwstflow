@@ -31,7 +31,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
-from ..steps.base import activate_plugins, step_identity
+from ..steps import activate_plugins, step_identity
 from .schema import RAW_STAGE, Config, slugify
 
 EXTENDS_KEY = "extends"
@@ -286,7 +286,7 @@ def load_env_files(
     """
     from dotenv import dotenv_values
 
-    from ..project import candidate_env_files
+    from .project import candidate_env_files
 
     candidates: list[tuple[Path, str]] = candidate_env_files(base_dir)
     explicit_paths: list[tuple[Path, str]] = []
@@ -339,7 +339,7 @@ def _derive_stage_identity(stages: list[Any]) -> None:
 
 def config_from_dict(data: dict[str, Any], *, base_dir: Path | None = None) -> Config:
     """Validate an already-composed dict (e.g. from OmegaConf/Hydra)."""
-    from ..project import find_project_root
+    from .project import find_project_root
 
     data = dict(data)
     project_root = find_project_root(base_dir or Path.cwd())
@@ -386,7 +386,7 @@ def _check_step_parameters(cfg: Config) -> None:
     a jwstflow Step that declares one (jwst steps validate their own parameters when they run)."""
     import inspect
 
-    from ..steps.base import BUILTIN_ALIASES, Step, resolve_target
+    from ..steps import BUILTIN_ALIASES, Step, resolve_target
 
     for stage in cfg.stages:
         if stage.step in BUILTIN_ALIASES:

@@ -19,6 +19,17 @@ Useful contributions include:
 
 Instrument-, programme-, or science-case-specific processing steps will often fit better in a separate package that registers steps through the `jwstflow.steps` entry-point group. If you are unsure whether a contribution belongs in the core package, open an issue before doing substantial implementation work.
 
+## Where code goes
+
+The package layout and its dependency rules are described in [`docs/guide.md`](docs/guide.md) ("How the package is laid out") and enforced by `tests/test_architecture.py`. In short:
+
+- the package directory holds `cli.py` and subpackages only: the step contract (`steps`), orchestration (`config`, `data`, `engine`), the science domains (`spectra`, `cubes`, `qa`) and the tools (`scaffold`, `testing`);
+- `steps` imports no other part of the package; orchestration never imports a science domain; the domains never import the engine;
+- a data step is defined with the feature it implements (`spectra/stitching.py`, `cubes/<feature>/steps.py`), a QA step in `qa/steps/`; `steps/` is the framework and defines no step;
+- a new step of the package is registered once, as a `jwstflow.steps` entry point in `pyproject.toml` naming the module that defines it (reinstall afterwards, e.g. `uv sync`: the tests compare the installed entry points with `pyproject.toml`);
+- features do not import each other: what two of them need goes into the toolkit of their domain;
+- a step's checkpoints depend on the content of the file that defines it: moving such a file is free, editing it reruns the step in every existing reduction -- so keep refactoring of step modules separate from functional changes, and say in the changelog which steps rerun.
+
 ## Development setup
 
 `jwstflow` requires Python 3.12 or later and uses `uv` for dependency management.

@@ -20,8 +20,6 @@ from __future__ import annotations
 
 import fnmatch
 import inspect
-import re
-import os
 import json
 import logging
 import time
@@ -32,18 +30,15 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
-from .. import crds as crds_mod
-from ..associations import Association, build_associations
 from ..config.loader import dump_config
 from ..config.schema import RAW_STAGE, Config, StageConfig
 from ..data.discovery import FileRecord, HeaderCache, discover, fingerprint
-from ..steps.base import (
+from ..steps import (
     ALIAS_ASN_TYPE,
     BUILTIN_ALIASES,
     LEVEL_DIRS,
     Step,
     activate_plugins,
-    default_thread_env,
     is_stpipe_step,
     plugins_fingerprint,
     resolve_target,
@@ -51,7 +46,9 @@ from ..steps.base import (
     source_origin,
     step_package_versions,
 )
-from .executor import Executor, Payload, Result, make_executor
+from . import crds as crds_mod
+from .associations import Association, build_associations
+from .executor import Payload, Result, default_thread_env, make_executor
 from .graph import select_stages
 from .state import StateStore, TaskRecord, make_task_id, now_iso, stable_hash
 
@@ -219,7 +216,7 @@ class Runner:
 
     def _uses_stpipe(self) -> bool:
         """True when any enabled stage runs an official pipeline/step (i.e. will need CRDS)."""
-        from ..steps.base import is_stpipe_step
+        from ..steps import is_stpipe_step
 
         for stage in self.cfg.stages:
             if not stage.enabled:
@@ -393,6 +390,18 @@ class Runner:
         origin = origin.resolve()
         return any(d == origin.parent or d in origin.parents for d in self._plugin_dirs)
 
+    def needs_reference(self, stage: StageConfig) -> bool:
+        """True when the stage's step declares `needs_reference_products`: it reads MAST's own
+        products, so the stage must not start before their background download has finished."""
+        if stage.step in BUILTIN_ALIASES:
+            return False
+        try:
+            target = resolve_target(stage.step)
+        except Exception as exc:  # unresolvable steps fail later with a proper message
+            log.debug("cannot resolve %s to read its declaration: %s", stage.step, exc)
+            return False
+        return bool(getattr(target, "needs_reference_products", False))
+
     def batch_mode(self, stage: StageConfig) -> str:
         """'per_file' or 'all': the YAML value if given, else the step's own `batch`
         attribute (jwst steps and pipelines are always per_file)."""
@@ -475,7 +484,7 @@ class Runner:
 
     # -------------------------------------------------------------- execution
     def run_stage(self, stage: StageConfig, tasks: list[Task] | None = None) -> StageSummary:
-        if stage.name.startswith("mast_compare"):
+        if self.needs_reference(stage):
             self.wait_for_reference()
         tasks = self.plan_stage(stage) if tasks is None else tasks
         if self.task_filter:
@@ -578,7 +587,7 @@ class Runner:
         step is resolved in *this* process and nothing is recorded in the
         checkpoint store.
         """
-        from ..steps.base import RunContext, make_step
+        from ..steps import RunContext, make_step
 
         self.prepare()
         st = self.cfg.stage(stage)
@@ -615,7 +624,7 @@ class Runner:
         log.info("run %r in %s  (%s)", self.cfg.name, self.cfg.run_dir, " -> ".join(s.name for s in stages))
         if self.cfg.workflow_graph and not self.dry_run:
             try:
-                from ..dagviz import render as render_graph
+                from .dagviz import render as render_graph
 
                 files = render_graph(self.cfg, self.cfg.run_dir / LEVEL_DIRS["qa"] / "workflow_graph")
                 log.info("workflow graph: %s", ", ".join(f.name for f in files))
@@ -684,15 +693,6 @@ def _write_if_changed(asn: Association, directory: Path, *, relative: bool) -> P
         except (json.JSONDecodeError, KeyError):
             pass
     return asn.write(directory, relative=relative)
-
-
-def _abs_members(data: dict[str, Any], base: Path) -> dict[str, Any]:
-    data = json.loads(json.dumps(data))
-    for product in data.get("products", []):
-        for m in product.get("members", []):
-            p = Path(m["expname"])
-            m["expname"] = str((base / p).resolve() if not p.is_absolute() else p.resolve())
-    return data
 
 
 def run_config(cfg: Config, **kwargs: Any) -> RunSummary:

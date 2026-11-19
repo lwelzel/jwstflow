@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from jwstflow.associations import Association, build_associations, members_of, product_name
+from jwstflow.engine.associations import Association, build_associations, members_of, product_name
 from jwstflow.config.schema import AssociationConfig
 from jwstflow.data.discovery import FileRecord
 

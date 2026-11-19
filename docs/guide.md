@@ -86,9 +86,16 @@ and promote it when it is reused:
    dotted path (`my_survey_steps.disks:DiskMask`) or register entry points.
 3. **A contributed package** (`jwstflow-<name>` on PyPI or a git host) --
    steps useful beyond one project. See the next section.
-4. **jwstflow itself** -- only broadly useful, dependency-free machinery
-   (`jwstflow.contrib` QA steps, the `jwstflow.masks` / `jwstflow.stitching`
-   contracts).
+4. **jwstflow itself** -- only broadly useful machinery: the toolkits steps
+   are built from (`jwstflow.spectra`, `jwstflow.cubes`), the shared contracts
+   below (`jwstflow.spectra.stitching`, `jwstflow.cubes.masks`,
+   `jwstflow.cubes.psf`, `jwstflow.cubes.clusters`) and the stock QA steps
+   (`jwstflow.qa.steps`).
+
+There is no tier in between inside jwstflow: a step either is part of the
+package, filed with the feature it implements (see "How the package is laid
+out"), or it lives in a contributed package. "Contributed" always means a
+separate distribution.
 
 ## Contributed packages
 
@@ -103,11 +110,11 @@ name = "jwstflow-midas"
 dependencies = ["jwstflow"]
 
 [project.entry-points."jwstflow.steps"]
-disk_mask = "jwstflow_midas.disk_mask:DiskMask"
+disk_mask = "jwstflow_midas.steps.disk_mask:DiskMask"
 ```
 
 Start a new package with the generator -- it writes the whole boilerplate
-(pyproject with entry points, src layout, step stubs whose `run()` awaits
+(pyproject with entry points, src layout with one module per step, step stubs whose `run()` awaits
 your science, a passing declaration test, README with a publish-to-GitHub
 walkthrough, CI workflow) and initialises a git repository:
 
@@ -135,13 +142,13 @@ hash covers direct edits, but not edits to helper modules.
 Two product shapes recur across instruments and packages, so their layout is
 fixed in core and plugins build on them instead of inventing variants:
 
-* **Mask products** (`jwstflow.masks`): wavelength-resolved spatial masks for
+* **Mask products** (`jwstflow.cubes.masks`): wavelength-resolved spatial masks for
   IFU cubes (a source aperture, a background exclusion zone, ...) in one FITS
   layout (MASK/CONT/CONTIMG + optional per-feature extensions), with
   `write_mask_product` / `read_mask_product` / `mask_from_stage` and the
   geometry helpers (WCS resampling, NaN-aware smoothing, morphological
   cleanup) such steps share. Any step can consume any other step's mask.
-* **Stitching** (`jwstflow.stitching.StitchSegments`, YAML name
+* **Stitching** (`jwstflow.spectra.stitching.StitchSegments`, YAML name
   `stitch_segments`): splice N overlapping 1-D segments (NIRSpec gratings,
   MRS bands) with flux ratios measured in a small window around each
   crossover (`ratio_window_frac` of the crossover wavelength) whose
@@ -151,7 +158,7 @@ fixed in core and plugins build on them instead of inventing variants:
   contributed packages subclass it for mode-specific behaviour (naming via
   `segment_label`, the ratio measurement via `overlap_ratio`, grouping via a
   `run` wrapper -- jwstflow-joys' `stitch_bands` does all three).
-* **PSF cubes** (`jwstflow.psf`): a distance-independent library of
+* **PSF cubes** (`jwstflow.cubes.psf`): a distance-independent library of
   spectrally sub-sampled instrument PSFs matching an s3d cube, on a fixed
   fine angular grid in the instrument frame, in one FITS layout (PSF slices
   + WAVETAB) with resampling onto any model grid (scale + rotation to sky in
@@ -162,7 +169,7 @@ fixed in core and plugins build on them instead of inventing variants:
   IFU + MIRI MRS), plotted by `qa_psf_cube`; the rationale and conventions
   live in [psf_cubes.md](psf_cubes.md).
 
-* **Bad spaxel clusters** (`jwstflow.clusters`): compact clusters of wildly
+* **Bad spaxel clusters** (`jwstflow.cubes.clusters`): compact clusters of wildly
   deviant spaxels over a few planes that survive the official pipeline
   (IFU `outlier_detection` keeps the *minimum* neighbour difference over all
   exposures, so anything confined to one dither passes; drizzle then averages
@@ -178,7 +185,7 @@ fixed in core and plugins build on them instead of inventing variants:
   every later stage consumes). `qa_spaxel_clusters` draws every dither at the
   affected wavelengths. The product carries the mask contract plus the
   per-region decisions and QA slices.
-* **The NIRSpec detector gap** (`jwstflow.gaps`): every IFU slice crosses
+* **The NIRSpec detector gap** (`jwstflow.cubes.gaps`): every IFU slice crosses
   the NRS1/NRS2 gap at its own wavelength and every dither moves a sky
   position onto other slices, so in a combined cube the exposures drop out
   one after another approaching the gap: the voxels of that staircase (some
@@ -193,9 +200,9 @@ fixed in core and plugins build on them instead of inventing variants:
   pixels deviating by more than 5 sigma from at least two other exposures
   are flagged `DO_NOT_USE | OUTLIER` in DQ-edited `_cal` copies; untestable
   pixels are kept. One `*_gapcov.fits` product per group of exposures maps
-  the coverage on the sky (`jwstflow.gaps.gap_limits_at` looks a position up:
-  where only some exposures contribute at a wavelength), drawn by
-  `qa_gap_coverage`. Files without a detector gap (MIRI, PRISM, medium
+  the coverage on the sky (`jwstflow.cubes.gaps.gap_limits_at` looks a
+  position up: where only some exposures contribute at a wavelength), drawn
+  by `qa_gap_coverage`. Files without a detector gap (MIRI, PRISM, medium
   gratings) pass unchanged:
 
   ```yaml
@@ -209,7 +216,7 @@ fixed in core and plugins build on them instead of inventing variants:
     tags: [qa]
   ```
 
-Extraction steps additionally share `jwstflow.apcorr`: the CRDS
+Extraction steps additionally share `jwstflow.cubes.apcorr`: the CRDS
 aperture-correction reference (MIRI MRS and NIRSpec IFU layouts) normalised
 to one plain-array table and evaluated per plane, so contributed extraction
 steps do not each carry their own loader.
@@ -223,12 +230,123 @@ derived products, `qa` for plots). This keeps runs comparable across targets,
 users and reductions; `--only`, `depends_on` and `inputs: [{stage: ...}]` use
 the derived names, and `--set stages.<name>.…` accepts the name or the step.
 
+## How the package is laid out
+
+`src/jwstflow/` holds the command line and ten subpackages -- no loose
+modules. Each subpackage is one of three things:
+
+```
+jwstflow/
+  cli.py        the command line
+
+                -- the step contract
+  steps/        what a step is (interface.py), the file-naming rules it follows (naming.py),
+                the adapter for the official pipelines (adapters.py), names -> steps
+                (registry.py), user code by path (plugins.py), the texts of `jwstflow steps`
+                (descriptions.py). No step is defined here.
+
+                -- orchestration: runs any workflow, knows no science
+  config/       the YAML: schema, loader (extends, interpolation, overrides), project root
+                and env files (project.py), presets/
+  data/         what is known about the observation outside the YAML: MAST (download.py), files
+                and headers (discovery.py), target positions (targets.py), the MSA metafile (msa.py)
+  engine/       the run model: runner, executor, stage graph, checkpoints (state.py),
+                associations, the CRDS environment (crds.py), the workflow DAG figure (dagviz.py)
+
+                -- science, by the kind of data: a toolkit for step authors, plus the bundled features
+  spectra/      1-D spectra: the x1d format (x1d.py), line and band datasets (features.py),
+                the stitching contract and its step (stitching.py)
+  cubes/        IFU cubes: WCS and regridding (wcs.py), the detector pixels behind a cube
+                (detector.py), image operations (morphology.py), instrument matching
+                (instrument.py), the mask-product contract (masks.py), aperture corrections
+                (apcorr.py); psf/, clusters/ and gaps/, each with its library, its product
+                and its steps.py
+  qa/           the QA figure standard; qa/steps/ holds every QA step
+
+                -- tools around it
+  scaffold/     the templates of `new-step` and `new-package`
+  testing/      run_step, synthetic products, check_step; testing/mock/: mock observations
+                and stub pipelines
+  refdata/      reference tables shipped with the package
+```
+
+**Who may import whom.** The dependencies run one way -- an arrow reads
+"imports" -- and `tests/test_architecture.py` checks them on the source:
+
+```
+cli · testing · scaffold                            tools: may import anything below
+
+engine              qa.steps · cubes.psf · cubes.clusters · cubes.gaps · spectra.stitching    the features
+   |                qa · cubes · spectra                                                      the toolkits
+   |                     |
+   +------> data <-------+           files and headers, MAST, target positions
+              |
+              v
+            config                   the YAML, the project root
+              |
+              v
+            steps                    the step contract: imports nothing
+```
+
+The two columns never import each other:
+
+* `steps` imports no other part of the package.
+* Orchestration (`config`, `data`, `engine`) never imports a science domain:
+  the engine runs steps it knows only through the step contract.
+* The science domains never import the engine: a step gets everything it
+  needs through its `RunContext`.
+* Within a domain, the toolkit does not depend on the features built with it
+  (`cubes/wcs.py` knows nothing of `cubes/psf/`), and no feature imports
+  another: what two of them need moves into the toolkit (`cubes/detector.py`
+  serves both `clusters` and `gaps`). Only the QA steps look across -- they
+  draw the products of the others.
+
+**Where a step is defined.**
+
+* A data step lives with the feature it implements: `stitch_segments` in
+  `jwstflow.spectra.stitching`, `psf_cube` in `jwstflow.cubes.psf.steps`, the
+  cluster steps in `jwstflow.cubes.clusters.steps`, `flag_gap_outliers` in
+  `jwstflow.cubes.gaps.steps`, `fix_msa_metafile` in `jwstflow.data.msa`.
+* Every QA step lives in `jwstflow.qa.steps`, one module per kind of product
+  (`spectra`, `stitch`, `images`, `cubes`, `psf`, `clusters`, `gaps`,
+  `mast_compare`, `summary`).
+
+jwstflow registers its own steps the way any step package does: as
+`jwstflow.steps` entry points in `pyproject.toml`, and nowhere else. Each
+entry names the module that *defines* the step, because that file's hash
+enters the task ids and its docstring is what `jwstflow steps` prints
+(`jwstflow check-step <name>` tells when an address leads to a module that
+merely re-exports the class).
+
+**What a step author imports.**
+
+```python
+from jwstflow import Step, StepParams, RunContext, qa
+from jwstflow.steps.naming import derived_name, slug
+from jwstflow.spectra import Spectrum1D, read_x1d, write_x1d
+from jwstflow.spectra.features import feature_windows
+from jwstflow.spectra.stitching import StitchSegments
+from jwstflow.cubes import celestial_wcs, cube_wavelengths, write_mask_product, load_apcorr
+from jwstflow.cubes.psf import PsfCubeProduct
+from jwstflow.data.targets import resolve_source
+```
+
+**A step package** (`jwstflow-midas`, `jwstflow-joys`, yours) follows the same
+conventions at its own scale:
+
+```
+jwstflow_<name>/
+  steps/        one module per data step, named like the step (steps/disk_mask.py -> `disk_mask`)
+  qa/           the QA steps
+  <library>.py  code several steps share, by concern
+```
+
 ## File names
 
 Official products keep the names the pipeline gives them. Level-3 product
 names follow the DMS convention `jw<PPPPP>-o<OOO>_<tTTT>_<instrument>` with the
 target id taken from MAST at download time, so cubes come out named exactly as
-in the archive. Custom steps derive names with `jwstflow.naming.derived_name()`
+in the archive. Custom steps derive names with `jwstflow.steps.naming.derived_name()`
 and may not use a suffix the pipeline reserves (`_x1d`, `_s3d`, `_cal`, …);
 jwstflow's own product types are `_s1d` (extracted spectra), `_s1dcomb`
 (stitched), `_bkgspec` (background spectra), `_lsr`, `_psfcube` (PSF
@@ -325,7 +443,7 @@ Positions are never read from ad-hoc files. `target:` is resolved by name
 (SIMBAD/Sesame, cached in `targets.json`) unless the workflow gives
 `target_coords: {ra, dec}`, and steps can also use the observation's own
 `TARG_RA/TARG_DEC`. Line and band lists ship as datasets in
-`jwstflow/data/spectral_features/` (`gas_lines`, `pah_bands`, `ice_bands`;
+`jwstflow/refdata/spectral_features/` (`gas_lines`, `pah_bands`, `ice_bands`;
 ECSV with per-feature label, transition, source and notes, plus file-level
 references and version). Steps select them with a small grammar:
 
@@ -475,7 +593,10 @@ with that id exists and its outputs are still present. Consequently:
 * editing the Python file that defines a custom step reruns that step's tasks
   (the file's hash is part of the task id; official jwst steps are covered by
   the jwst version instead), and editing *any* `plugins:` file reruns every
-  plugin-defined step's tasks (plugin files may import each other);
+  plugin-defined step's tasks (plugin files may import each other). The hash
+  is of the file's *content*: moving or renaming a module reruns nothing, any
+  edit to it -- a comment included -- reruns the step. Helper modules a step
+  imports are not hashed; bump the step's `version` when they change results;
 * `--force`, `force: true` on a stage, or `jwstflow clean` override this.
 
 stpipe stages write into a private `<stage>/.tmp-<task>/` directory that is
@@ -511,8 +632,8 @@ print(summary.ok)
 ## Testing status
 
 `python -m pytest` runs the suite in `tests/` plus the example-step tests in
-`examples/`: the mask-product contract (`jwstflow.masks`), the generic
-stitcher (`jwstflow.stitching`), x1d writing with extra columns, the packaged
+`examples/`: the mask-product contract (`jwstflow.cubes.masks`), the generic
+stitcher (`jwstflow.spectra.stitching`), x1d writing with extra columns, the packaged
 reference data and its project override, the contributed-package generator
 (`jwstflow new-package`, both flavours, generated steps audited against the
 contract), and the three example custom-step flavours end to end on synthetic

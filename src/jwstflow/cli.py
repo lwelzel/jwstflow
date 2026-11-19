@@ -21,7 +21,7 @@ from .config import Config, ConfigError, list_presets, load_config, preset_path
 from .engine.graph import select_stages
 from .engine.runner import Runner
 from .engine.state import StateStore
-from .steps.base import activate_plugins, describe_target, registered_steps
+from .steps import activate_plugins, describe_target, registered_steps
 
 app = typer.Typer(
     help="Lightweight YAML-driven orchestrator for the JWST calibration pipeline.",
@@ -61,11 +61,15 @@ def _load(config: Path, overrides: list[str] | None) -> Config:
         raise typer.Exit(2) from None
 
 
-@app.callback()
-def _main(version: Annotated[bool, typer.Option("--version", help="Show version and exit.")] = False) -> None:
+@app.callback(invoke_without_command=True)
+def _main(ctx: typer.Context,
+          version: Annotated[bool, typer.Option("--version", help="Show version and exit.")] = False) -> None:
     if version:
         console.print(f"jwstflow {__version__}")
         raise typer.Exit()
+    if ctx.invoked_subcommand is None:   # options but no command
+        console.print(ctx.get_help())
+        raise typer.Exit(2)
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +236,7 @@ def asn(config: ConfigArg, stage: Annotated[str, typer.Argument(help="Stage with
     if st.association is None:
         err.print(f"[red]stage {stage!r} has no association section[/red]")
         raise typer.Exit(2)
-    from .associations import summarize
+    from .engine.associations import summarize
 
     tasks = runner.plan_stage(st)
     for t in tasks:
@@ -300,8 +304,8 @@ def graph(
     set_: Annotated[list[str] | None, typer.Option("--set", help="Override config values (key=value).")] = None,
 ) -> None:
     """Render the workflow DAG (data patterns -> steps -> products) without running anything."""
-    from .dagviz import render
-    from .steps.base import LEVEL_DIRS
+    from .engine.dagviz import render
+    from .steps import LEVEL_DIRS
 
     setup_logging("WARNING")
     cfg = _load(config, set_)
@@ -365,10 +369,10 @@ def new_step(
     suffix: Annotated[str | None, typer.Option("--suffix", help="Product suffix written (lowercase alphanumeric)")] = None,
 ) -> None:
     """Scaffold a custom step (documented class + a passing test) following the step contract."""
-    from .testing import scaffold
+    from .scaffold import scaffold_step
 
     lvl: int | str = int(level) if level.isdigit() else level
-    for f in scaffold(class_name, directory, level=lvl, inputs=inputs, suffix=suffix):
+    for f in scaffold_step(class_name, directory, level=lvl, inputs=inputs, suffix=suffix):
         console.print(f"wrote {f}")
     console.print(f"next: edit the run() method, then `python -m pytest {directory}` and `jwstflow check-step {directory}/<module>.py:{class_name}`")
 
@@ -381,8 +385,9 @@ def new_package(
     private: Annotated[bool, typer.Option("--private", help="Proprietary flavour: restrictive LICENSE, 'Private :: Do Not Upload' classifier, private-repo instructions")] = False,
     git: Annotated[bool, typer.Option("--git/--no-git", help="Initialise a git repository with an initial commit")] = True,
 ) -> None:
-    """Scaffold a contributed step package: pyproject with `jwstflow.steps` entry points, src layout,
-    step stubs, a passing declaration test, README (with a publish-to-GitHub walkthrough), CI and git.
+    """Scaffold a contributed step package: pyproject with `jwstflow.steps` entry points, src layout
+    (`steps/` with one module per step), step stubs, a passing declaration test, README (with a
+    publish-to-GitHub walkthrough), CI and git.
     Only scaffolding is generated -- each step's run() awaits your science."""
     from .scaffold import scaffold_package
 
@@ -400,7 +405,7 @@ def new_package(
         f"\nnext:\n"
         f"  cd {root}\n"
         f"  uv sync && uv run python -m pytest     # green before any science exists\n"
-        f"  edit src/{name.replace('-', '_')}/steps.py   # implement each step's run()\n"
+        f"  edit src/{name.replace('-', '_')}/steps/<step>.py   # one module per step: implement its run()\n"
         f"  README.md walks through publishing to GitHub ({'private' if private else 'public'})"
     )
 
@@ -419,7 +424,7 @@ def steps(
     from rich.padding import Padding
     from rich.text import Text
 
-    from .steps.base import step_description
+    from .steps import step_description
 
     known = registered_steps()
     if name is not None:

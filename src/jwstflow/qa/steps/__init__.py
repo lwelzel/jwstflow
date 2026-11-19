@@ -9,17 +9,26 @@ and :class:`jwstflow.qa.Frame`:
 * :mod:`.stitch` -- stitched spectra: ``plot_stitch``, ``plot_stitch_overlaps``, ``plot_stitch_background``
 * :mod:`.images` -- ``quicklook_image``
 * :mod:`.cubes` -- IFU cubes: ``qa_cube_summary``, ``qa_cube_slices``
+* :mod:`.psf` -- PSF cubes (:mod:`jwstflow.cubes.psf`): ``qa_psf_cube``
+* :mod:`.clusters` -- bad spaxel clusters (:mod:`jwstflow.cubes.clusters`): ``qa_spaxel_clusters``
+* :mod:`.gaps` -- the NIRSpec detector gap (:mod:`jwstflow.cubes.gaps`): ``qa_gap_coverage``
+* :mod:`.mast_compare` -- ``mast_compare``: jwstflow's products against the archive's own
 * :mod:`.summary` -- ``header_summary`` (a table, not a figure)
 """
 
+from .clusters import QaSpaxelClusters
 from .cubes import QaCubeSlices, QaCubeSummary
+from .gaps import QaGapCoverage
 from .images import QuicklookImage
+from .mast_compare import MastCompare
+from .psf import QaPsfCube
 from .spectra import PlotSnr, PlotSpectrum, PlotSpectrumStages
 from .stitch import PlotStitch, PlotStitchBackground, PlotStitchOverlaps
-from .summary import HeaderSummary, copy_inputs
+from .summary import HeaderSummary
 
 __all__ = [
     "HeaderSummary",
+    "MastCompare",
     "PlotSnr",
     "PlotSpectrum",
     "PlotSpectrumStages",
@@ -28,6 +37,8 @@ __all__ = [
     "PlotStitchOverlaps",
     "QaCubeSlices",
     "QaCubeSummary",
+    "QaGapCoverage",
+    "QaPsfCube",
+    "QaSpaxelClusters",
     "QuicklookImage",
-    "copy_inputs",
 ]
