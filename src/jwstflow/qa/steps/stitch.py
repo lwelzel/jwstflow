@@ -55,19 +55,22 @@ class PlotStitch(Step):
     ``features`` the selected spectral features (jwstflow ``features:``
     grammar; ``all`` takes every bundled dataset in range) are annotated on
     every figure (``qa.annotate_features``: every line labelled at its own
-    wavelength), and a second figure (``*_series.png``) shows the same
-    spectrum with the line series drawn as combs above the plot.
+    wavelength; strong peaks no catalogue line explains as ``? [wavelength]``),
+    a second figure (``*_detected.png``) labels only the lines the stitched
+    spectrum shows -- and the gas bands only where it shows their forest
+    (``detected: false`` leaves it out) -- and a third (``*_series.png``)
+    shows the spectrum with the line series drawn as combs above the plot.
     """
 
     level = "qa"
     batch = "all"   # all inputs in one task, so the combined overview sees every spectrum
     inputs = ("*_s1dcomb.ecsv",)
-    version = "7"   # 6 -> 7: built on qa.Spectrum
+    version = "8"   # 7 -> 8: a figure of the detected lines; "? [wavelength]" for unidentified peaks
 
     def run(self, inputs: list[Path], ctx: RunContext, *, segments_stage: str | None = None,
             unscaled: bool = True, xscale: str = "log", yscale: str = "log",
             features: Any = None, label_offset: float = qa.FEATURE_LABEL_OFFSET,
-            photospheric: bool = True, dpi: int = 150, **_: Any) -> Iterable[Path]:
+            photospheric: bool = True, detected: bool = True, dpi: int = 150, **_: Any) -> Iterable[Path]:
         out: list[Path] = []
         combined: list[tuple[np.ndarray, np.ndarray, str, str]] = []
         annotation = {"features": features, "label_offset": label_offset, "photospheric": photospheric}
@@ -86,8 +89,13 @@ class PlotStitch(Step):
             many = len(segments) > 4      # then the legend names the family, the overlap figure the factors
 
             # the combination over its rescaled segments: the overview with every line labelled at
-            # its place and -- with features -- a second figure with the series as combs
-            for series, suffix in (("labels", ""), ("combs", "_series"))[:2 if features not in (None, False) else 1]:
+            # its place and -- with features -- one with only the lines the spectrum shows, and
+            # one with the series as combs
+            variants = [("labels", "", False)]
+            if features not in (None, False):
+                variants += [("labels", "_detected", True)] if detected else []
+                variants += [("combs", "_series", False)]
+            for series, suffix, detected_only in variants:
                 plot = qa.Spectrum(xscale=xscale, yscale=yscale)
                 for k, (label, scale, color, w, f, unit) in enumerate(segments):
                     plot.line(w, qa.to_mjy(f * scale, unit)[0], color=color, alpha=0.7, context=True,
@@ -96,7 +104,7 @@ class PlotStitch(Step):
                 plot.line(s["wave"], s["flux"], label="stitched")
                 plot.crossovers(s["crossovers"])
                 out.append(plot.finish(ctx.output_dir / f"{inp.stem}{suffix}.png", ylabel=s["ylabel"], notes=[inp.name],
-                                       series=series, dpi=dpi, **annotation))
+                                       series=series, detected_only=detected_only, dpi=dpi, **annotation))
 
             # the segments as extracted, before the multiplicative rescaling -- only
             # when a scale was actually applied (otherwise it repeats the figure above)
@@ -297,7 +305,7 @@ class PlotStitchBackground(Step):
     level = "qa"
     batch = "all"
     inputs = ("*_s1dcomb.ecsv",)
-    version = "3"   # 2 -> 3: built on qa.Spectrum; the background in its role color
+    version = "4"   # 3 -> 4: "? [wavelength]" for unidentified peaks, lines identified within one sample / 50 km/s
 
     def run(self, inputs: list[Path], ctx: RunContext, *, segments_stage: str | None = None,
             xscale: str = "log", yscale: str = "log", features: Any = "all",

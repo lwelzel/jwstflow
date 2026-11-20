@@ -20,14 +20,16 @@ from .labels import (
     _band_group,
     _band_text,
     _line_label,
+    _member_span,
     _photosphere_color,
     _photosphere_label,
     _series,
+    _unidentified_label,
     detect_lines,
     species_color,
     tex_label,
 )
-from .placement import _declutter, _pack_bands, _spread
+from .placement import _pack_bands, _spread
 from .style import FONT, REF_COLOR
 
 log = logging.getLogger(__name__)
@@ -49,6 +51,13 @@ FEATURE_MIN_AXES_HEIGHT = 2.9
 #: A series of lines (an H I series, a branch of an H2 band) with at least this many members
 #: in view is drawn as a comb above the plot in the comb layout (``series="combs"``).
 COMB_MIN = 4
+#: A broad gas band (a forest the catalogue names as a band, not line by line) is seen in the
+#: spectrum when at least this many emission peaks that are no catalogue line stand within this
+#: many samples of one another inside it. Measured on edge-on disks: a forest of CO, OH or water
+#: lines puts 5 to 20 there, noise and stray peaks at most 4. Only a band that is seen explains
+#: the peaks inside it, and where only the detected features are marked only such bands are drawn.
+FOREST_MIN_PEAKS = 5
+FOREST_WINDOW = 300
 #: The rows of solid-state bands at the foot of the plot, top to bottom.
 BAND_ROW_ORDER = ("H2O ice", "CO2 ice", "CO ice", "other ices", "silicates", "PAH bands")
 #: Artists of the annotation that are lines carry this gid, so that they never count as data.
@@ -184,9 +193,16 @@ class FeatureLayout:
     # ------------------------------------------------------------------ phases
     def detect(self) -> None:
         """What stands out of the spectrum: orders the labels where they crowd, and finds strong
-        peaks no catalogue line explains. Every line in range is marked whether it is seen or not
-        (``detected_only`` restricts the marks to the lines found)."""
+        peaks no catalogue line explains. Every line in range is marked whether it is seen or not;
+        ``detected_only`` restricts the marks to the lines found -- a catalogue line is found when
+        a peak (a dip, for the photosphere) stands within its tolerance (:func:`detect_lines`) --
+        and the broad gas bands to those whose forest the spectrum shows (:data:`FOREST_MIN_PEAKS`
+        peaks no catalogue line is within :data:`FOREST_WINDOW` samples). Only such a band explains
+        the peaks inside it, in either figure, and inside it a catalogue line counts as found only
+        where its peak stands above the forest around it. Solid-state bands are kept: no peak
+        search can tell them."""
         record = self.record
+        detected_only = bool(record.get("detected_only", False))
         self.data = _data_lines(self.ax)
         if record.get("under") is not None:
             self.curves = [tuple(np.asarray(v, dtype=float) for v in record["under"])]
@@ -195,27 +211,62 @@ class FeatureLayout:
         found = [f for f in (detect_lines(cx, cy) for cx, cy in self.curves) if f is not None]
         self.unidentified: list[float] = []
         if not found:
+            if detected_only:      # nothing could be searched, so nothing is known to be there
+                log.info("the spectrum is too short to search for lines: none labelled")
+                self.lines, self.bands = [], [e for e in self.bands if not self._gas_band(e)]
             return
         peaks = {key: np.concatenate([f[key] for f in found]) for key in found[0]}
+
+        def hits(e: dict[str, Any], key: str) -> np.ndarray:
+            """The peaks (dips) that are line ``e``: those within their tolerance of it. A Q-branch
+            too is found at its wavelength only -- its catalogue window is a band's width and would
+            take the peaks of any forest around it."""
+            return np.abs(peaks[f"x_{key}"] - e["x"]) <= peaks[f"tol_{key}"]
+
         for e in self.lines:
             key = "ab" if e["cls"] == "photosphere" else "em"
-            e["strength"] = 0.0
-            if peaks[f"x_{key}"].size:
-                j = int(np.argmin(np.abs(peaks[f"x_{key}"] - e["x"])))
-                if abs(peaks[f"x_{key}"][j] - e["x"]) <= peaks[f"tol_{key}"][j]:
-                    e["strength"] = float(peaks[f"s_{key}"][j])
-        known = np.array([e["x"] for e in record["lines"] if e["cls"] != "photosphere"])
-        covered = [(e["lo"], e["hi"]) for e in record["bands"] if e["cls"] == "emission" and e["species"] != "PAH"]
-        for xp, sp, tp in zip(peaks["x_em"], peaks["s_em"], peaks["tol_em"]):
+            mine = hits(e, key)
+            e["strength"] = float(peaks[f"s_{key}"][mine].max()) if mine.any() else 0.0
+        unknown = np.ones(peaks["x_em"].size, dtype=bool)
+        for e in record["lines"]:
+            if e["cls"] != "photosphere":
+                unknown &= ~hits(e, "em")
+        loose, step = peaks["x_em"][unknown], peaks["step_em"][unknown]
+
+        def forest(e: dict[str, Any]) -> bool:
+            """Whether the spectrum shows the forest of gas band ``e``."""
+            inside = (loose >= e["lo"]) & (loose <= e["hi"])
+            x, reach = loose[inside], FOREST_WINDOW * step[inside]
+            return any(int(np.sum((x >= a) & (x <= a + r))) >= FOREST_MIN_PEAKS for a, r in zip(x, reach))
+
+        seen_bands = [e for e in record["bands"] if self._gas_band(e) and forest(e)]
+        covered = [(e["lo"], e["hi"]) for e in seen_bands]
+        # inside a forest a catalogue line is found only where it stands above the forest around
+        # it: a forest peak that happens to fall on a catalogue line is no detection of that line
+        loose_s = peaks["s_em"][unknown]
+        for e in self.lines:
+            if e["cls"] != "photosphere" and e["strength"] > 0 and any(a <= e["x"] <= b for a, b in covered):
+                near = np.abs(loose - e["x"]) <= 0.5 * FOREST_WINDOW * step
+                if near.any() and e["strength"] <= float(loose_s[near].max()):
+                    e["strength"] = 0.0
+        for xp, sp, alone in zip(peaks["x_em"], peaks["s_em"], unknown):
             # inside a broad gas band its forest explains ordinary peaks; one that towers over it is flagged too
             need = UNIDENTIFIED_SIGMA * (UNIDENTIFIED_IN_BAND if any(a <= xp <= b for a, b in covered) else 1.0)
-            if sp >= need and self.x_lo <= xp <= self.x_hi and (not known.size or float(np.min(np.abs(known - xp))) > tp):
+            if alone and sp >= need and self.x_lo <= xp <= self.x_hi:
                 self.unidentified.append(float(xp))
         seen = sum(e["strength"] > 0 for e in self.lines)
         log.info("%d of %d catalogue lines in view stand out of the spectrum; %d strong peak(s) unidentified",
                  seen, len(self.lines), len(self.unidentified))
-        if record.get("detected_only", False):
+        if detected_only:
             self.lines = [e for e in self.lines if e["strength"] > 0]
+            drawn = {(e["label"], e["lo"], e["hi"]) for e in seen_bands}
+            self.bands = [e for e in self.bands if not self._gas_band(e) or any(
+                b[0] == e["label"] and b[1] <= e["lo"] and e["hi"] <= b[2] for b in drawn)]
+
+    @staticmethod
+    def _gas_band(entry: dict[str, Any]) -> bool:
+        """A broad band of gas emission (a forest named as one band), not a solid-state band or PAH."""
+        return entry["cls"] == "emission" and entry["species"] != "PAH"
 
     def label_lines(self) -> None:
         """Turn the lines into labels: one per line, except that converging members of a series
@@ -244,13 +295,18 @@ class FeatureLayout:
             inline_gas += [e for name, members in series.items() if name not in self.combs for e in members]
         else:
             # every member is labelled at its line; members that lie closer than a label is wide
-            # share one label for their range, each with its own stem to it
+            # share one label for their range, each with its own stem to it -- unless another
+            # labelled line stands between them, whose stem the shared label's stems would cross
+            labelled = np.array([e["x"] for e in self.lines if e["cls"] != "photosphere"] + self.unidentified)
             for name, members in series.items():
                 members = sorted(members, key=lambda e: e["x"])
                 pixels = self.to_px([e["x"] for e in members])
+                own = np.isin(labelled, [e["x"] for e in members])
+                strangers = labelled[~own]
                 runs, run = [], [0]
                 for k in range(1, len(members)):
-                    if pixels[k] - pixels[k - 1] < thickness:
+                    between = bool(np.any((strangers > members[k - 1]["x"]) & (strangers < members[k]["x"])))
+                    if pixels[k] - pixels[k - 1] < thickness and not between:
                         run.append(k)
                     else:
                         runs.append(run)
@@ -260,23 +316,20 @@ class FeatureLayout:
                     if len(run) < 3:
                         inline_gas += [members[k] for k in run]
                         continue
-                    ticks = [members[k]["tick"] for k in run]
-                    if all(t.isdigit() for t in ticks):
-                        ticks = sorted(ticks, key=int)
-                    span = f"{ticks[0]}\N{EN DASH}{ticks[-1]}"
+                    span = _member_span([members[k]["tick"] for k in run])
                     text = tex_label(name) + (f"({span})" if name.startswith("H2") else f" {span}")
                     xs = [members[k]["x"] for k in run]
                     inline_gas.append(dict(members[run[0]], x=float(np.sqrt(xs[0] * xs[-1])), members=xs, text=text,
                                            strength=max(members[k].get("strength", 0.0) for k in run)))
-        inline_gas += [{"x": xp, "text": "?", "label": "?", "species": "?", "cls": "line", "color": REF_COLOR,
-                        "strength": UNIDENTIFIED_SIGMA} for xp in self.unidentified]
+        inline_gas += [{"x": xp, "text": _unidentified_label(xp), "label": "?", "species": "?", "cls": "line",
+                        "color": REF_COLOR, "strength": UNIDENTIFIED_SIGMA} for xp in self.unidentified]
         inline_gas.sort(key=lambda e: e["x"])
         self.inline_gas = inline_gas
         self.with_labels = len(inline_gas) <= int(self.record.get("max_line_labels", 250))
         for e in self.lines:
-            e["length"] = self.measure(e["text"], 90)[1]
+            e["width"], e["length"] = self.measure(e["text"], 90)
         for e in inline_gas:
-            e["length"] = self.measure(e["text"], 90)[1]
+            e["width"], e["length"] = self.measure(e["text"], 90)
         # photospheric lines of one species that stand side by side are one multiplet: one label
         # (named a doublet / triplet where the catalogue says so), a stem from every line
         stellar_lines: list[dict[str, Any]] = []
@@ -296,7 +349,7 @@ class FeatureLayout:
             word = next((w for w in ("doublet", "triplet") if all(w in kind for kind in e["kinds"])), "")
             e["text"] = f"{e['name']} {word}".strip() if word else f"{e['name']} ($\\times${len(e['members'])})"
             e["x"] = float(np.sqrt(e["members"][0] * e["members"][-1]))
-            e["length"] = self.measure(e["text"], 90)[1]
+            e["width"], e["length"] = self.measure(e["text"], 90)
         self.stellar_lines = stellar_lines
 
     def sort_bands(self) -> None:
@@ -410,9 +463,14 @@ class FeatureLayout:
         the axis no label may stand in. Returns the placed items and the entries that found no room.
 
         Each label stands a constant factor above (below) the spectrum at its own line. A line
-        that towers over its neighbours keeps its label on top of itself and the others dodge
-        left or right of it; labels that still would touch are moved apart, and only labels
-        whose connectors would otherwise cross share a level.
+        that towers over its neighbours keeps its label on top of itself, moved just aside where
+        the stem of another line would rise inside its column (it gives up its place where no
+        spot within a label width is free, and below the spectrum where the band rows stand).
+        The others dodge left or right of it, never past it: a label stays between the pinned
+        labels on either side of its line (where there is no room, the lower of the two gives up
+        its place). Labels that still would touch are moved apart, and only labels whose
+        connectors would otherwise cross share a level. So no connector crosses a label or
+        another connector.
         """
         if not entries or not self.with_labels:
             return [], []
@@ -425,7 +483,38 @@ class FeatureLayout:
         level = _window(_window(edge, 6, np.min if above else np.max), 8, np.mean)     # the continuum beside the lines
         rise = sign * (self.on_grid(edge, pixels) - self.on_grid(level, pixels)) / (self.u1 - self.u0) * self.full
         tall = rise > TALL_LINE * float(np.median([e["length"] for e in entries]))
+        for i in np.nonzero(tall)[0]:        # (below the spectrum) not where the band rows stand
+            if any(a_ - 0.5 * thickness < pixels[i] < b_ + 0.5 * thickness for a_, b_ in blocked):
+                tall[i] = False
+        stems = [np.atleast_1d(self.to_px(e.get("members") or [e["x"]])) for e in entries]
+        stem_x = np.concatenate(stems)
+        stem_of = np.concatenate([np.full(len(x), j) for j, x in enumerate(stems)])
         lo_edge, hi_edge = box.x0 + 2.0, box.x1 - 2.0
+        offsets = sorted(np.arange(-thickness, thickness + 0.25, 0.5), key=abs)
+
+        def pin() -> dict[int, float]:
+            """Where the labels of the tall lines stand: over their own line, or as close to it as
+            needed -- a label width from one another, with no stem of another line inside the
+            label's column or between the label and its line. A label that finds no such spot
+            within a label width of its line gives up its place on top; its line dodges like any
+            other."""
+            spots: dict[int, float] = {}
+            for i in sorted(np.nonzero(tall)[0], key=lambda i: -rise[i]):
+                others = stem_x[stem_of != i]
+                reach = 0.5 * entries[i].get("width", thickness) + px
+                for d in offsets:
+                    spot = float(pixels[i]) + d
+                    a_, b_ = min(spot, float(pixels[i])), max(spot, float(pixels[i]))
+                    if lo_edge + 0.5 * thickness <= spot <= hi_edge - 0.5 * thickness \
+                            and all(abs(spot - q) >= thickness for q in spots.values()) \
+                            and not any(lo - 0.5 * thickness < spot < hi + 0.5 * thickness for lo, hi in blocked) \
+                            and not np.any(np.abs(others - spot) < reach) and not np.any((others > a_) & (others < b_)):
+                        spots[int(i)] = spot
+                        break
+                else:
+                    tall[i] = False
+            return spots
+
         half = 0.5 * (thickness + 2.0 * px)      # pitch of two interleaved tiers of labels
         tier: dict[int, int] = {}
 
@@ -451,11 +540,8 @@ class FeatureLayout:
         placed: dict[int, float] = {}
         skipped: set[int] = set()        # no room on this side of the spectrum at all
         for _ in range(2 * n + 2):
-            placed = {}
+            placed = pin()            # the tall lines first, each over itself (or just beside it)
             keep = np.nonzero(tall)[0]
-            if keep.size:      # the tall lines first, each over itself (apart from one another where they must)
-                spots, _kept = _declutter(pixels[keep], np.full(keep.size, thickness), lo_edge, hi_edge, max_shift=np.inf)
-                placed.update({int(i): float(p) for i, p in zip(keep, spots)})
             walls = _merged([(p - 0.5 * thickness - px, p + 0.5 * thickness + px) for p in placed.values()] + blocked)
             starts = [lo_edge] + [w[1] for w in walls]
             ends = [w[0] for w in walls] + [hi_edge]
@@ -464,15 +550,27 @@ class FeatureLayout:
             if rest and not segments:
                 skipped.update(rest)
                 break
-            homes: dict[int, list[int]] = {}
+            homes: dict[tuple[float, float], list[int]] = {}      # free stretch -> the labels placed in it
+            demote = None
             for i in rest:
-                k = min(range(len(segments)), key=lambda k: 0.0 if segments[k][0] <= pixels[i] <= segments[k][1]
-                        else min(abs(pixels[i] - segments[k][0]), abs(pixels[i] - segments[k][1])))
-                homes.setdefault(k, []).append(i)
+                # a label stays between the tall lines on either side of its own: its curve never
+                # passes under a label that stands over its line
+                left = max((float(pixels[j]) for j in keep if pixels[j] < pixels[i]), default=-np.inf)
+                right = min((float(pixels[j]) for j in keep if pixels[j] > pixels[i]), default=np.inf)
+                inside = {k: (max(a_, left), min(b_, right)) for k, (a_, b_) in enumerate(segments)
+                          if min(b_, right) - max(a_, left) >= thickness}
+                if not inside:     # no room between them: the lower of the two gives up its place on top
+                    demote = min((int(j) for j in keep if pixels[j] in (left, right)), key=lambda j: rise[j])
+                    break
+                k = min(inside, key=lambda k: 0.0 if inside[k][0] <= pixels[i] <= inside[k][1]
+                        else min(abs(pixels[i] - inside[k][0]), abs(pixels[i] - inside[k][1])))
+                homes.setdefault(inside[k], []).append(i)
+            if demote is not None:
+                tall[demote] = False
+                continue
             again = False
             tier.clear()
-            for k, members in homes.items():
-                a_, b_ = segments[k]
+            for (a_, b_), members in homes.items():
                 spots = arrange(members, a_, b_)
                 if spots is None:
                     # no room between two tall lines: the lower of them gives up its place on top;
@@ -641,6 +739,8 @@ __all__ = [
     "FEATURE_MAX_ASPECT",
     "FEATURE_MAX_WIDTH",
     "FEATURE_MIN_AXES_HEIGHT",
+    "FOREST_MIN_PEAKS",
+    "FOREST_WINDOW",
     "TALL_LINE",
     "FeatureLayout",
 ]

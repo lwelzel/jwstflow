@@ -38,14 +38,18 @@ class PlotSpectrum(Step):
     ``label_offset`` over the spectrum at its own wavelength, colored by
     species; the absorption lines of the stellar photosphere dashed, labelled
     below, unless ``photospheric: false``; ices, silicates and PAH as
-    rectangles in rows at the foot of the plot). The 1-sigma uncertainty (the
+    rectangles in rows at the foot of the plot; strong peaks no catalogue
+    line explains as ``? [wavelength]``), and every input gets a second
+    figure (``*_detected.png``) that labels only the lines the spectrum
+    shows -- and the gas bands only where it shows their forest
+    (``detected: false`` leaves it out). The 1-sigma uncertainty (the
     ``<column>_ERROR`` column, where the table carries one) is shaded around
     each spectrum of the per-file figures (``errors: false`` leaves it out).
     """
 
     level = "qa"
     batch = "all"   # all inputs in one task, so the combined overview sees every spectrum
-    version = "7"   # 6 -> 7: built on qa.Spectrum
+    version = "8"   # 7 -> 8: a figure of the detected lines; "? [wavelength]" for unidentified peaks
 
     def run(
         self,
@@ -60,6 +64,7 @@ class PlotSpectrum(Step):
         label_offset: float = qa.FEATURE_LABEL_OFFSET,
         photospheric: bool = True,
         errors: bool = True,
+        detected: bool = True,
         dpi: int = 150,
         fmt: str = "png",
         **_: Any,
@@ -68,14 +73,16 @@ class PlotSpectrum(Step):
 
         out: list[Path] = []
         combined: list[tuple[np.ndarray, np.ndarray, str, str]] = []
+        # every line in range labelled; with features also only the lines the spectrum shows
+        variants = (("", False), ("_detected", True))[:2 if detected and features not in (None, False) else 1]
         for inp in sorted(inputs):
+            series = []     # (wavelength, mJy, 1-sigma, label, color) of every spectrum in the file
+            ylabel = ""
             with fits.open(inp) as hdul:
                 tables = [h for h in hdul if h.name in qa.SPECTRUM_EXTENSIONS]
                 if not tables:
                     log.warning("%s has no EXTRACT1D/COMBINE1D extension; skipped", inp.name)
                     continue
-                plot = qa.Spectrum(xscale=xscale, yscale=yscale)
-                ylabel = ""
                 for i, (h, color) in enumerate(zip(tables, qa.line_colors(len(tables)))):
                     tab = h.data
                     if "WAVELENGTH" not in tab.names or column not in tab.names:
@@ -86,12 +93,16 @@ class PlotSpectrum(Step):
                     error_column = f"{column}_ERROR"
                     sigma = qa.to_mjy(tab[error_column], qa.column_unit(h, error_column))[0] \
                         if errors and error_column in tab.names else None
+                    series.append((wave, values, sigma, label, color))
+                    combined.append((wave, values, inp.stem + (f":{label}" if label else ""), ylabel))
+            for suffix, detected_only in variants:
+                plot = qa.Spectrum(xscale=xscale, yscale=yscale)
+                for i, (wave, values, sigma, label, color) in enumerate(series):
                     plot.line(wave, values, error=sigma, color=color, label=label,
                               error_label=qa.SIGMA_BAND_LABEL if i == 0 else None)
-                    combined.append((wave, values, inp.stem + (f":{label}" if label else ""), ylabel))
-            out.append(plot.finish(ctx.output_dir / f"{inp.stem}.{fmt}", ylabel=ylabel or column, notes=[inp.name],
-                                   features=features, label_offset=label_offset, photospheric=photospheric,
-                                   ylim=ylim, dpi=dpi))
+                out.append(plot.finish(ctx.output_dir / f"{inp.stem}{suffix}.{fmt}", ylabel=ylabel or column,
+                                       notes=[inp.name], features=features, label_offset=label_offset,
+                                       photospheric=photospheric, ylim=ylim, dpi=dpi, detected_only=detected_only))
         overview = all_spectra_figure(combined, ctx.output_dir / f"{ctx.stage}_all.{fmt}", what="spectra", dpi=dpi,
                                       features=features, label_offset=label_offset, photospheric=photospheric)
         if overview is not None:
@@ -117,7 +128,7 @@ class PlotSnr(Step):
     """
 
     level = "qa"
-    version = "2"   # 1 -> 2: a spectrum-like figure, features annotated
+    version = "3"   # 2 -> 3: "? [wavelength]" for unidentified peaks, lines identified within one sample / 50 km/s
 
     def run(self, inputs: list[Path], ctx: RunContext, *, column: str = "FLUX", xscale: str = "log",
             yscale: str = "log", features: Any = "all", label_offset: float = qa.FEATURE_LABEL_OFFSET,
@@ -174,7 +185,7 @@ class PlotSpectrumStages(Step):
     """
 
     level = "qa"
-    version = "2"   # 1 -> 2: built on qa.Spectrum
+    version = "3"   # 2 -> 3: "? [wavelength]" for unidentified peaks, lines identified within one sample / 50 km/s
     inputs = ("*_s1d.fits", "*_x1d.fits")
 
     def run(self, inputs: list[Path], ctx: RunContext, *, stages: list[str] | tuple[str, ...] = (),

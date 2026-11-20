@@ -76,7 +76,7 @@ class QaCubeStitch(Step):
     name = "qa_cube_stitch"
     level = "qa"
     inputs = (f"*_{JOINT_SUFFIX}.fits",)
-    version = "1"
+    version = "2"   # 1 -> 2: "? [wavelength]" for unidentified peaks, lines identified within one sample / 50 km/s
 
     def run(self, inputs: list[Path], ctx: RunContext, *, xscale: str = "log", yscale: str = "log",
             features: Any = None, stretch: str = "asinh", ncols: int = 4, panel: float = 3.0, dpi: int = 150,

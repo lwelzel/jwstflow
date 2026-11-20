@@ -78,6 +78,18 @@ DETECT_SIGMA = (5.0, 4.0)
 UNIDENTIFIED_SIGMA = 12.0
 #: ... and inside a broad gas band (a forest of lines the band already names) this many times stronger.
 UNIDENTIFIED_IN_BAND = 3.0
+#: A peak is a catalogue line when it lies within one sample of it or this velocity [km/s],
+#: whichever is larger: the half sample by which the highest sample misses the line centre, plus
+#: the wavelength calibration and the velocity of the source. Measured on NIRSpec and MIRI
+#: spectra of edge-on disks, every line seen lies inside it; further out, the matches are those a
+#: catalogue shifted by a percent finds as well -- chance coincidences with other peaks.
+IDENTIFY_VELOCITY = 50.0
+#: The wavelength of an unidentified peak is printed with this many decimals [um].
+UNIDENTIFIED_DECIMALS = 3
+#: A step between samples this many times wider than the steps beside it is a gap in the spectrum;
+#: the first and last this many samples of every stretch between gaps are not searched for lines.
+GAP_STEP = 4.0
+EDGE_SAMPLES = 3
 
 
 def detect_lines(x: Any, y: Any, *, window: int = 50) -> dict[str, np.ndarray] | None:
@@ -88,11 +100,15 @@ def detect_lines(x: Any, y: Any, *, window: int = 50) -> dict[str, np.ndarray] |
     residual (x 1.4826). An emission peak is a local maximum at least
     ``DETECT_SIGMA[0]`` scatters above the median whose neighbour stands
     out too (one sample alone is a spike, not a line); an absorption dip
-    the same downwards with ``DETECT_SIGMA[1]``. Returns the positions
-    ``x_em`` / ``x_ab``, their significances ``s_em`` / ``s_ab`` and the
-    matching tolerances ``tol_em`` / ``tol_ab`` (two samples or 0.05 % of
-    the wavelength, whichever is larger); None for a spectrum too short to
-    search.
+    the same downwards with ``DETECT_SIGMA[1]``. The :data:`EDGE_SAMPLES`
+    samples at either end of the spectrum and of every stretch between gaps
+    are left out (an edge rises or falls, it is no line). Returns the positions
+    ``x_em`` / ``x_ab``, their significances ``s_em`` / ``s_ab``, the
+    sample step there ``step_em`` / ``step_ab`` and the
+    tolerances ``tol_em`` / ``tol_ab`` within which a peak is the line of a
+    catalogue (one sample or :data:`IDENTIFY_VELOCITY`, whichever is
+    larger; the sample is the step to the nearer neighbour, so a gap in the
+    spectrum never widens it); None for a spectrum too short to search.
     """
     from numpy.lib.stride_tricks import sliding_window_view
 
@@ -113,13 +129,23 @@ def detect_lines(x: Any, y: Any, *, window: int = 50) -> dict[str, np.ndarray] |
     if not positive.size:
         return None
     significance = residual / np.maximum(scatter, 0.05 * float(np.median(positive)))
-    tolerance = np.maximum(2.0 * np.abs(np.gradient(x)), 5e-4 * np.abs(x))
+    step = np.abs(np.diff(x))
+    sample = np.minimum(np.append(step[:1], step), np.append(step, step[-1:]))     # never across a gap
+    tolerance = np.maximum(sample, IDENTIFY_VELOCITY / 299792.458 * np.abs(x))
+    # a gap is a step far wider than the steps on either side of it (a change of sampling is not);
+    # the samples next to a gap or an end of the spectrum are no lines: they rise and fall with the edge
+    around = np.maximum(np.append(step[1:], step[-1]), np.append(step[0], step[:-1]))
+    starts = np.concatenate([[0], np.nonzero(step > GAP_STEP * around)[0] + 1, [x.size]])
+    index = np.arange(x.size)
+    run = np.searchsorted(starts, index, side="right") - 1
+    inner = np.minimum(index - starts[run], starts[run + 1] - 1 - index) >= EDGE_SAMPLES
     core, left, right = significance[1:-1], significance[:-2], significance[2:]
     out: dict[str, np.ndarray] = {}
     for key, sign, level in (("em", 1.0, DETECT_SIGMA[0]), ("ab", -1.0, DETECT_SIGMA[1])):
         hit = (sign * core >= level) & (sign * core >= sign * left) & (sign * core >= sign * right) \
-            & (np.maximum(sign * left, sign * right) >= 0.4 * level)
+            & (np.maximum(sign * left, sign * right) >= 0.4 * level) & inner[1:-1]
         out[f"x_{key}"], out[f"s_{key}"], out[f"tol_{key}"] = x[1:-1][hit], sign * core[hit], tolerance[1:-1][hit]
+        out[f"step_{key}"] = sample[1:-1][hit]
     return out
 
 
@@ -186,6 +212,28 @@ def _photosphere_label(label: str) -> str:
     return " ".join(words) or label
 
 
+def _unidentified_label(wavelength: float) -> str:
+    """The label of a peak no catalogue line explains: ``?`` and its wavelength [um]
+    (``? [1.234]``)."""
+    return f"? [{wavelength:.{UNIDENTIFIED_DECIMALS}f}]"
+
+
+def _member_span(ticks: list[str]) -> str:
+    """The members of a series that share one label: a range where they follow one another
+    (``17–25``), else the runs of consecutive members (``17–18, 21, 24–25``) -- the label
+    names exactly the lines its stems point to."""
+    if not all(t.isdigit() for t in ticks):
+        return f"{ticks[0]}\N{EN DASH}{ticks[-1]}"
+    numbers = sorted({int(t) for t in ticks})
+    runs: list[list[int]] = [[numbers[0]]]
+    for n in numbers[1:]:
+        if n == runs[-1][-1] + 1:
+            runs[-1].append(n)
+        else:
+            runs.append([n])
+    return ", ".join(f"{r[0]}\N{EN DASH}{r[-1]}" if len(r) > 1 else f"{r[0]}" for r in runs)
+
+
 def _line_label(label: str) -> str:
     """A gas line's label in the plot: what identifies it, without the words its mark already
     says (``C2H6 Q-branch`` -> ``C2H6``, ``H2O cold diagnostic 23.8-24.0`` -> ``H2O cold``)."""
@@ -198,9 +246,13 @@ def _line_label(label: str) -> str:
 __all__ = [
     "BAND_COLORS",
     "DETECT_SIGMA",
+    "EDGE_SAMPLES",
+    "GAP_STEP",
+    "IDENTIFY_VELOCITY",
     "PHOTOSPHERE_COLORS",
     "SPECIES_COLORS",
     "SPECIES_GROUPS",
+    "UNIDENTIFIED_DECIMALS",
     "UNIDENTIFIED_IN_BAND",
     "UNIDENTIFIED_SIGMA",
     "detect_lines",

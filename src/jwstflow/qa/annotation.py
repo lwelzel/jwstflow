@@ -21,6 +21,8 @@ FEATURE_NARROW_BAND = 0.02
 PHOTOSPHERIC_DATASET = "photospheric_lines"
 #: The opt-in table of further gas lines, annotated together with ``gas_lines``.
 EXTENDED_DATASET = "gas_lines_extended"
+#: The note of a figure that marks only the features its spectrum shows (``detected_only``).
+DETECTED_NOTE = "labelled: only the lines and gas bands detected in the spectrum (solid-state bands: all in range)"
 
 
 def annotate_features(ax: Any, features: Any, *, wave_min: float, wave_max: float,
@@ -37,7 +39,8 @@ def annotate_features(ax: Any, features: Any, *, wave_min: float, wave_max: floa
     spectrum stays the main element of the figure:
 
     * **Every line in range is marked, whether the spectrum shows it or
-      not** -- the figure tells where lines *would* be.
+      not** -- the figure tells where lines *would* be -- unless
+      ``detected_only`` (below).
     * **Gas lines** are labelled *in the plot, right above their own line*,
       always with a stem to it: the label starts a constant factor
       (``label_offset``) above the spectrum there, in the **color of the
@@ -58,8 +61,10 @@ def annotate_features(ax: Any, features: Any, *, wave_min: float, wave_max: floa
     * **Series** (the H I series, the branches of the H2 bands) are
       labelled line by line like everything else (``series="labels"``).
       Only where consecutive members of one series lie closer than a label
-      is wide do they share one label for the range (``H I Pf 17-25``),
-      with a stem from every member -- no bracket, no comb. With
+      is wide, and no other labelled line stands between them, do they
+      share one label for the range (``H I Pf 17-25``; ``H2 2-1 Q(1, 3-5)``
+      where members are missing), with a stem from every member -- no
+      bracket, no comb. With
       ``series="combs"`` every series with :data:`COMB_MIN` or more members
       in view is instead one named row above the plot -- a tick and a
       number per member: the compact inventory, for a figure of its own.
@@ -81,18 +86,31 @@ def annotate_features(ax: Any, features: Any, *, wave_min: float, wave_max: floa
       bands, and a photospheric line that has no room beside them is
       labelled above the spectrum instead.
     * The spectrum is searched for peaks that stand out of its running
-      median (:func:`detect_lines`): a strong one that no catalogue line
-      explains gets a grey ``?`` over it (inside a broad gas band only when
-      it towers over the band's own forest), and ``detected_only=True``
-      restricts the marks to the lines found.
+      median (:func:`detect_lines`); a peak is a catalogue line when it
+      stands within one sample or :data:`IDENTIFY_VELOCITY` of it (of the
+      wavelength of a Q-branch). A strong peak that no catalogue line
+      explains gets a grey label of a question mark and its wavelength,
+      ``? [4.954]``, over it (inside a broad gas band whose forest the
+      spectrum shows only when it towers over that forest).
+    * ``detected_only=True`` marks only what the spectrum shows: the lines
+      found (emission peaks for gas lines, absorption dips for photospheric
+      lines) and the broad gas bands whose forest it shows -- at least
+      :data:`FOREST_MIN_PEAKS` peaks that are no catalogue line within
+      :data:`FOREST_WINDOW` samples; inside such a forest a line counts
+      only where its peak stands above the forest around it. The ``?``
+      labels are the same as without it; the solid-state
+      bands are kept (no peak search can tell them). A spectrum too short
+      to search gets no line labels.
     * Labels are typeset: formulae with sub- and superscripts, Greek
       letters for the hydrogen series; the label of an ice band is the
       formula of its species.
     * **Nothing crosses and nothing overlaps.** Neighbouring labels that
       would touch are moved apart as a group, and each is joined to its line
       by one smooth curve; the labels of a group keep the order of their
-      lines, so the curves cannot cross. No label is dropped while the axes
-      has room for all of them.
+      lines, so the curves cannot cross. A label on top of a towering line
+      moves just aside where another line's stem would rise inside its
+      column, and a moved label never passes a line whose label stands over it. No label is
+      dropped while the axes has room for all of them.
     * The y range gains only the room the labels need; the strips above and
       below are a few rows high.
 
@@ -151,4 +169,4 @@ def annotate_features(ax: Any, features: Any, *, wave_min: float, wave_max: floa
         _defer(ax.figure, lambda: FeatureLayout(ax).run())
 
 
-__all__ = ["EXTENDED_DATASET", "FEATURE_NARROW_BAND", "PHOTOSPHERIC_DATASET", "annotate_features"]
+__all__ = ["DETECTED_NOTE", "EXTENDED_DATASET", "FEATURE_NARROW_BAND", "PHOTOSPHERIC_DATASET", "annotate_features"]

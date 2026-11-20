@@ -21,7 +21,7 @@ from typing import Any
 
 import numpy as np
 
-from .annotation import annotate_features
+from .annotation import DETECTED_NOTE, annotate_features
 from .frames import SkyFrame, contour_mask, imshow, marker
 from .layout import FEATURE_LABEL_OFFSET
 from .lines import error_band, refline, set_flux_scale, set_wave_scale, step
@@ -96,7 +96,7 @@ class Spectrum:
 
     def decorate(self, *, ylabel: str, features: Any = None, label_offset: float = FEATURE_LABEL_OFFSET,
                  photospheric: bool = True, series: str = "labels", follow: tuple[Any, Any] | None = None,
-                 ylim: Any = None, wave_range: tuple[float, float] | None = None) -> None:
+                 ylim: Any = None, wave_range: tuple[float, float] | None = None, detected_only: bool = False) -> None:
         """Label and scale the axes and annotate ``features`` (jwstflow ``features:`` grammar; None
         for no annotation) over the plotted range. ``wave_range`` zooms the wavelength axis.
 
@@ -104,6 +104,8 @@ class Spectrum:
         (black) are searched for peaks. ``follow`` -- ``(wavelength, values)``
         -- names the curve to use instead, for a figure whose product is not
         the curve that carries the lines (a continuum under its spectrum).
+        Every line in range is marked; ``detected_only`` marks only the
+        lines the spectrum shows (:func:`annotate_features`).
         """
         self.axes[-1].set_xlabel(WAVE_LABEL)
         self.ax.set_ylabel(ylabel)
@@ -116,13 +118,15 @@ class Spectrum:
         if features not in (None, False) and (self._range or wave_range is not None):
             lo, hi = wave_range or (min(r[0] for r in self._range), max(r[1] for r in self._range))
             annotate_features(self.ax, features, wave_min=lo, wave_max=hi, label_offset=label_offset,
-                              photospheric=photospheric, series=series, under=follow)
+                              photospheric=photospheric, series=series, under=follow, detected_only=detected_only)
 
     def finish(self, path: Path | str, *, ylabel: str, notes: tuple[str, ...] | list[str] = (), dpi: int = 150,
                **decoration: Any) -> Path:
-        """:meth:`decorate` (which takes ``decoration``), then the notes and the legend; save and close."""
+        """:meth:`decorate` (which takes ``decoration``), then the notes and the legend; save and close.
+        A figure that marks only the detected lines says so in its notes."""
         self.decorate(ylabel=ylabel, **decoration)
-        annotate(self.ax, *notes)
+        detected = decoration.get("detected_only") and decoration.get("features") not in (None, False)
+        annotate(self.ax, *notes, *([DETECTED_NOTE] if detected else []))
         figlegend(self.fig)
         return save(self.fig, path, dpi=dpi)
 

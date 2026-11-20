@@ -261,6 +261,11 @@ def test_plot_stitch_also_draws_the_segments_before_rescaling(tmp_path: Path):
     pngs = run_step(PlotStitch, [o for o in outputs if o.suffix == ".ecsv"], tmp_path, ctx=ctx,
                     params={"unscaled": False})
     assert [p.name for p in pngs] == ["jw001_nirspec_s1dcomb.png"]
+    # with features: every line labelled, only the lines found, and the series as combs
+    pngs = run_step(PlotStitch, [o for o in outputs if o.suffix == ".ecsv"], tmp_path, ctx=ctx,
+                    params={"unscaled": False, "features": "all"})
+    assert [p.name for p in pngs] == ["jw001_nirspec_s1dcomb.png", "jw001_nirspec_s1dcomb_detected.png",
+                                      "jw001_nirspec_s1dcomb_series.png"]
 
 
 def test_plot_stitch_overlaps_draws_one_panel_per_pair(tmp_path: Path):

@@ -86,6 +86,16 @@ before a figure is committed.
     * **Every line in range is marked, whether the spectrum shows it or
       not** -- the figure tells where lines *would* be. No label is dropped
       to make room: a figure with more labels gets wider.
+    * **A second figure marks only what the spectrum shows**
+      (`detected_only=True`; `plot_spectrum` and `plot_stitch` write it as
+      `*_detected.png` next to the full one, and its notes say so): a gas
+      line is labelled where an emission peak stands within one sample or
+      `qa.IDENTIFY_VELOCITY` (50 km/s) of it, a photospheric line where a
+      dip does, and a broad gas band is drawn where the spectrum shows its
+      forest (`qa.FOREST_MIN_PEAKS` peaks that are no catalogue line
+      within `qa.FOREST_WINDOW` samples inside it); inside such a forest a
+      line counts only where its peak stands above the forest around it.
+      The solid-state rows and the `?` labels are those of the full figure.
     * **Each gas label stands at its own line**, a constant factor
       (`label_offset`) above the spectrum there, with a stem to the line and
       in the **color of the species** (`qa.SPECIES_COLORS`) -- the labels
@@ -95,13 +105,17 @@ before a figure is committed.
       moved apart; where lines crowd so much that one row of labels would
       have to move far from them, the labels alternate between two tiers.
       Narrow bands of the gas catalogue (Q-branches) count as lines. Strong
-      peaks that no catalogue line or gas band explains are marked `?`
-      (`qa.detect_lines`).
+      peaks that no catalogue line or gas band explains (a band explains
+      the peaks inside it only where the spectrum shows its forest) are labelled in grey
+      with a question mark and their wavelength in um, `? [4.954]`
+      (`qa.detect_lines`; a peak is a catalogue line within one sample or
+      50 km/s of it).
     * **Series** (the H I series, the branches of the H₂ bands) are
       labelled line by line too. Only where consecutive members lie closer
-      than a label is wide do they share one label for the range
-      (`H I Pf 17–25`, `H₂ 1-0 Q(1–8)`), with a stem from every member --
-      no brackets, no combs in the overview.
+      than a label is wide, and no other labelled line stands between them,
+      do they share one label for the range (`H I Pf 17–25`,
+      `H₂ 1-0 Q(1–8)`; `H₂ 2-1 Q(1, 3–5)` where members are missing), with
+      a stem from every member -- no brackets, no combs in the overview.
     * **Broad gas emission** (the CO fundamental, OH and water forests) is
       marked above the plot: outlined rectangles over the wavelength range,
       in the species color.
@@ -130,11 +144,14 @@ before a figure is committed.
       cool maps (*freeze*, *amethyst*, *lavender*, *sapphire*), silicates
       grey, PAH from *sunburst*.
     * **Nothing crosses, nothing overlaps.** A label over its own line
-      stands right above the spectrum there. Labels that would touch are
-      moved apart and each is joined to its line by one smooth curve that
-      leaves the line vertically -- no kinks; the labels of such a run
-      share one level and keep the order of their lines, so the curves
-      cannot cross.
+      stands right above the spectrum there, moved just aside where another
+      line's stem would rise inside its column (and, below the spectrum, not
+      where the band rows stand).
+      Labels that would touch are moved apart and each is joined to its
+      line by one smooth curve that leaves the line vertically -- no kinks;
+      the labels of such a run share one level and keep the order of their
+      lines, so the curves cannot cross, and a moved label never passes a
+      line whose label stands over it.
     * `series="combs"` is the other layout, for a separate figure: every
       series with several members in view is one named row above the plot,
       a tick and a number per member -- the compact inventory
@@ -388,10 +405,10 @@ Guidelines that follow from the rules:
 
 | step | kind | inputs | figure |
 |---|---|---|---|
-| `plot_spectrum` | spectrum | `*_x1d` / `*_c1d` / `*_s1d(comb)` | every EXTRACT1D/COMBINE1D spectrum in mJy with its 1σ band; with 2+ spectra also a combined log-log overview (`<stage>_all.png`); optional feature annotation |
+| `plot_spectrum` | spectrum | `*_x1d` / `*_c1d` / `*_s1d(comb)` | every EXTRACT1D/COMBINE1D spectrum in mJy with its 1σ band; with 2+ spectra also a combined log-log overview (`<stage>_all.png`); optional feature annotation, and with it a second figure labelling only the lines the spectrum shows (`*_detected.png`) |
 | `plot_snr` | spectrum | `*_x1d` / `*_c1d` / `*_s1d(comb)` | signal-to-noise ratio per sample against wavelength (`*_snr.png`), median S/N in the legend, features annotated by default |
 | `plot_spectrum_stages` | spectrum | the spectra of the last 1-D processing stage | the same spectrum at each named earlier stage, and the ratio of every stage to the one before it (`*_stages.png`): what defringing, cleaning, ... did |
-| `plot_stitch` | spectrum | `*_s1dcomb.ecsv` | stitched spectrum (black) over its rescaled segments; with features also the series as combs (`*_series.png`); when the stitch rescaled anything, the segments as extracted (`*_unscaled.png`); with 2+ stitched spectra a combined overview |
+| `plot_stitch` | spectrum | `*_s1dcomb.ecsv` | stitched spectrum (black) over its rescaled segments; with features also only the lines the spectrum shows (`*_detected.png`) and the series as combs (`*_series.png`); when the stitch rescaled anything, the segments as extracted (`*_unscaled.png`); with 2+ stitched spectra a combined overview |
 | `plot_stitch_overlaps` | line panels | `*_s1dcomb.ecsv` | one panel per neighbouring segment pair, zoomed into their overlap (`*_overlaps.png`): both segments with error bands, the crossover, the window the factor was measured in, the bluer segment times that factor; pair and factor noted in each panel |
 | `plot_stitch_background` | spectrum | `*_s1dcomb.ecsv` | source / background / difference (`*_bkgcomp.png`), features annotated by default |
 | `quicklook_image` | frame | anything with a SCI extension | nan-median collapsed image (asinh), pixel and sky offsets from the target |

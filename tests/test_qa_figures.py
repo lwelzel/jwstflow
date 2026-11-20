@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import re
+from itertools import pairwise
+
 import numpy as np
 import pytest
 
@@ -9,7 +12,7 @@ pytest.importorskip("matplotlib")
 
 from jwstflow import qa
 from jwstflow.qa.frames import _robust_max
-from jwstflow.qa.labels import _line_label, _series
+from jwstflow.qa.labels import _line_label, _member_span, _series
 from jwstflow.qa.placement import _declutter
 
 
@@ -152,8 +155,10 @@ def test_annotate_features_marks_every_line_without_overlaps(tmp_path):
     # the members of a series are labelled at their lines too; where they converge they share one label
     assert {"H$_{2}$ 1-0 S(1)", r"H I Br$\gamma$", "H$_{2}$ 0-0 S(3)"} <= inline
     assert any("\N{EN DASH}" in t and t.startswith("H I ") for t in inline)
-    marks = [t for t in rotated if t.get_text() == "?"]
-    assert len(marks) == 1 and marks[0].get_color() == qa.REF_COLOR     # the strong line no catalogue explains
+    marks = [t for t in rotated if t.get_text().startswith("?")]
+    assert len(marks) == 1 and marks[0].get_color() == qa.REF_COLOR     # the strong line no catalogue explains,
+    assert re.fullmatch(r"\? \[8\.\d{3}\]", marks[0].get_text())          # labelled with its wavelength
+    assert abs(float(marks[0].get_text()[3:-1]) - 8.3) < 0.003
     spot = marks[0].get_window_extent(renderer)
     assert abs(0.5 * (spot.x0 + spot.x1) - ax.transData.transform((8.3, 1.0))[0]) < 12
     curve = ax.transData.transform((5.0, 1.0))[1]
@@ -171,7 +176,7 @@ def test_annotate_features_marks_every_line_without_overlaps(tmp_path):
     peak = ax.transData.transform((12.81355, 4.0))
     extent = neon.get_window_extent(renderer)
     assert abs(0.5 * (extent.x0 + extent.x1) - peak[0]) < 6 and 0 < extent.y0 - peak[1] < 40
-    others = [t.get_window_extent(renderer).y0 for t in above if t is not neon and t.get_text() != "?"]
+    others = [t.get_window_extent(renderer).y0 for t in above if t is not neon and not t.get_text().startswith("?")]
     assert np.median(others) < peak[1]                # ... they stay down at the continuum
     # the band rows are the foot of the plot; all regions of one ice share a row; formulae, no "ice"
     rects = [p for p in ax.patches if isinstance(p, matplotlib.patches.Rectangle)]
@@ -201,6 +206,133 @@ def test_series_as_combs_is_a_separate_layout(tmp_path):
     assert len(top.lines) > 80                        # a tick for every member of the series
     assert _overlaps(list(top.texts), fig.canvas.get_renderer()) == 0
     qa.save(fig, tmp_path / "combs.png")
+
+
+def _annotated(tmp_path, name: str, *, detected_only: bool, lines=(), dips=(), lo=1.7, hi=14.0):
+    """A synthetic spectrum annotated with every dataset; the axes after the layout ran."""
+    fig, ax = qa.subplots()
+    wave, flux = _spectrum(lines=lines, dips=dips, lo=lo, hi=hi)
+    qa.step(ax, wave, flux, color=qa.MAIN_COLOR)
+    qa.set_wave_scale(ax)
+    qa.set_flux_scale(ax, "log")
+    qa.annotate_features(ax, "all", wave_min=lo, wave_max=hi, detected_only=detected_only)
+    qa.finalize(fig)
+    fig.draw_without_rendering()
+    qa.save(fig, tmp_path / f"{name}.png")
+    return ax
+
+
+def test_detected_only_labels_what_the_spectrum_shows(tmp_path):
+    # [Ne II], H2 0-0 S(3), an unknown line, Na I in absorption -- and a forest of unknown lines
+    # inside the CO fundamental band (4.4-5.2 um), none inside the water band at 5.5-7.3 um
+    forest = tuple(4.5 + 0.035 * k for k in range(8))
+    shown = {"lines": (12.81355, 9.66491, 8.3000, *forest), "dips": (2.20625,)}
+    every = _annotated(tmp_path, "every", detected_only=False, **shown)
+    found = _annotated(tmp_path, "found", detected_only=True, **shown)
+
+    def texts(ax, rotation):
+        return {t.get_text() for t in ax.texts if t.get_rotation() == rotation}
+
+    inline = texts(found, 90)
+    assert {"[Ne II] 12.814", "H$_{2}$ 0-0 S(3)"} <= inline              # the lines the spectrum shows
+    assert any(t.startswith("Na I") for t in inline)                     # ... the photospheric dip among them
+    assert "[Fe II] 5.340" not in inline and "[Fe II] 5.340" in texts(every, 90)     # absent: only in the full figure
+    assert len(inline) < 15 < len(texts(every, 90))
+    # the unidentified peaks are labelled alike in both figures
+    assert {t for t in inline if t.startswith("?")} == {t for t in texts(every, 90) if t.startswith("?")} != set()
+    # gas bands: kept where the spectrum shows their forest, dropped elsewhere; solid-state bands kept
+    top_found = {t.get_text() for child in found.child_axes for t in child.texts}
+    top_every = {t.get_text() for child in every.child_axes for t in child.texts}
+    assert any("CO fundamental" in t for t in top_found)
+    assert any("$\\nu_{2}$" in t for t in top_every) and not any("$\\nu_{2}$" in t for t in top_found)
+    assert texts(found, 0) == texts(every, 0) != set()                   # the ice rows are the same
+
+
+def test_detected_only_without_a_searchable_spectrum_labels_nothing(tmp_path):
+    fig, ax = qa.subplots()
+    wave = np.linspace(2.0, 2.4, 60)                 # too short to search for lines
+    qa.step(ax, wave, np.ones_like(wave), color=qa.MAIN_COLOR)
+    qa.annotate_features(ax, "all", wave_min=2.0, wave_max=2.4, detected_only=True)
+    qa.finalize(fig)
+    assert not [t for t in ax.texts if t.get_rotation() == 90]
+
+
+def test_a_peak_identifies_a_line_within_one_sample_never_across_a_gap():
+    wave, flux = _spectrum(lines=(3.0, 4.06), lo=2.9, hi=5.2, n=8000)
+    keep = (wave < 4.05) | (wave > 4.15)             # a detector gap right of 4.05 um
+    wave, flux = wave[keep], flux[keep]
+    edge = int(np.searchsorted(wave, 4.05))         # the first sample after the gap
+    flux[edge - 2:edge] += 0.5                       # the detector edge rises before the gap: no line
+    found = qa.detect_lines(wave, flux)
+    assert not np.any(np.abs(found["x_em"] - 4.05) < 0.01)
+    step = np.median(np.diff(wave) / wave[1:])
+    # the tolerance is one sample or IDENTIFY_VELOCITY, whichever is larger -- also next to the gap
+    assert np.all(found["tol_em"] <= np.maximum(1.01 * step * found["x_em"],
+                                                qa.IDENTIFY_VELOCITY / 2.998e5 * found["x_em"] * 1.001))
+    assert abs(found["x_em"][np.argmin(np.abs(found["x_em"] - 3.0))] - 3.0) <= found["tol_em"].max()
+
+
+def test_a_shared_label_names_exactly_the_members_with_stems():
+    assert _member_span(["25", "24", "23", "22"]) == "22\N{EN DASH}25"
+    assert _member_span(["17", "19", "20", "22"]) == "17, 19\N{EN DASH}20, 22"
+    assert _member_span([r"$\alpha$", r"$\beta$"]) == "$\\alpha$\N{EN DASH}$\\beta$"     # Greek ticks: first to last
+
+
+def _stems_through_labels(ax, renderer) -> list[tuple[str, str]]:
+    """(label, owner of the stem) for every connector that passes through a label not its own."""
+    from matplotlib.patches import PathPatch
+
+    labels = [t for t in ax.texts if t.get_rotation() == 90 and t.get_visible()]
+    boxes = [t.get_window_extent(renderer) for t in labels]
+    found = []
+    for patch in (p for p in ax.patches if isinstance(p, PathPatch)):
+        path = patch.get_transform().transform_path(patch.get_path())
+        for poly in path.to_polygons(closed_only=False):
+            end = poly[-1]
+            own = next((i for i, b in enumerate(boxes) if b.x0 - 2 <= end[0] <= b.x1 + 2
+                        and min(abs(end[1] - b.y0), abs(end[1] - b.y1)) < 5), None)
+            dense = np.concatenate([a + np.linspace(0.0, 1.0, 12)[:, None] * (b - a) for a, b in pairwise(poly)])
+            for i, b in enumerate(boxes):
+                inside = (dense[:, 0] > b.x0 + 1) & (dense[:, 0] < b.x1 - 1) & (dense[:, 1] > b.y0 + 1) & (dense[:, 1] < b.y1 - 1)
+                if i != own and inside.any():
+                    found.append((labels[i].get_text(), labels[own].get_text() if own is not None else "?"))
+    return found
+
+
+#: Emission lines of an H2-rich NIRSpec spectrum (HV Tau C, 1.6-2.75 and 3.4-3.6 um): wavelength
+#: [um] and peak over continuum. Strong lines with weak ones in their label's column, series with
+#: other lines between their members, unknown peaks beside known lines -- where connectors crossed.
+CROWDED_LINES = (
+    (1.66416, 0.126), (1.67762, 0.227), (1.68792, 0.133), (1.71485, 0.124), (1.74811, 0.648), (1.78811, 0.432),
+    (1.79761, 0.151), (1.80038, 0.175), (1.80989, 0.3), (1.83602, 1.873), (1.85265, 0.136), (1.87562, 0.827),
+    (1.89186, 0.972), (1.94492, 0.352), (1.95759, 4.564), (2.00432, 0.148), (2.01581, 0.07), (2.03402, 1.621),
+    (2.0657, 0.071), (2.07362, 0.572), (2.12193, 5.473), (2.13342, 0.032), (2.15441, 0.215), (2.16629, 0.063),
+    (2.20153, 0.114), (2.22331, 1.257), (2.24786, 0.584), (2.38646, 0.181), (2.47556, 0.985), (2.50011, 2.145),
+    (2.52823, 0.471), (2.5512, 0.565), (2.55872, 0.214), (2.55991, 0.947), (2.56981, 0.523), (2.58525, 0.185),
+    (2.59555, 0.173), (2.60426, 0.495), (2.62723, 2.098), (2.63515, 0.385), (2.65416, 0.387), (2.6795, 0.191),
+    (2.68505, 0.102), (2.71039, 0.126), (2.71118, 0.163), (2.72029, 0.273), (2.72702, 0.169), (2.73138, 0.131),
+    (3.40433, 0.203), (3.43824, 0.42), (3.45487, 0.042), (3.48612, 0.403), (3.50075, 0.688), (3.534, 0.044),
+    (3.54797, 0.172), (3.59252, 0.023),
+)
+
+
+def test_no_connector_passes_through_a_label(tmp_path):
+    wave = np.geomspace(1.6, 3.65, 9000)       # NIRSpec-like sampling (~60 km/s), R ~ 2700 lines
+    flux = 1.0 + 0.004 * np.random.default_rng(4).standard_normal(wave.size)
+    for centre, amplitude in CROWDED_LINES:
+        flux += amplitude * np.exp(-0.5 * ((wave - centre) / (1.6e-4 * centre)) ** 2)
+    for detected_only in (False, True):
+        fig, ax = qa.subplots()
+        qa.step(ax, wave, flux, color=qa.MAIN_COLOR)
+        qa.set_wave_scale(ax)
+        qa.set_flux_scale(ax, "log")
+        qa.annotate_features(ax, "all", wave_min=1.6, wave_max=3.65, detected_only=detected_only)
+        qa.finalize(fig)
+        fig.draw_without_rendering()
+        renderer = fig.canvas.get_renderer()
+        assert _stems_through_labels(ax, renderer) == []
+        assert _overlaps([t for t in ax.texts if t.get_visible()], renderer) == 0
+        qa.save(fig, tmp_path / f"crowded_{detected_only}.png")
 
 
 def test_a_log_axis_without_positive_data_falls_back_to_linear(tmp_path):

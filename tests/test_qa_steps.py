@@ -32,8 +32,13 @@ def test_stock_steps_resolve_by_name_and_by_path():
 
 def test_spectrum_steps_draw_annotated_spectrum_like_figures(tmp_path):
     spectrum = _x1d(tmp_path / "t_s1d.fits")
-    (png,) = run_step(PlotSpectrum, [spectrum], tmp_path, stage="plot_spectrum", params={"features": "all"})
+    png, detected = run_step(PlotSpectrum, [spectrum], tmp_path, stage="plot_spectrum", params={"features": "all"})
     assert png.name == "t_s1d.png" and png.stat().st_size > 20_000
+    assert detected.name == "t_s1d_detected.png"                     # with features: only the lines found, too
+    (alone,) = run_step(PlotSpectrum, [spectrum], tmp_path, stage="plot_spectrum_one",
+                        params={"features": "all", "detected": False})
+    (bare,) = run_step(PlotSpectrum, [spectrum], tmp_path, stage="plot_spectrum_bare")    # no features, one figure
+    assert alone.name == bare.name == "t_s1d.png"
     (snr,) = run_step(PlotSnr, [spectrum], tmp_path, stage="plot_snr")                  # features annotated by default
     (plain,) = run_step(PlotSnr, [spectrum], tmp_path, stage="plot_snr_plain", params={"features": None})
     assert snr.name == "t_s1d_snr.png" and snr.stat().st_size > plain.stat().st_size
