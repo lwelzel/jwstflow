@@ -51,6 +51,12 @@ CROSSOVER_TOLERANCE = 1e-6
 
 class StitchCubes(Step):
     """Join the band cubes of one instrument (NIRSpec gratings, MRS bands) into one cube along wavelength.
+    In development: the joint cubes are not science-ready products.
+
+    **Status: in development.** This step and its product are still being
+    worked on. A joint cube is not a science-ready product, and no reduction
+    recipe builds one; for science use the band cubes (``*_s3d.fits``) and
+    the stitched spectra.
 
     One task receives every cube (``batch = "all"``); the cubes are grouped
     by ``group_by`` (default: the instrument) and each group becomes one

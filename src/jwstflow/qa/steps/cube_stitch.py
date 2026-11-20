@@ -31,6 +31,7 @@ def _spectrum_rows(table: Any, index: int, label: str | None = None) -> tuple[np
 
 class QaCubeStitch(Step):
     """The figures of a joint cube: the join, the overlaps, and the positions across every crossover.
+    In development with ``stitch_cubes``: joint cubes are not science-ready products.
 
     All of them are drawn from the records the ``stitch_cubes`` step wrote
     into its ``*_s3dcomb.fits`` product; only the first also reads the cube.

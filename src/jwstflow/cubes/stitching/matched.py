@@ -19,6 +19,11 @@ log = logging.getLogger(__name__)
 
 class CubeBuildMatched(CubeBuildStep):
     """The official cube_build with the spatial grid prescribed: every band cube on the joint grid.
+    In development with ``stitch_cubes``: joint cubes are not science-ready products.
+
+    **Status: in development.** This step exists for the joint cube
+    (``stitch_cubes``), which is still being worked on: no reduction recipe
+    runs it, and a joint cube is not a science-ready product.
 
     ``cube_build`` gives each band its own grid -- its own tangent point,
     field and, for the MRS, spaxel scale -- so the band cubes of one

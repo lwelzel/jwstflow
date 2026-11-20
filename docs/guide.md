@@ -216,7 +216,9 @@ fixed in core and plugins build on them instead of inventing variants:
     tags: [qa]
   ```
 
-* **Joint cubes** (`jwstflow.cubes.stitching`): the band cubes of one
+* **Joint cubes** (`jwstflow.cubes.stitching`) -- *in development: joint
+  cubes are not science-ready products, and no reduction recipe builds them
+  yet* --: the band cubes of one
   instrument -- the gratings of a NIRSpec IFU observation, the twelve bands
   of an MRS observation -- joined along wavelength into one cube
   (`*_s3dcomb.fits`), by the rules of the spectrum stitch and with every

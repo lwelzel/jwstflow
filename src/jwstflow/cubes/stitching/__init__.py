@@ -1,5 +1,10 @@
 """Joint cubes: the band cubes of one instrument joined along wavelength, on one spatial grid.
 
+**Status: in development.** The steps of this package (``cube_build_matched``,
+``stitch_cubes``, ``qa_cube_stitch``) are still being worked on: a joint cube
+is not a science-ready product, and no reduction recipe builds one. For
+science use the band cubes and the stitched spectra.
+
 An IFU observation comes out of the pipeline as one cube per grating (NIRSpec)
 or per band (MIRI MRS: twelve), each on a grid of its own. A *joint cube* is
 one cube for the whole wavelength range of the instrument -- the cube
