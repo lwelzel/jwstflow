@@ -426,3 +426,13 @@ def test_stitched_ecsv_inputs_are_single_segments(tmp_path: Path):
     tab = Table.read([o for o in out if o.suffix == ".ecsv"][0])
     assert tab.meta["segments"] == ["nirspec", "miri"]
     assert tab.meta["scales_applied"] == [pytest.approx(2.0), 1.0]
+
+
+def test_wavelength_limits_drop_samples(tmp_path: Path):
+    from astropy.table import Table
+
+    out = run_step(StitchSegments, two_segments(tmp_path), tmp_path,
+                   params={"crossovers": [1.9], "min_wavelength": 1.2, "max_wavelength": 2.5})
+    tab = Table.read([o for o in out if o.suffix == ".ecsv"][0])
+    w = np.asarray(tab["WAVELENGTH"])
+    assert w.min() >= 1.2 and w.max() <= 2.5

@@ -113,7 +113,7 @@ class StitchSegments(Step):
     inputs = ("*_s1d.fits", "*_x1d.fits", "*_c1d.fits", "*_s1dcomb.ecsv")
     outputs = ("s1dcomb",)
     batch = "all"
-    version = "6"   # 5 -> 6: combine add|multiply, fixed_scales, stitched ECSV inputs (4 -> 5: DQ != 0 not spliced)
+    version = "7"   # 6 -> 7: min/max_wavelength; 5 -> 6: combine add|multiply, fixed_scales, stitched ECSV inputs (4 -> 5: DQ != 0 not spliced)
 
     class Params(StepParams):
         crossovers: list[float] | None = Field(None, description="wavelengths [um] where the combination switches "
@@ -133,6 +133,10 @@ class StitchSegments(Step):
         fixed_scales: dict[str, list[float]] = Field(default_factory=dict, description="segment label -> [factor, "
                                                      "1-sigma error]: a factor measured elsewhere, applied on top of "
                                                      "any rescaling, its error folded into FLUX_ERROR")
+        min_wavelength: float | None = Field(None, gt=0, description="samples bluer than this [um] are left out "
+                                             "of every segment (a noisy band end)")
+        max_wavelength: float | None = Field(None, gt=0, description="samples redder than this [um] are left out "
+                                             "of every segment (e.g. the end of MRS ch4-long, S/N < 2 past 27.5 um)")
         min_overlap_snr: float = Field(3.0, ge=0, description="both windowed medians must sit this many sigmas "
                                        "above zero for the ratio to count (a near-zero overlap cannot anchor a "
                                        "rescaling; its link stays at 1). 0 disables the guard")
@@ -158,7 +162,8 @@ class StitchSegments(Step):
     def run(self, inputs: list[Path], ctx: RunContext, *, crossovers: list[float] | None = None,
             rescale: bool = False, reference: str | None = None, ratio_window_frac: float = 0.05,
             min_overlap_points: int = 5, min_overlap_snr: float = 3.0, combine: str = "multiply",
-            fixed_scales: dict[str, list[float]] | None = None, **params) -> list[Path]:
+            fixed_scales: dict[str, list[float]] | None = None, min_wavelength: float | None = None,
+            max_wavelength: float | None = None, **params) -> list[Path]:
         from astropy.table import Table
 
         if len(inputs) < 2:
@@ -170,6 +175,10 @@ class StitchSegments(Step):
             arrays = {c: np.asarray(np.ma.filled(tab[c], np.nan), dtype=float)
                       for c in ("WAVELENGTH", "FLUX", "FLUX_ERROR")}
             ok = np.isfinite(arrays["FLUX"]) & np.isfinite(arrays["WAVELENGTH"])
+            if min_wavelength is not None:
+                ok &= arrays["WAVELENGTH"] >= float(min_wavelength)
+            if max_wavelength is not None:
+                ok &= arrays["WAVELENGTH"] <= float(max_wavelength)
             if "DQ" in tab.colnames:  # flagged samples (DO_NOT_USE, FLUX_ESTIMATED, ...) are not spliced
                 ok &= np.asarray(np.ma.filled(tab["DQ"], 1)).astype(np.int64) == 0
             if not ok.any():
