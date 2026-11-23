@@ -224,6 +224,29 @@ model is good to the percent, is blanked; `*_nbrfit.fits`
 control ring -- the mean residual at the target's distance from the
 neighbour, held out of the fit, which a correct subtraction leaves at zero.
 
+**Line planes.** Gas-line emission spread over the field (HH 48: H2 and
+[Fe II] everywhere in the MRS field, +170 MJy/sr at the control ring in the
+H2 S(5) plane) is more structured than the background terms, and the fit
+over the field takes part of it for the neighbour: SW's line flux came out
+1.3-3.2x its own aperture's and the excess was subtracted under NE (up to
+15 % of NE's [Fe II] 17.94 um). `line_planes: core` gives the planes within
+`line_window` (300 km/s) of the lines of `line_features` (default
+`{gas_lines: all}`, lines only) the model of the `line_context` continuum
+planes on either side -- every component, the wing, the background --
+scaled by the neighbour's brightness in the plane over the continuum's,
+both fitted on its core (`line_core` = 1 FWHM, local `line_background`
+plane) with one fixed weighting, so that the core's mismatch with the PSF
+model cancels. Continuum planes are identical to the default to the bit;
+the record gains `LINE`, `LINE_SCALE(_ERR)` and `FLUX_FIELD` (the fit over
+the field). Where the core is not in the field the fit over the field
+stands (logged). Planes outside the listed lines where the fitted flux
+jumps are logged as lines the list may lack.
+
+```yaml
+  - step: subtract_psf_neighbour
+    parameters: {ra: 166.094061, dec: -77.302306, line_planes: core}
+```
+
 ## Engines, methods, OPD
 
 | parameter | choices | notes |

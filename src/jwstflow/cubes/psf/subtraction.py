@@ -64,6 +64,10 @@ PLANE_COLUMNS = {
     "SKY_FAR": ("cube", "mean residual beyond the ring (farther from the neighbour), off the protected region"),
     "TARGET": ("cube", "mean of (data - neighbour - background) within one FWHM of the target"),
     "FILLED": ("", "1 where the fit failed and the amplitude was interpolated from other planes"),
+    "FLUX_FIELD": ("Jy", "line_planes core: the neighbour's flux from the fit over the field (FLUX outside line planes)"),
+    "LINE": ("", "line_planes core: 1 where the plane took the continuum's model, scaled on the neighbour's core"),
+    "LINE_SCALE": ("", "that scale: the neighbour's brightness in the plane over the continuum's, on its core"),
+    "LINE_SCALE_ERR": ("", "its 1-sigma error"),
 }
 
 

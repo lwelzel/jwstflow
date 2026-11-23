@@ -237,3 +237,169 @@ def test_psf_cube_records_the_pa_of_the_frame_it_was_computed_in():
         == pytest.approx(273.67)
     # circular engines have no frame: PA_APER as before
     assert _frame_position_angle(geometry(16.18, 0.0), Engine(None), Path("c.fits")) == pytest.approx(16.18)
+
+
+# --------------------------------------------------------------------------- line planes
+FEII = 5.34017      # [Fe II] 5.340 of gas_lines [um]
+
+
+def _line_profile(wave, sigma_kms=80.0):
+    return np.exp(-0.5 * ((wave - FEII) / FEII * nb.C_KMS / sigma_kms) ** 2)
+
+
+def _field_emission():
+    """Line emission spread over the field beside the neighbour: a broad blob 8 px from it."""
+    yy, xx = np.indices(SHAPE, dtype=float)
+    return np.exp(-((xx - 22.0) ** 2 + (yy - 6.0) ** 2) / (2 * 6.0**2))
+
+
+def _line_scene(psf: PsfCubeProduct, *, k=0.4, blob=40.0, nwave=60, noise=0.02, seed=4):
+    """_scene's neighbour with a compact line (k times its continuum at the peak) and extended line emission
+    elsewhere in the field (``blob`` per spaxel at its peak) at [Fe II] 5.340."""
+    rng = np.random.default_rng(seed)
+    wave = np.linspace(5.28, 5.40, nwave)
+    g = _line_profile(wave)
+    cont = 4000.0 * (wave / 5.0) ** 2
+    amp = cont * (1.0 + k * g)
+    neighbour, target = (30.3, 9.7), (14.0, 26.0)
+    (comp,) = nb.components([psf], SHAPE, *neighbour, wave, pixel_arcsec=PIX, rotation_deg=0.0)
+    yy, xx = np.indices(SHAPE, dtype=float)
+    disk = 30.0 * np.exp(-(((xx - target[0]) / 2.5) ** 2 + ((yy - target[1]) / 1.2) ** 2) / 2)
+    data = (amp[:, None, None] * comp + disk[None] + 0.5 + blob * g[:, None, None] * _field_emission()[None]
+            + rng.normal(0.0, noise, (nwave, *SHAPE)))
+    return data, np.full_like(data, noise), wave, {"amp": amp, "cont": cont, "neighbour": neighbour, "target_xy": target}
+
+
+def test_feature_planes_and_runs():
+    wave = np.linspace(5.28, 5.40, 60)
+    line = nb.feature_planes(wave, [FEII, 5.5], 400.0)
+    near = np.abs(wave - FEII) / FEII * nb.C_KMS <= 400.0
+    np.testing.assert_array_equal(line, near)
+    assert nb.plane_runs(line) == [(int(np.flatnonzero(near)[0]), int(np.flatnonzero(near)[-1]) + 1)]
+    assert nb.plane_runs(np.array([1, 1, 0, 0, 1, 0, 1], bool)) == [(0, 2), (4, 5), (6, 7)]
+
+
+def test_line_planes_take_the_continuum_model_scaled_on_the_core():
+    # the model lacks part of the true wing (as stpsf's does): only a ratio measured the same way in line and
+    # continuum planes is free of that mismatch
+    psf_true, psf_model = _library(wing=0.2), _library(wing=0.05)
+    data, err, wave, truth = _line_scene(psf_true)
+    protect = _protect(truth["target_xy"])
+    (comp,) = nb.components([psf_model], SHAPE, *truth["neighbour"], wave, pixel_arcsec=PIX, rotation_deg=0.0)
+    fit = nb.fit_planes(data, err, [comp], ~protect, origin=truth["target_xy"], model_error=0.05)
+    line = nb.feature_planes(wave, [FEII], 400.0)
+    assert 5 <= line.sum() <= 9
+    out = nb.scale_line_planes(data, err, [comp], fit.amplitudes, line, wave, centre=truth["neighbour"],
+                               core_radius=2.5, allowed=~protect, const=fit.const, gradient=fit.gradient,
+                               total_err=fit.total_err)
+    assert out.line.sum() == line.sum() and not out.skipped
+    # the continuum planes as they were
+    for name in ("amplitudes", "const", "gradient", "total_err"):
+        np.testing.assert_array_equal(getattr(out, name)[~line], getattr(fit, name)[~line])
+    assert np.isnan(out.scale[~line]).all()
+    # the neighbour's line against its continuum: right on the core, far too high from the fit over the field
+    cont = np.interp(wave, wave[~line], fit.amplitudes[~line, 0])
+    ratio = truth["amp"] / truth["cont"]
+    np.testing.assert_allclose(out.amplitudes[line, 0] / cont[line], ratio[line], rtol=0.02)
+    np.testing.assert_allclose(out.scale[line], ratio[line], rtol=0.02)
+    assert np.all(out.scale_err[line] < 0.02)
+    assert np.max(fit.amplitudes[line, 0] / cont[line] - ratio[line]) > 0.2
+    # no core to fit on: the given fit stands, and says why
+    none = nb.scale_line_planes(data, err, [comp], fit.amplitudes, line, wave, centre=truth["neighbour"],
+                                core_radius=2.5, allowed=np.zeros(SHAPE, bool))
+    assert not none.line.any() and len(none.skipped) == line.sum()
+    np.testing.assert_array_equal(none.amplitudes, fit.amplitudes)
+
+
+def _line_pair(tmp_path: Path, neighbour=(31.2, 8.6), k=0.4, blob=40.0):
+    """A MIRI ch1-short cube around [Fe II] 5.340 (60 planes, 110 km/s each) holding a neighbour with a compact
+    line, extended line emission beside it and a faint target; its Gaussian library; the neighbour's (ra, dec)."""
+    from astropy.io import fits
+    from astropy.wcs import WCS
+
+    cube = synthetic_cube(tmp_path / "jw01234-o001_t001_miri_ch1-short_s3d.fits", instrument="MIRI", nwave=60,
+                          size=40, wave_min=5.28, wave_step=0.002, pix_arcsec=PIX, PA_APER=0.0)
+    lib_out = run_step("psf_cube", [cube], tmp_path / "lib", params={"engine": "gaussian", "fov_arcsec": 12.0,
+                                                                      "position_angle_deg": 0.0})
+    psf = PsfCubeProduct.read(lib_out[0])
+    with fits.open(cube) as hdul:
+        wcs = WCS(hdul["SCI"].header).celestial
+    rng = np.random.default_rng(5)
+    nwave, ny, nx = 60, 40, 40
+    wave = 5.28 + np.arange(nwave) * 0.002
+    g = _line_profile(wave)
+    amp = 4000.0 * (wave / 5.0) ** 2 * (1.0 + k * g)
+    target = (20.0, 20.0)
+    (comp,) = nb.components([psf], (ny, nx), *neighbour, wave, pixel_arcsec=PIX, rotation_deg=0.0)
+    yy, xx = np.indices((ny, nx), dtype=float)
+    target_img = 30.0 * np.exp(-(((xx - target[0]) / 2.0) ** 2 + ((yy - target[1]) / 1.0) ** 2) / 2)
+    field = np.exp(-((xx - 24.0) ** 2 + (yy - 5.0) ** 2) / (2 * 6.0**2))
+    data = (amp[:, None, None] * comp + target_img[None] + 0.5 + blob * g[:, None, None] * field[None]
+            + rng.normal(0, 0.02, (nwave, ny, nx)))
+    with fits.open(cube, mode="update") as hdul:
+        hdul["SCI"].data = data.astype("f4")
+        hdul["ERR"].data = np.full(data.shape, 0.02, "f4")
+        hdul[0].header["TARG_RA"], hdul[0].header["TARG_DEC"] = (float(v) for v in wcs.all_pix2world(*target, 0))
+    ra, dec = (float(v) for v in wcs.all_pix2world(*neighbour, 0))
+    return cube, lib_out[0].parent, (ra, dec), {"amp": amp, "k": k, "g": g, "target": target_img,
+                                                 "field": blob * g[:, None, None] * field[None]}
+
+
+def _run_both(tmp_path: Path, cube: Path, lib_dir: Path, ra: float, dec: float, **core_params):
+    from jwstflow.cubes.psf import SubtractPsfNeighbour
+
+    results = {}
+    for mode in ("field", "core"):
+        ctx = make_context(tmp_path / mode, stage="subtract_psf_neighbour")
+        ctx.stage_dirs["psf_cube"] = lib_dir
+        params = {"ra": ra, "dec": dec, **({"line_planes": "core", **core_params} if mode == "core" else {})}
+        results[mode] = run_step(SubtractPsfNeighbour, [cube], tmp_path / mode, ctx=ctx, params=params)
+    return results
+
+
+def test_subtract_psf_neighbour_line_planes_end_to_end(tmp_path: Path):
+    from astropy.io import fits
+
+    from jwstflow.cubes.psf.subtraction import PsfSubtraction
+
+    cube, lib_dir, (ra, dec), truth = _line_pair(tmp_path)
+    results = _run_both(tmp_path, cube, lib_dir, ra, dec)
+    field, core = (PsfSubtraction.read(results[m][1]) for m in ("field", "core"))
+    line = core.planes["LINE"].astype(bool)
+    assert 3 <= line.sum() <= 9 and core.header["JWFNBLPL"] == "core" and core.header["JWFNBNLR"] == line.sum()
+    assert field.header["JWFNBLPL"] == "field" and "LINE" not in field.planes
+    # the continuum planes exactly as without the option: cube, record and regions
+    with fits.open(results["field"][0]) as a, fits.open(results["core"][0]) as b:
+        for ext in ("SCI", "ERR", "DQ"):
+            np.testing.assert_array_equal(a[ext].data[~line], b[ext].data[~line])
+        sci_field, sci_core = a["SCI"].data.astype(float), b["SCI"].data.astype(float)
+    for name, column in field.planes.items():
+        np.testing.assert_array_equal(column[~line], core.planes[name][~line])
+    np.testing.assert_array_equal(field.regions, core.regions)
+    # the line planes: the neighbour's own line, not the field's emission
+    cont = np.interp(core.planes["WAVELENGTH"], core.planes["WAVELENGTH"][~line], core.planes["FLUX"][~line])
+    ratio = 1.0 + truth["k"] * truth["g"]
+    np.testing.assert_allclose(core.planes["FLUX"][line] / cont[line], ratio[line], rtol=0.02)
+    np.testing.assert_array_equal(core.planes["FLUX_FIELD"], field.planes["FLUX"])
+    assert np.max(field.planes["FLUX"][line] / cont[line] - ratio[line]) > 0.1
+    # what is left at the target and in the field: its own light (and the field's line emission) back
+    yy, xx = np.indices(truth["target"].shape)
+    near = np.hypot(xx - 20, yy - 20) <= 5
+    peak = int(np.argmax(np.where(line, truth["g"], -1)))
+    left = {m: float((s[peak] - truth["target"] - truth["field"][peak] - 0.5)[near].sum())
+            for m, s in (("field", sci_field), ("core", sci_core))}
+    target_flux = float(truth["target"][near].sum())
+    assert abs(left["core"]) < 0.01 * target_flux < abs(left["field"])
+
+
+def test_subtract_psf_neighbour_line_planes_need_the_core_in_the_field(tmp_path: Path):
+    from astropy.io import fits
+
+    from jwstflow.cubes.psf.subtraction import PsfSubtraction
+
+    cube, lib_dir, (ra, dec), _truth = _line_pair(tmp_path, neighbour=(40.7, 14.0))   # centre beyond the edge
+    results = _run_both(tmp_path, cube, lib_dir, ra, dec)
+    core = PsfSubtraction.read(results["core"][1])
+    assert not core.header["JWFNBREF"] and not core.planes["LINE"].any() and core.header["JWFNBNLR"] == 0
+    with fits.open(results["field"][0]) as a, fits.open(results["core"][0]) as b:
+        np.testing.assert_array_equal(a["SCI"].data, b["SCI"].data)
