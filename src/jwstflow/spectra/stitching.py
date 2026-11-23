@@ -113,7 +113,7 @@ class StitchSegments(Step):
     inputs = ("*_s1d.fits", "*_x1d.fits", "*_c1d.fits", "*_s1dcomb.ecsv")
     outputs = ("s1dcomb",)
     batch = "all"
-    version = "8"   # 7 -> 8: edge_trim, crossfade, fixed-scale error in FLUX_SYS; 6 -> 7: min/max_wavelength; 5 -> 6: combine add|multiply, fixed_scales, stitched ECSV inputs (4 -> 5: DQ != 0 not spliced)
+    version = "9"   # 8 -> 9: edge_trim keeps every overlap measurable; 7 -> 8: edge_trim, crossfade, fixed-scale error in FLUX_SYS; 6 -> 7: min/max_wavelength; 5 -> 6: combine add|multiply, fixed_scales, stitched ECSV inputs (4 -> 5: DQ != 0 not spliced)
 
     class Params(StepParams):
         crossovers: list[float] | None = Field(None, description="wavelengths [um] where the combination switches "
@@ -189,11 +189,24 @@ class StitchSegments(Step):
             if not ok.any():
                 raise ValueError(f"{path.name}: no finite flux samples")
             order = np.argsort(arrays["WAVELENGTH"][ok])
-            if edge_trim and len(order) > 2 * edge_trim + 2:
-                order = order[edge_trim: len(order) - edge_trim]
             segments.append({"path": path, "label": self.segment_label(path),
                              **{c: v[ok][order] for c, v in arrays.items()}})
         segments.sort(key=lambda s: float(s["WAVELENGTH"].min()))
+        if edge_trim:
+            # band edges dropped -- but never so many that a neighbour overlap loses its last
+            # min_overlap_points samples (a join must stay measurable and blendable)
+            n = len(segments)
+            lo_trim, hi_trim = [int(edge_trim)] * n, [int(edge_trim)] * n
+            for i in range(n - 1):
+                a, b = segments[i], segments[i + 1]
+                na = int(np.sum(a["WAVELENGTH"] >= b["WAVELENGTH"].min()))
+                nb = int(np.sum(b["WAVELENGTH"] <= a["WAVELENGTH"].max()))
+                room = max(0, (min(na, nb) - int(min_overlap_points)) // 2)
+                hi_trim[i], lo_trim[i + 1] = min(hi_trim[i], room), min(lo_trim[i + 1], room)
+            for seg, lo, hi in zip(segments, lo_trim, hi_trim):
+                cut = slice(lo, max(lo + 1, len(seg["WAVELENGTH"]) - hi))
+                for c in ("WAVELENGTH", "FLUX", "FLUX_ERROR"):
+                    seg[c] = seg[c][cut]
         labels = [s["label"] for s in segments]
         if len(set(labels)) != len(labels):
             raise ValueError(f"segment labels are not unique: {labels}")

@@ -460,3 +460,18 @@ def test_edge_trim_drops_band_edges(tmp_path: Path):
     w = np.asarray(tab["WAVELENGTH"])
     step = 1.0 / 199
     assert w.min() == pytest.approx(1.0 + 5 * step) and w.max() == pytest.approx(3.0 - 5 * 1.2 / 199)
+
+
+def test_edge_trim_keeps_a_narrow_overlap(tmp_path: Path):
+    """A trim larger than a narrow overlap allows leaves min_overlap_points samples on each side."""
+    from astropy.table import Table
+
+    blue = synthetic_x1d(tmp_path / "jw001_nirspec_g235h-f170lp_s1d.fits", wave=np.linspace(1.0, 2.0, 200),
+                         flux=np.full(200, 1.0), instrument="NIRSPEC", GRATING="G235H", FILTER="F170LP")
+    red = synthetic_x1d(tmp_path / "jw001_nirspec_g395h-f290lp_s1d.fits", wave=np.linspace(1.94, 3.0, 200),
+                        flux=np.full(200, 2.0), instrument="NIRSPEC", GRATING="G395H", FILTER="F290LP")
+    out = run_step(StitchSegments, [blue, red], tmp_path, params={"edge_trim": 20})
+    tab = Table.read([o for o in out if o.suffix == ".ecsv"][0])
+    assert tab.meta["neighbour_ratios"][0] == pytest.approx(2.0)          # still measured
+    w = np.asarray(tab["WAVELENGTH"])
+    assert np.max(np.diff(w)) < 0.02                                       # no hole at the join
