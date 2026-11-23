@@ -502,3 +502,16 @@ def test_stitched_inputs_keep_their_systematic_and_segments(tmp_path: Path):
     kept = np.asarray(tab2["SEGMENT"]) == "g235h-f170lp"
     assert kept.any() and np.allclose(tab2["FLUX_SYS"][kept], 0.1 * tab2["FLUX"][kept])
     assert {"g235h-f170lp", "g395h-f290lp", "1-short"} <= set(np.asarray(tab2["SEGMENT"]))
+
+
+def test_range_systematics_add_to_flux_sys(tmp_path: Path):
+    from astropy.table import Table
+
+    out = [o for o in run_step(StitchSegments, two_segments(tmp_path), tmp_path, params=dict(
+        crossovers=[1.9], rescale=False, fixed_scales={"g395h-f290lp": [1.0, 0.03]},
+        range_systematics=[[2.5, 3.5, 0.04]])) if o.suffix == ".ecsv"]
+    tab = Table.read(out[0], format="ascii.ecsv")
+    w, f, sy = (np.asarray(tab[c], float) for c in ("WAVELENGTH", "FLUX", "FLUX_SYS"))
+    red = w >= 2.5
+    assert np.allclose(sy[red], 0.05 * f[red]) and np.allclose(sy[(w > 1.95) & (w < 2.5)], 0.03 * f[(w > 1.95) & (w < 2.5)])
+    assert tab.meta["range_systematics"] == [[2.5, 3.5, 0.04]]

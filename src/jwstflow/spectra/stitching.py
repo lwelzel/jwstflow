@@ -113,7 +113,7 @@ class StitchSegments(Step):
     inputs = ("*_s1d.fits", "*_x1d.fits", "*_c1d.fits", "*_s1dcomb.ecsv")
     outputs = ("s1dcomb",)
     batch = "all"
-    version = "10"  # 9 -> 10: FLUX_SYS / SEGMENT of stitched inputs carried, scale_notes, target-named cross-program products; 8 -> 9: edge_trim keeps every overlap measurable; 7 -> 8: edge_trim, crossfade, fixed-scale error in FLUX_SYS; 6 -> 7: min/max_wavelength; 5 -> 6: combine add|multiply, fixed_scales, stitched ECSV inputs (4 -> 5: DQ != 0 not spliced)
+    version = "11"  # 10 -> 11: range_systematics; 9 -> 10: FLUX_SYS / SEGMENT of stitched inputs carried, scale_notes, target-named cross-program products; 8 -> 9: edge_trim keeps every overlap measurable; 7 -> 8: edge_trim, crossfade, fixed-scale error in FLUX_SYS; 6 -> 7: min/max_wavelength; 5 -> 6: combine add|multiply, fixed_scales, stitched ECSV inputs (4 -> 5: DQ != 0 not spliced)
 
     class Params(StepParams):
         crossovers: list[float] | None = Field(None, description="wavelengths [um] where the combination switches "
@@ -130,6 +130,10 @@ class StitchSegments(Step):
         combine: str = Field("multiply", pattern="^(multiply|add)$", description="how rescale joins segments: "
                              "multiply (factors) or add (offsets, for additive mismatches such as a residual "
                              "background over an extended aperture)")
+        range_systematics: list[list[float]] = Field(default_factory=list, description="[[lo_um, hi_um, fraction], "
+                                                     "...]: a relative systematic of the stitched flux in each "
+                                                     "wavelength range (e.g. a band's stray-light residual, a noisy "
+                                                     "red end), added in quadrature to FLUX_SYS")
         scale_notes: dict[str, str] = Field(default_factory=dict, description="segment label -> what its fixed "
                                             "scale stands for (metadata and plot legend), e.g. 'geometry 1.13 x "
                                             "source change 1.37'")
@@ -191,7 +195,8 @@ class StitchSegments(Step):
             min_overlap_points: int = 5, min_overlap_snr: float = 3.0, combine: str = "multiply",
             fixed_scales: dict[str, list[float]] | None = None, min_wavelength: float | None = None,
             max_wavelength: float | None = None, edge_trim: int = 0, crossfade: bool = False,
-            scale_notes: dict[str, str] | None = None, **params) -> list[Path]:
+            scale_notes: dict[str, str] | None = None, range_systematics: list[list[float]] | None = None,
+            **params) -> list[Path]:
         from astropy.table import Table
 
         if len(inputs) < 2:
@@ -311,6 +316,12 @@ class StitchSegments(Step):
         combined = Table({c: np.concatenate([p[c] for p in pieces]) for c in (*cols, "SEGMENT")})
         combined["SEGMENT"] = combined["SEGMENT"].astype(str)
         combined["WAVELENGTH"].unit, combined["FLUX"].unit, combined["FLUX_ERROR"].unit = "um", "Jy", "Jy"
+        for lo, hi, frac in (range_systematics or []):
+            if not (float(hi) > float(lo) and float(frac) >= 0):
+                raise ValueError(f"range_systematics: need lo < hi and fraction >= 0, got {[lo, hi, frac]}")
+            inside = (combined["WAVELENGTH"] >= float(lo)) & (combined["WAVELENGTH"] < float(hi))
+            combined["FLUX_SYS"][inside] = np.hypot(combined["FLUX_SYS"][inside],
+                                                    np.abs(combined["FLUX"][inside]) * float(frac))
         combined["FLUX_SYS"].unit = "Jy"
         combined.meta.update({
             "segments": labels, "crossovers_um": [float(b) for b in bounds],
@@ -330,6 +341,7 @@ class StitchSegments(Step):
             "fixed_scales": {k: [float(x) for x in v] for k, v in (fixed_scales or {}).items()},
             "fixed_scale_rel_errors": [float(x) for x in fixed_rel],
             "scale_notes": {str(k): str(v) for k, v in (scale_notes or {}).items()},
+            "range_systematics": [[float(x) for x in r] for r in (range_systematics or [])],
             "instrument": self._instrument(segments),
             "edge_trim": int(edge_trim), "crossfade": bool(crossfade),
             "crossfade_windows_um": [[float(a), float(b)] for a, b in windows] if crossfade else [],
