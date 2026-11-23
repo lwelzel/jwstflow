@@ -83,6 +83,7 @@ class PsfCubeProduct:
     pixelscale_arcsec: float
     meta: dict[str, Any] = field(default_factory=dict)   # JWFPSF* provenance (written to PRIMARY)
     header: Any = None                 # PRIMARY header after read()
+    source: Path | None = None         # the file after read()
 
     def __post_init__(self) -> None:
         self.data = np.asarray(self.data, dtype=float)
@@ -186,15 +187,9 @@ class PsfCubeProduct:
         else:
             theta = float(rotation_deg or 0.0)
         s = float(pixelscale_arcsec) / self.pixelscale_arcsec       # output pixel in input pixels
-        cy_in, cx_in = self.centre
         c_out = (int(npix) - 1) / 2.0
         yy, xx = np.indices((int(npix), int(npix)), dtype=float)
-        dx, dy = (xx - c_out) * s, (yy - c_out) * s
-        # inverse mapping of "rotate array +y to PA theta" (see rotate_cube_to_sky; pinned by a test)
-        rad = np.deg2rad(theta)
-        ct, st = np.cos(rad), np.sin(rad)
-        in_x = cx_in + ct * dx + st * dy
-        in_y = cy_in - st * dx + ct * dy
+        in_y, in_x = self._source_coords((xx - c_out) * s, (yy - c_out) * s, theta)
         out = np.empty((len(self.data), int(npix), int(npix)), dtype=float)
         for i, plane in enumerate(self.data):
             resampled = map_coordinates(np.where(np.isfinite(plane), plane, 0.0), [in_y, in_x],
@@ -207,6 +202,62 @@ class PsfCubeProduct:
             meta["JWFPSFFR"] = ("sky" if to_sky else "custom", "orientation after resampling")
         return PsfCubeProduct(out, self.wavelengths.copy(), float(pixelscale_arcsec),
                               meta=meta, header=self.header)
+
+    def _source_coords(self, dx: np.ndarray, dy: np.ndarray, theta_deg: float) -> tuple[np.ndarray, np.ndarray]:
+        """Where offsets (dx, dy) [library pixels, along the axes of an output grid whose array +y is
+        to end up at position angle ``theta_deg``] fall on the stored slices: (y, x) array coordinates.
+        The inverse of "rotate array +y to PA theta" (:func:`rotate_cube_to_sky`; pinned by a test)."""
+        cy_in, cx_in = self.centre
+        rad = np.deg2rad(float(theta_deg))
+        ct, st = np.cos(rad), np.sin(rad)
+        return cy_in - st * dx + ct * dy, cx_in + ct * dx + st * dy
+
+    def placed(self, shape: tuple[int, int], x0: float, y0: float, pixelscale_arcsec: float, *,
+               rotation_deg: float = 0.0, sampling: str = "point", order: int = 3) -> np.ndarray:
+        """Every slice on an image grid, with the point source at array position (x0, y0).
+
+        The grid is ``shape`` (ny, nx) pixels of ``pixelscale_arcsec`` -- a
+        cube's spaxel grid -- and the source may sit anywhere, at a fraction of
+        a pixel or outside the grid altogether (its wing then still falls on
+        it). ``rotation_deg`` puts the slices' array +y at that angle from the
+        grid's +y, in the sense of :meth:`resampled` (for a library in the
+        ideal frame on a cube whose +y points to position angle ``north``:
+        ``JWFPSFPA - north``). Values are the share of the source's total flux
+        per output pixel, so a slice sums to its in-field energy where the grid
+        holds all of the library's field; pixels beyond that field are zero.
+
+        ``sampling`` says what a pixel's value is: ``point`` -- the library at
+        the pixel centre (scaled by the pixel-area ratio): the stpsf IFU
+        broadening is calibrated on PSFs *as measured in reconstructed cubes*,
+        whose spaxel values are such samples -- or ``spaxel``, its mean over
+        the pixel's area (sub-sampled at the library's own pitch), for a grid
+        whose pixels integrate the light. Cubic-spline sampling (``order``),
+        undershoots clipped at zero.
+        """
+        from scipy.ndimage import map_coordinates, spline_filter
+
+        if sampling not in ("point", "spaxel"):
+            raise ValueError(f"sampling must be 'point' or 'spaxel', not {sampling!r}")
+        ny, nx = int(shape[0]), int(shape[1])
+        s = float(pixelscale_arcsec) / self.pixelscale_arcsec       # output pixel in library pixels
+        m = max(1, int(np.ceil(s))) if sampling == "spaxel" else 1
+        sub = (np.arange(m) + 0.5) / m - 0.5                       # sub-pixel offsets [output pixels]
+        yy, xx = np.indices((ny, nx), dtype=float)
+        dx, dy = np.broadcast_arrays((xx[..., None, None] + sub[None, None, None, :] - float(x0)) * s,
+                                     (yy[..., None, None] + sub[None, None, :, None] - float(y0)) * s)
+        in_y, in_x = self._source_coords(dx.ravel(), dy.ravel(), rotation_deg)
+        n_lib = self.data.shape[-1]
+        inside = (in_x > -0.5) & (in_x < n_lib - 0.5) & (in_y > -0.5) & (in_y < n_lib - 0.5)
+        out = np.zeros((len(self.data), ny, nx), dtype=float)
+        if not inside.any():
+            return out
+        for i, plane in enumerate(self.data):
+            coeffs = spline_filter(np.where(np.isfinite(plane), plane, 0.0), order=order) if order > 1 else plane
+            values = np.zeros(in_x.size)
+            values[inside] = map_coordinates(coeffs, [in_y[inside], in_x[inside]], order=order, mode="constant",
+                                             cval=0.0, prefilter=False)
+            out[i] = np.clip(values, 0.0, None).reshape(ny, nx, m * m).mean(axis=-1) * s**2
+        return out
 
     def convolve(self, cube: np.ndarray, wavelengths_um: np.ndarray, *, normalized: bool = True) -> np.ndarray:
         """Convolve a model cube (nw, my, mx) with the wavelength-matched PSF.
@@ -293,7 +344,7 @@ class PsfCubeProduct:
             wave = np.asarray(hdul["WAVETAB"].data["wavelength"], dtype=float)
             header = hdul[0].header.copy()
         meta = {k: header[k] for k in header if str(k).startswith("JWFPSF")}
-        return cls(data, wave, pixelscale, meta=meta, header=header)
+        return cls(data, wave, pixelscale, meta=meta, header=header, source=Path(path))
 
 
 # --------------------------------------------------------------------------- discovery

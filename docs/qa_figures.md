@@ -415,6 +415,7 @@ Guidelines that follow from the rules:
 | `qa_cube_summary` | frames + spectra | `*_s3d.fits`, `*_s3dcomb.fits` | median image, coverage and signal-to-noise maps; under them, over the full width, the field-integrated flux and the filled fraction of the footprint against wavelength (`*_summary.png`) |
 | `qa_cube_slices` | frames | `*_s3d.fits`, `*_s3dcomb.fits` | channel maps: the cube in `n_slices` wavelength bins on one display scale (`*_slices.png`) |
 | `qa_psf_cube` | frames + lines | `*_psfcube.fits` | PSF slices across wavelength, FWHM against the diffraction limit, in-field energy |
+| `qa_psf_neighbour` | frames + lines | `*_nbrfit.fits` | data / neighbour model / residual per block of planes, the neighbour's flux, the control ring against wavelength, the radial profile about the neighbour before and after |
 | `mast_compare` | spectrum | `*_s3d` / `*_x1d` | jwstflow vs. MAST spectra and their ratio |
 | `qa_spaxel_clusters` | thumbnails | `*_clustermask.fits` | per band and region: one row per dither cube, one column per wavelength plane (`*_<region>_clusters.png`) |
 | `qa_gap_coverage` | frames | `*_gapcov.fits` | the coverage next to the NIRSpec detector gap on the sky: where all exposures stop before and after it, and how long the partially covered stretch beyond is (nm), per group of exposures |

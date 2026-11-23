@@ -84,6 +84,38 @@ class CubeGeometry:
     position_angle_deg: float | None   # PA of the aperture ideal +y axis (deg E of N)
     date_obs: str | None               # ISO time for OPD selection
     header: Any                        # the cube's PRIMARY header
+    aperture_name: str | None = None   # APERNAME: the reference aperture PA_APER belongs to
+    v3_yangle_deg: float | None = None  # V3I_YANG: that aperture's V3IdlYAngle, when the header records it
+
+    def v3_position_angle(self) -> float | None:
+        """Sky PA [deg E of N] of the telescope V3 axis at the aperture: ``PA_APER - V3IdlYAngle``.
+
+        The angle of any frame given relative to V3 (an stpsf PSF frame,
+        :meth:`StpsfEngine.frame_v3_angle`) is added to it. V3IdlYAngle comes
+        from the header (``V3I_YANG``, present in calibrated exposures, not in
+        level-3 cubes), else from the SIAF entry of ``APERNAME`` (pysiaf, which
+        stpsf brings along); None when neither is available.
+        """
+        if self.position_angle_deg is None:
+            return None
+        yangle = self.v3_yangle_deg
+        if yangle is None and self.aperture_name:
+            yangle = siaf_v3_yangle(self.config.instrument, self.aperture_name)
+        return None if yangle is None else float(self.position_angle_deg) - float(yangle)
+
+
+def siaf_v3_yangle(instrument: str, aperture_name: str) -> float | None:
+    """V3IdlYAngle [deg] of a SIAF aperture (pysiaf), or None when pysiaf or the aperture is missing.
+    The MRS channel apertures carry 0 there: the PA_APER of an MRS cube is the PA of V3."""
+    try:
+        import pysiaf
+    except ImportError:
+        return None
+    try:
+        value = pysiaf.Siaf(instrument)[str(aperture_name).strip()].V3IdlYAngle
+    except Exception:  # noqa: BLE001 -- unknown aperture or SIAF version: the caller falls back
+        return None
+    return None if value is None or not np.isfinite(value) else float(value)
 
 
 def read_cube_geometry(path: Path | str) -> CubeGeometry:
@@ -127,8 +159,11 @@ def read_cube_geometry(path: Path | str) -> CubeGeometry:
     date_obs = primary.get("DATE-BEG") or primary.get("DATE-OBS")
     if date_obs and primary.get("TIME-OBS") and "T" not in str(date_obs):
         date_obs = f"{date_obs}T{primary['TIME-OBS']}"
+    aperture = next((str(h["APERNAME"]).strip() for h in (sci, primary) if h.get("APERNAME")), None)
+    yangle = next((float(h["V3I_YANG"]) for h in (sci, primary) if h.get("V3I_YANG") is not None), None)
     return CubeGeometry(IfuConfig.from_header(primary), np.asarray(wave, float), (ny, nx),
-                        pixelscale, pa, str(date_obs) if date_obs else None, primary)
+                        pixelscale, pa, str(date_obs) if date_obs else None, primary,
+                        aperture_name=aperture, v3_yangle_deg=yangle)
 
 
 def approx_fwhm_arcsec(config: IfuConfig, wavelength_um: np.ndarray | float) -> np.ndarray | float:

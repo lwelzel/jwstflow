@@ -29,6 +29,8 @@ class GaussianPsfEngine:
     """
 
     name = "gaussian"
+    #: The slices are circular: no frame to orient.
+    frame_v3_angle: float | None = None
 
     def compute(self, config: IfuConfig, wavelengths_um: np.ndarray, grid: PsfGrid, *,
                 date_obs: str | None = None) -> np.ndarray:
@@ -55,9 +57,13 @@ class StpsfEngine:
     describe the PSF *as realised in reconstructed cubes*, not the bare
     optical PSF. The instrument's native pixel scale is overridden with the
     requested grid after band selection (stpsf resets it on any IFU aperture
-    change), and NIRSpec's extra IFU-align output rotation is disabled so
-    both instruments come out with array +y along the aperture ideal +y axis
-    (the ``PA_APER`` convention that :func:`rotate_cube_to_sky` assumes).
+    change), and NIRSpec's extra IFU-align output rotation is disabled, so
+    the slices come out in the frame stpsf computes in: +y at
+    :attr:`frame_v3_angle` from V3 (the SIAF V3IdlYAngle of NRS_FULL_IFU;
+    for an MRS band the angle of its along-slice axis, 7.5-8.4 deg -- the
+    MRS apertures carry no V3IdlYAngle in the SIAF, so the ``PA_APER`` of an
+    MRS cube is the PA of V3 and the slices are rotated by that much from
+    it). ``psf_cube`` records the sky PA of that axis.
 
     ``method='exact'`` runs one full ``calc_psf`` per wavelength;
     ``method='fast'`` uses ``calc_datacube_fast`` (one pupil propagation for
@@ -73,6 +79,10 @@ class StpsfEngine:
     broadening: str = "default"
     method: str = "exact"
     name: str = field(init=False, default="stpsf")
+    #: After :meth:`compute`: the angle [deg] of the computed frame's +y axis from the telescope V3 axis,
+    #: counter-clockwise on the sky (stpsf's ``_rotation``, SIAF V3IdlYAngle convention). Its sky PA is
+    #: the V3 PA at the aperture plus this (:meth:`CubeGeometry.v3_position_angle`).
+    frame_v3_angle: float | None = field(init=False, default=None)
 
     #: MRS across-slice widths [arcsec] per channel (Argyriou et al. 2023), the
     #: fallback when stpsf's private attribute moves.
@@ -82,6 +92,8 @@ class StpsfEngine:
                 date_obs: str | None = None) -> np.ndarray:
         stpsf = _import_stpsf()
         inst = self._instrument(stpsf, config, grid, date_obs)
+        rotation = getattr(inst, "_rotation", None)
+        self.frame_v3_angle = float(rotation) if rotation is not None else None
         waves = np.asarray(wavelengths_um, dtype=float)
         if self.method == "fast":
             stack = self._fast(stpsf, inst, config, waves, grid)

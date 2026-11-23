@@ -155,13 +155,20 @@ therefore approximate the PSF **as realised in reconstructed s3d cubes**;
 the bare optical PSF is available with `broadening: none`.
 
 stpsf computes (and its docs recommend comparing) in the instrument-aligned
-frame, and the default `frame: ideal` keeps exactly that: **array +y along
-the aperture ideal +y axis** for both instruments (for NIRSpec, stpsf's
-extra 90-degree IFU-align display rotation is disabled so the two
+frame, and the default `frame: ideal` keeps exactly that (for NIRSpec,
+stpsf's extra 90-degree IFU-align display rotation is disabled so the two
 instruments share one convention), and *nothing is ever interpolated at
-generation*. The sky position angle of that axis -- `PA_APER`, else
-`ROLL_REF + V3I_YANG`, overridable via `position_angle_deg` -- is recorded
-in `JWFPSFPA`, and `resampled(to_sky=True)` folds the rotation to the
+generation*. That frame's +y lies at stpsf's `_rotation` from V3
+(`JWFPSFV3`): the SIAF V3IdlYAngle of `NRS_FULL_IFU`, and for an MRS band
+the angle of its along-slice axis, 7.5-8.4 deg. Its sky position angle --
+the PA of V3 at the aperture (`PA_APER` minus the aperture's V3IdlYAngle)
+plus that angle, overridable via `position_angle_deg` -- is recorded in
+`JWFPSFPA`. For NIRSpec that is `PA_APER` itself; for MRS it is `PA_APER`
++ 7.5-8.4 deg, because the SIAF gives the MRS channel apertures no
+V3IdlYAngle, so an MRS cube's `PA_APER` is the PA of V3. (Until psf_cube
+v3 `PA_APER` was recorded for both: fitted to HH 48 SW in all four MRS
+channels, the library is best within 2 deg of the new angle, and 1.5-2.8x
+worse in chi2 at `PA_APER`.) `resampled(to_sky=True)` folds the rotation to the
 north-up/east-left frame of `skyalign` cubes into the same interpolation as
 the scale change. `frame: sky` instead rotates the slices once at
 generation, for direct overlay on skyalign cubes (PSF photometry, quick
@@ -175,6 +182,47 @@ a further +-90 degrees relative to the library frame (use
 sub-degree PA effects and speckle-level structure as beyond this product's
 fidelity. If your model is rendered in a frame other than sky (e.g. disk
 major axis along x), compose that angle into `rotation_deg` yourself.
+
+## A bright neighbour: `subtract_psf_neighbour`
+
+When a faint target shares the field with a much brighter point source
+(HH 48 NE, 2.3" from HH 48 SW, 10-100x brighter in the mid-infrared), the
+neighbour's PSF is fitted to every plane and subtracted, so that the
+target's mask and extraction see the target alone:
+
+```yaml
+  - step: psf_cube
+    inputs: [{stage: calwebb_spec3, pattern: "*_s3d.fits"}]
+    parameters: {fov_arcsec: 17}           # the library must reach every spaxel from the neighbour
+
+  - step: subtract_psf_neighbour           # -> stage4/subtract_psf_neighbour: *_s3d.fits + *_nbrfit.fits
+    inputs: [{stage: calwebb_spec3, pattern: "*_s3d.fits"}]
+    depends_on: [psf_cube]
+    parameters: {ra: 166.09405, dec: -77.30231}
+
+  - step: qa_psf_neighbour                 # -> qa/qa_psf_neighbour
+    inputs: [{stage: subtract_psf_neighbour, pattern: "*_nbrfit.fits"}]
+    tags: [qa]
+```
+
+Downstream steps take the cleaned cubes (`stage: subtract_psf_neighbour,
+pattern: "*_s3d.fits"`). The library field must be twice the largest
+distance from the neighbour to a spaxel; the step logs it (`JWFNBNED`) and
+fits only what the library reaches. For HH 48 NE: 12" (MRS ch1-ch2), 14"
+(ch3), 17" (ch4), 10" (NIRSpec G395H) -- the 6" default is far too small.
+
+What it does (the step's docstring has the detail): the position is
+fitted when the core is in the field; the PSF (+ a constant) is fitted
+plane by plane over the field minus a protected region around the target
+and minus a control ring, weighted by ERR with a 5 % model error; a radial
+wing profile -- what the PSF model lacks at a few FWHM (scattered light, a
+broader PSF than stpsf's), measured on block-stacked residuals at all
+azimuths but the target's -- is folded into the model; model and wing are
+subtracted (the background is not); the core of the neighbour, where no
+model is good to the percent, is blanked; `*_nbrfit.fits`
+(`jwstflow.cubes.psf.subtraction`) records the fit per plane and the
+control ring -- the mean residual at the target's distance from the
+neighbour, held out of the fit, which a correct subtraction leaves at zero.
 
 ## Engines, methods, OPD
 

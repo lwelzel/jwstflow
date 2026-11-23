@@ -37,10 +37,12 @@ The design choices (docs/psf_cubes.md carries the full rationale):
   :func:`model_pixel_scale`) is the *consumer's* single resampling step,
   :meth:`PsfCubeProduct.resampled`, so many models at many trial distances
   reuse one library.
-* **Orientation stays instrument-native** (``frame='ideal'``: array +y along
-  the aperture ideal +y axis, the frame both engines produce), so no rotation
-  ever resamples the stored slices; the sky position angle of that axis
-  (``PA_APER``, else ``ROLL_REF + V3I_YANG``) is recorded in ``JWFPSFPA`` and
+* **Orientation stays instrument-native** (``frame='ideal'``: the frame the
+  engine computes in -- for stpsf +y at ``frame_v3_angle`` from V3: the
+  V3IdlYAngle of the NIRSpec IFU, the along-slice axis of an MRS band), so no
+  rotation ever resamples the stored slices; the sky position angle of that
+  axis (the PA of V3 at the aperture plus that angle: ``PA_APER`` for
+  NIRSpec, ``PA_APER`` + 7.5-8.4 deg for MRS) is recorded in ``JWFPSFPA`` and
   :meth:`PsfCubeProduct.resampled` folds the rotation to the sky frame of
   ``skyalign`` cubes (north up, east left) into the same interpolation as the
   scale change. ``frame='sky'`` rotates at generation instead, for direct
@@ -58,7 +60,11 @@ The package, by module:
   the PSF widths to expect;
 * :mod:`.engines` -- :class:`StpsfEngine` and :class:`GaussianPsfEngine`;
 * :mod:`.product` -- :class:`PsfCubeProduct` and the lookup of products;
-* :mod:`.steps` -- the ``psf_cube`` step (its figure, ``qa_psf_cube``, is in
+* :mod:`.neighbour` -- a bright neighbour's PSF in a cube: its position,
+  the fit of every plane, the control ring;
+* :mod:`.subtraction` -- the ``*_nbrfit.fits`` record of that subtraction;
+* :mod:`.steps` -- the ``psf_cube`` and ``subtract_psf_neighbour`` steps
+  (their figures, ``qa_psf_cube`` and ``qa_psf_neighbour``, are in
   :mod:`jwstflow.qa.steps.psf`).
 
 Everything imports its heavy dependencies lazily so the package stays
@@ -92,13 +98,15 @@ from .product import (
     psf_from_stage,
     rotate_cube_to_sky,
 )
-from .steps import PsfCube
+from .steps import PsfCube, SubtractPsfNeighbour
+from .subtraction import NBRFIT_SUFFIX, PsfSubtraction
 
 __all__ = [
     "JWST_DIAMETER_M",
     "MODEL_FOV_AU",
     "MODEL_NPIX",
     "MRS_SUBBAND",
+    "NBRFIT_SUFFIX",
     "NIRSPEC_IFU_BROADENING_SIGMA",
     "PSFCUBE_SUFFIX",
     "CubeGeometry",
@@ -107,7 +115,9 @@ __all__ = [
     "PsfCube",
     "PsfCubeProduct",
     "PsfGrid",
+    "PsfSubtraction",
     "StpsfEngine",
+    "SubtractPsfNeighbour",
     "approx_fwhm_arcsec",
     "diffraction_fwhm_arcsec",
     "find_psf_product",
