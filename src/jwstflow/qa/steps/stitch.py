@@ -30,6 +30,7 @@ def _read_stitch(path: Path) -> dict[str, Any]:
         "names": names,
         "labels": [str(s) for s in meta.get("segments", names)],
         "scales": [float(s) for s in meta.get("scales_applied", [1.0] * len(names))],
+        "notes": {str(k): str(v) for k, v in (meta.get("scale_notes") or {}).items()},
         "crossovers": [float(b) for b in meta.get("crossovers_um", [])],
         "segment_of": np.asarray(tab["SEGMENT"], dtype=str) if "SEGMENT" in tab.colnames
         else np.full(len(tab), "", dtype=object),
@@ -101,7 +102,8 @@ class PlotStitch(Step):
                     plot.line(w, qa.to_mjy(f * scale, unit)[0], color=color, alpha=0.7, context=True,
                               label=(f"{len(segments)} segments" + (", rescaled" if any(abs(sc - 1.0) > 1e-9 for _, sc, *_ in segments) else "")
                                      if k == len(segments) // 2 else None) if many
-                              else label + (f" {qa.times(scale)}" if scale != 1.0 else ""))
+                              else label + (f" {qa.times(scale)}" if scale != 1.0 else "")
+                              + (f" ({s['notes'][label]})" if label in s["notes"] else ""))
                 plot.line(s["wave"], s["flux"], label="stitched")
                 plot.crossovers(s["crossovers"])
                 out.append(plot.finish(ctx.output_dir / f"{inp.stem}{suffix}.png", ylabel=s["ylabel"], notes=[inp.name],

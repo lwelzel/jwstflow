@@ -475,3 +475,30 @@ def test_edge_trim_keeps_a_narrow_overlap(tmp_path: Path):
     assert tab.meta["neighbour_ratios"][0] == pytest.approx(2.0)          # still measured
     w = np.asarray(tab["WAVELENGTH"])
     assert np.max(np.diff(w)) < 0.02                                       # no hole at the join
+
+
+def test_stitched_inputs_keep_their_systematic_and_segments(tmp_path: Path):
+    """A fixed scale's FLUX_SYS and the SEGMENT names of a stitched input survive the next stitch;
+    a combination across programs is named after the target and instrument(s)."""
+    from astropy.table import Table
+
+    blue, red = two_segments(tmp_path)
+    (tmp_path / "one").mkdir()
+    out = run_step(StitchSegments, [blue, red], tmp_path / "one", params=dict(
+        crossovers=[1.9], rescale=False, fixed_scales={"g235h-f170lp": [1.5, 0.15]},
+        scale_notes={"g235h-f170lp": "geometry x epoch"}))
+    out = [o for o in out if o.suffix == ".ecsv"]
+    tab = Table.read(out[0], format="ascii.ecsv")
+    assert tab.meta["scale_notes"] == {"g235h-f170lp": "geometry x epoch"} and tab.meta["instrument"] == "nirspec"
+    blue_part = np.asarray(tab["SEGMENT"]) == "g235h-f170lp"
+    assert np.allclose(tab["FLUX_SYS"][blue_part], 0.1 * tab["FLUX"][blue_part])
+    other = synthetic_x1d(tmp_path / "jw002_miri_ch1-short_s1d.fits", wave=np.linspace(2.8, 4.0, 200),
+                          flux=np.full(200, 2.0), instrument="MIRI", CHANNEL="1", BAND="SHORT")
+    (tmp_path / "two").mkdir()
+    out2 = [o for o in run_step(StitchSegments, [out[0], other], tmp_path / "two",
+                                params=dict(crossovers=[2.9], rescale=False)) if o.suffix == ".ecsv"]
+    assert out2[0].name == "test-target_jwst_s1dcomb.ecsv"
+    tab2 = Table.read(out2[0], format="ascii.ecsv")
+    kept = np.asarray(tab2["SEGMENT"]) == "g235h-f170lp"
+    assert kept.any() and np.allclose(tab2["FLUX_SYS"][kept], 0.1 * tab2["FLUX"][kept])
+    assert {"g235h-f170lp", "g395h-f290lp", "1-short"} <= set(np.asarray(tab2["SEGMENT"]))

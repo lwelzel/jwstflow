@@ -113,7 +113,7 @@ class StitchSegments(Step):
     inputs = ("*_s1d.fits", "*_x1d.fits", "*_c1d.fits", "*_s1dcomb.ecsv")
     outputs = ("s1dcomb",)
     batch = "all"
-    version = "9"   # 8 -> 9: edge_trim keeps every overlap measurable; 7 -> 8: edge_trim, crossfade, fixed-scale error in FLUX_SYS; 6 -> 7: min/max_wavelength; 5 -> 6: combine add|multiply, fixed_scales, stitched ECSV inputs (4 -> 5: DQ != 0 not spliced)
+    version = "10"  # 9 -> 10: FLUX_SYS / SEGMENT of stitched inputs carried, scale_notes, target-named cross-program products; 8 -> 9: edge_trim keeps every overlap measurable; 7 -> 8: edge_trim, crossfade, fixed-scale error in FLUX_SYS; 6 -> 7: min/max_wavelength; 5 -> 6: combine add|multiply, fixed_scales, stitched ECSV inputs (4 -> 5: DQ != 0 not spliced)
 
     class Params(StepParams):
         crossovers: list[float] | None = Field(None, description="wavelengths [um] where the combination switches "
@@ -130,6 +130,9 @@ class StitchSegments(Step):
         combine: str = Field("multiply", pattern="^(multiply|add)$", description="how rescale joins segments: "
                              "multiply (factors) or add (offsets, for additive mismatches such as a residual "
                              "background over an extended aperture)")
+        scale_notes: dict[str, str] = Field(default_factory=dict, description="segment label -> what its fixed "
+                                            "scale stands for (metadata and plot legend), e.g. 'geometry 1.13 x "
+                                            "source change 1.37'")
         fixed_scales: dict[str, list[float]] = Field(default_factory=dict, description="segment label -> [factor, "
                                                      "1-sigma error]: a factor measured elsewhere, applied on top of "
                                                      "any rescaling, its error folded into FLUX_ERROR")
@@ -144,6 +147,26 @@ class StitchSegments(Step):
         min_overlap_snr: float = Field(3.0, ge=0, description="both windowed medians must sit this many sigmas "
                                        "above zero for the ratio to count (a near-zero overlap cannot anchor a "
                                        "rescaling; its link stays at 1). 0 disables the guard")
+
+    @staticmethod
+    def segment_instrument(path: Path, tab: Any = None) -> str:
+        """``nirspec``, ``miri``, ... of a segment (``jwst`` for a stitched input of several)."""
+        if Path(path).suffix == ".ecsv":
+            if tab is not None and tab.meta.get("instrument"):
+                return str(tab.meta["instrument"])
+            name = Path(path).name.lower()
+            for token in ("nirspec", "miri", "nircam", "niriss"):
+                if f"_{token}" in name:
+                    return token
+            return "jwst"
+        from astropy.io import fits
+
+        return str(fits.getheader(path, 0).get("INSTRUME", "jwst")).strip().lower() or "jwst"
+
+    @staticmethod
+    def _instrument(segments: list[dict[str, Any]]) -> str:
+        kinds = {s.get("instrument", "jwst") for s in segments}
+        return kinds.pop() if len(kinds) == 1 else "jwst"
 
     def segment_label(self, path: Path) -> str:
         """Short label of a segment (override for mode-specific naming)."""
@@ -168,7 +191,7 @@ class StitchSegments(Step):
             min_overlap_points: int = 5, min_overlap_snr: float = 3.0, combine: str = "multiply",
             fixed_scales: dict[str, list[float]] | None = None, min_wavelength: float | None = None,
             max_wavelength: float | None = None, edge_trim: int = 0, crossfade: bool = False,
-            **params) -> list[Path]:
+            scale_notes: dict[str, str] | None = None, **params) -> list[Path]:
         from astropy.table import Table
 
         if len(inputs) < 2:
@@ -179,6 +202,11 @@ class StitchSegments(Step):
                 Table.read(path, hdu=self._table_hdu(path))
             arrays = {c: np.asarray(np.ma.filled(tab[c], np.nan), dtype=float)
                       for c in ("WAVELENGTH", "FLUX", "FLUX_ERROR")}
+            # a stitched input keeps its own systematic and the names of its segments
+            arrays["FLUX_SYS"] = (np.nan_to_num(np.asarray(np.ma.filled(tab["FLUX_SYS"], 0.0), dtype=float))
+                                  if "FLUX_SYS" in tab.colnames else np.zeros(len(tab)))
+            arrays["SEGMENT"] = (np.asarray(tab["SEGMENT"], dtype=object) if "SEGMENT" in tab.colnames
+                                 else np.full(len(tab), self.segment_label(path), dtype=object))
             ok = np.isfinite(arrays["FLUX"]) & np.isfinite(arrays["WAVELENGTH"])
             if min_wavelength is not None:
                 ok &= arrays["WAVELENGTH"] >= float(min_wavelength)
@@ -190,6 +218,7 @@ class StitchSegments(Step):
                 raise ValueError(f"{path.name}: no finite flux samples")
             order = np.argsort(arrays["WAVELENGTH"][ok])
             segments.append({"path": path, "label": self.segment_label(path),
+                             "instrument": self.segment_instrument(path, tab),
                              **{c: v[ok][order] for c, v in arrays.items()}})
         segments.sort(key=lambda s: float(s["WAVELENGTH"].min()))
         if edge_trim:
@@ -205,7 +234,7 @@ class StitchSegments(Step):
                 hi_trim[i], lo_trim[i + 1] = min(hi_trim[i], room), min(lo_trim[i + 1], room)
             for seg, lo, hi in zip(segments, lo_trim, hi_trim):
                 cut = slice(lo, max(lo + 1, len(seg["WAVELENGTH"]) - hi))
-                for c in ("WAVELENGTH", "FLUX", "FLUX_ERROR"):
+                for c in ("WAVELENGTH", "FLUX", "FLUX_ERROR", "FLUX_SYS", "SEGMENT"):
                     seg[c] = seg[c][cut]
         labels = [s["label"] for s in segments]
         if len(set(labels)) != len(labels):
@@ -250,7 +279,8 @@ class StitchSegments(Step):
             flux = seg["FLUX"] * scale + shift
             done.append({"WAVELENGTH": seg["WAVELENGTH"], "FLUX": flux,
                          "FLUX_ERROR": np.hypot(np.hypot(seg["FLUX_ERROR"] * scale, seg["FLUX"] * scale_err), shift_err),
-                         "FLUX_SYS": np.abs(flux) * frel})
+                         "FLUX_SYS": np.hypot(np.abs(flux) * frel, seg["FLUX_SYS"] * abs(scale)),
+                         "SEGMENT": seg["SEGMENT"]})
         # where each segment hands over: at the crossover, or -- cross-fading -- across the ratio window,
         # the bluer segment's samples blended with the redder one's (linear weight over the window)
         windows = []
@@ -263,7 +293,7 @@ class StitchSegments(Step):
             lo = -np.inf if i == 0 else windows[i - 1][1]
             hi = np.inf if i == len(segments) - 1 else windows[i][1]
             keep = (d["WAVELENGTH"] > lo) & (d["WAVELENGTH"] <= hi)
-            piece = {c: d[c][keep].copy() for c in cols}
+            piece = {c: d[c][keep].copy() for c in (*cols, "SEGMENT")}
             if i < len(segments) - 1 and windows[i][1] > windows[i][0]:
                 wlo, whi = windows[i]
                 nxt = done[i + 1]
@@ -277,7 +307,6 @@ class StitchSegments(Step):
                     piece["FLUX"][inside] = (1 - t) * piece["FLUX"][inside] + t * fb
                     piece["FLUX_ERROR"][inside] = np.hypot((1 - t) * piece["FLUX_ERROR"][inside], t * eb)
                     piece["FLUX_SYS"][inside] = (1 - t) * piece["FLUX_SYS"][inside] + t * sb
-            piece["SEGMENT"] = np.full(len(piece["WAVELENGTH"]), seg["label"], dtype=object)
             pieces.append(piece)
         combined = Table({c: np.concatenate([p[c] for p in pieces]) for c in (*cols, "SEGMENT")})
         combined["SEGMENT"] = combined["SEGMENT"].astype(str)
@@ -300,6 +329,8 @@ class StitchSegments(Step):
             "offset_errors": [float(e) for e in shift_errors],
             "fixed_scales": {k: [float(x) for x in v] for k, v in (fixed_scales or {}).items()},
             "fixed_scale_rel_errors": [float(x) for x in fixed_rel],
+            "scale_notes": {str(k): str(v) for k, v in (scale_notes or {}).items()},
+            "instrument": self._instrument(segments),
             "edge_trim": int(edge_trim), "crossfade": bool(crossfade),
             "crossfade_windows_um": [[float(a), float(b)] for a, b in windows] if crossfade else [],
             "inputs": [s["path"].name for s in segments],
@@ -307,7 +338,7 @@ class StitchSegments(Step):
         log.info("stitched %s at %s (ratios %s, scales %s)", labels, [f"{b:.3f}" for b in bounds],
                  [f"{r.ratio:.4f}+-{r.error:.4f}" for r in ratios],
                  [f"{s:.4f}+-{e:.4f}" for s, e in zip(scales, scale_errors)])
-        out = ctx.output_dir / derived_name(self._product_stem(segments), "s1dcomb", ext=".ecsv")
+        out = ctx.output_dir / derived_name(self._product_stem(segments, ctx.target), "s1dcomb", ext=".ecsv")
         combined.write(out, format="ascii.ecsv", overwrite=True)
         return [out]
 
@@ -339,11 +370,19 @@ class StitchSegments(Step):
         raise ValueError(f"{path}: no EXTRACT1D/COMBINE1D extension")
 
     @staticmethod
-    def _product_stem(segments: list[dict[str, Any]]) -> str:
-        """Longest common prefix of the segment file names, cut back to a whole ``_`` token."""
+    def _product_stem(segments: list[dict[str, Any]], target: str = "") -> str:
+        """Longest common prefix of the segment file names, cut back to a whole ``_`` token -- or, when
+        the segments come from different programs (or earlier combinations), ``<target>_<instrument>``
+        (``jwst`` when the instruments differ): a common prefix would be a stub like ``jw01``."""
         import os
+        import re
+
+        from ..config.schema import slugify
 
         stems = [s["path"].stem for s in segments]
+        programs = {(re.match(r"jw\d+", st) or [st])[0] for st in stems}
+        if len(programs) > 1 and target:
+            return f"{slugify(target)}_{StitchSegments._instrument(segments)}.fits"
         prefix = os.path.commonprefix(stems)
         if prefix and len(prefix) < len(stems[0]) and stems[0][len(prefix)] not in "_-":
             # drop the partial token (g235h... vs g395h... -> ..._nirspec); without an underscore in the
