@@ -91,8 +91,18 @@ def spectrum_name(hdu: Any, index: int) -> str:
 
 def read_spectrum(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, str | None]:
     """(wavelength, flux, flux error, flux unit) of the first EXTRACT1D/COMBINE1D table of a
-    1-D product (the error all-NaN when the table carries no FLUX_ERROR column)."""
+    1-D product (the error all-NaN when the table carries no FLUX_ERROR column) -- or of a
+    stitched spectrum (``*.ecsv``, a segment of a later stitch)."""
     from astropy.io import fits
+
+    if Path(path).suffix == ".ecsv":
+        from astropy.table import Table
+
+        tab = Table.read(path, format="ascii.ecsv")
+        wave = np.asarray(tab["WAVELENGTH"], dtype=float)
+        error = np.asarray(tab["FLUX_ERROR"], dtype=float) if "FLUX_ERROR" in tab.colnames \
+            else np.full(len(wave), np.nan)
+        return wave, np.asarray(tab["FLUX"], dtype=float), error, str(tab["FLUX"].unit or "Jy")
 
     with fits.open(path) as hdul:
         for name in SPECTRUM_EXTENSIONS:

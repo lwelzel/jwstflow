@@ -284,6 +284,8 @@ class StitchSegments(Step):
         stems = [s["path"].stem for s in segments]
         prefix = os.path.commonprefix(stems)
         if prefix and len(prefix) < len(stems[0]) and stems[0][len(prefix)] not in "_-":
-            prefix = prefix.rsplit("_", 1)[0]  # drop the partial token (g235h... vs g395h... -> ..._nirspec)
+            # drop the partial token (g235h... vs g395h... -> ..._nirspec); without an underscore in the
+            # prefix (two observations: jw01751-o006... vs jw01751-o010...) cut at the last hyphen
+            prefix = prefix.rsplit("_", 1)[0] if "_" in prefix else prefix.rsplit("-", 1)[0]
         prefix = prefix.rstrip("-_")
         return (prefix or stems[0]) + ".fits"  # derived_name strips the extension again
