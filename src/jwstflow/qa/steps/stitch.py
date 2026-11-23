@@ -206,7 +206,8 @@ class PlotStitchOverlaps(Step):
                               xscale=xscale, yscale=yscale,
                               applied=[f"{lab} x {float(v[0]):g} +- {float(v[1]) if len(v) > 1 else 0:g} (fixed)"
                                        for lab, v in (meta.get("fixed_scales") or {}).items()
-                                       if lab in (labels[i], labels[i + 1])])
+                                       if lab in (labels[i], labels[i + 1])],
+                              rescaled=bool(meta.get("rescale", True)))
                 if i % ncols == 0:
                     ax.set_ylabel(qa.FLUX_LABEL)
                 if i // ncols == nrows - 1 or i + ncols >= n_pairs:
@@ -223,7 +224,8 @@ def overlap_panel(ax: Any, i: int, labels: list[str], colors: list[Any],
                   segments: list[tuple[np.ndarray, np.ndarray, np.ndarray] | None],
                   crossover: float, window: tuple[float, float] | None,
                   ratio: float | None, ratio_error: float | None, *,
-                  xscale: str = "linear", yscale: str = "linear", applied: list[str] | None = None) -> None:
+                  xscale: str = "linear", yscale: str = "linear", applied: list[str] | None = None,
+                  rescaled: bool = True) -> None:
     """One neighbour pair (segments ``i`` and ``i + 1``) around its overlap: both segments as
     measured -- ``(wavelength, flux, error)`` in mJy, None for a missing one -- with their error
     bands, the crossover, the ratio window, the bluer segment times the measured factor, and a
@@ -260,7 +262,8 @@ def overlap_panel(ax: Any, i: int, labels: list[str], colors: list[Any],
     measured = (rf"$\times$ {qa.pm(ratio, ratio_error)}" if ratio is not None and ratio_error is not None
                 else "ratio not measured" if ratio is None else qa.times(ratio))
     missing = [labels[i + k] for k, seg in ((0, seg_a), (1, seg_b)) if seg is None]
-    qa.panel_note(ax, f"{labels[i]} | {labels[i + 1]}: {'measured ' if applied else ''}{measured}"
+    qa.panel_note(ax, f"{labels[i]} | {labels[i + 1]}: {'measured ' if applied or not rescaled else ''}{measured}"
+                     + ("" if rescaled or applied or ratio is None else ", not applied")
                      + "".join(f"\napplied: {a}" for a in (applied or []))
                      + (f"\nsegment file missing: {', '.join(missing)}" if missing else ""))
     ax.set_xlim(*view)
