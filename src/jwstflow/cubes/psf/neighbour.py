@@ -36,6 +36,7 @@ around the neighbour before and after.
 from __future__ import annotations
 
 import logging
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import pairwise
@@ -536,8 +537,186 @@ def fill_amplitudes(amplitudes: np.ndarray, *, smooth: int = 1) -> tuple[np.ndar
     return amps, filled
 
 
+# --------------------------------------------------------------------------- line planes
+# A fit over the field takes for the neighbour's light whatever else shares its plane and is more
+# structured than the background terms: in the line planes of HH 48 NE's MRS cubes -- H2 and [Fe II]
+# over the whole field, the control ring at +170 MJy/sr in the H2 S(5) plane -- SW's line flux came out
+# 1.3-3.2 times its own aperture's (0.92-0.96 in the continuum), and the excess was subtracted under NE.
+# In a line plane the neighbour's model can instead be that of the continuum planes on either side --
+# every component, the wing, the background -- scaled by the neighbour's brightness in the line plane
+# over that in the continuum, both measured on its core alone, where its own light outshines the
+# field's, and the same way, so that the core's mismatch with the PSF model cancels.
+C_KMS = 299792.458   #: speed of light [km/s]
+
+
+def feature_planes(wave_um: np.ndarray, centres_um: list[float] | np.ndarray, half_width_kms: float) -> np.ndarray:
+    """(nw,) True for the planes within ``half_width_kms`` of any of the wavelengths ``centres_um``."""
+    wave = np.asarray(wave_um, dtype=float)
+    out = np.zeros(len(wave), bool)
+    for centre in np.asarray(centres_um, dtype=float).ravel():
+        out |= np.abs(wave - centre) <= centre * float(half_width_kms) / C_KMS
+    return out
+
+
+def plane_runs(mask: np.ndarray) -> list[tuple[int, int]]:
+    """``(start, stop)`` of every run of consecutive True planes (stop exclusive)."""
+    step = np.diff(np.concatenate([[0], np.asarray(mask, bool).astype(int), [0]]))
+    return [(int(a), int(b)) for a, b in zip(np.flatnonzero(step == 1), np.flatnonzero(step == -1))]
+
+
+@dataclass
+class LinePlanes:
+    """The neighbour's model in the line planes (arrays of length nw; outside the planes rescaled, the
+    values given to :func:`scale_line_planes`)."""
+
+    line: np.ndarray            #: planes whose model is the continuum's, rescaled
+    scale: np.ndarray           #: the neighbour's brightness in the plane over the continuum's, on its core (NaN elsewhere)
+    scale_err: np.ndarray       #: its 1-sigma error
+    amplitudes: np.ndarray      #: (nw, ncomp) the amplitudes to subtract
+    const: np.ndarray           #: background constant (the continuum's, interpolated, in the planes rescaled)
+    gradient: np.ndarray        #: (nw, 2) background gradient, likewise
+    total_err: np.ndarray       #: error of the neighbour's total flux (scale and continuum errors in the planes rescaled)
+    skipped: list[tuple[float, str]]  #: (wavelength [um], reason) of line planes left at the given fit
+
+
+def _across(points: list[tuple[float, np.ndarray]], at: np.ndarray) -> np.ndarray:
+    """Values at the wavelengths ``at`` from (wavelength, value) of one or two sides: linear between two,
+    held from one."""
+    (w0, v0), *rest = points
+    v0 = np.asarray(v0, dtype=float)
+    if not rest:
+        return np.broadcast_to(v0, (len(at), *v0.shape)).copy()
+    w1, v1 = rest[0]
+    t = ((np.asarray(at, dtype=float) - w0) / (w1 - w0) if w1 != w0 else np.zeros(len(at)))
+    return v0 + t.reshape(-1, *([1] * v0.ndim)) * (np.asarray(v1, dtype=float) - v0)
+
+
+def scale_line_planes(data: np.ndarray, err: np.ndarray, components: list[np.ndarray], amplitudes: np.ndarray,
+                      line: np.ndarray, wave: np.ndarray, *, centre: tuple[float, float],
+                      core_radius: float | np.ndarray, allowed: np.ndarray, const: np.ndarray | None = None,
+                      gradient: np.ndarray | None = None, total_err: np.ndarray | None = None,
+                      valid: np.ndarray | None = None, context: int = 5, background: str = "plane",
+                      min_pixels: int = 8) -> LinePlanes:
+    """The neighbour's model in the planes ``line`` (nw,) from the continuum planes around them.
+
+    For every run of consecutive line planes the ``context`` nearest planes on either side that are
+    neither line planes nor failed fits (``valid``, default: finite ``amplitudes``) are the continuum:
+    per side the median of their amplitudes (every component), background terms and flux error,
+    interpolated linearly in wavelength across the run (held from the one side at the end of a cube).
+    On the neighbour's core -- the ``allowed`` spaxels within ``core_radius`` [pix] (per plane; the
+    run's middle plane decides) of ``centre`` -- every plane of the run and of its continuum is fitted
+    with its model as a template plus a local ``background`` (``constant`` or ``plane``: the field's
+    emission across the core): ``data = A * model + background``, with uniform weights, so that every
+    plane takes the same combination of spaxels and the core's mismatch with the model, the same in
+    the continuum, cancels in the ratio. A line plane's scale is its ``A`` over the continuum's ``A``
+    (the side medians interpolated likewise), its amplitudes the interpolated ones times the scale.
+    Where no continuum plane is found or the core cannot be fitted (fewer than ``min_pixels``
+    spaxels), the given fit stands and the planes are listed in ``skipped``.
+    """
+    comps = [np.asarray(c, dtype="f8") for c in components]
+    data = np.asarray(data, dtype="f8")
+    err = np.asarray(err, dtype="f8")
+    wave = np.asarray(wave, dtype=float)
+    nw = len(data)
+    amps = np.array(amplitudes, dtype=float, copy=True)
+    const = np.zeros(nw) if const is None else np.array(const, dtype=float, copy=True)
+    gradient = np.zeros((nw, 2)) if gradient is None else np.array(gradient, dtype=float, copy=True)
+    total_err = np.zeros(nw) if total_err is None else np.array(total_err, dtype=float, copy=True)
+    line = np.asarray(line, bool)
+    valid = np.isfinite(amps).all(axis=1) if valid is None else np.asarray(valid, bool)
+    pool = valid & ~line & np.isfinite(amps).all(axis=1)
+    radius = np.broadcast_to(np.asarray(core_radius, dtype=float), (nw,))
+    yy, xx = np.indices(data.shape[1:], dtype=float)
+    r = np.hypot(xx - centre[0], yy - centre[1])
+    idx = np.arange(nw)
+    done = np.zeros(nw, bool)
+    scale = np.full(nw, np.nan)
+    scale_err = np.full(nw, np.nan)
+    skipped: list[tuple[float, str]] = []
+    for a, b in plane_runs(line):
+        run = idx[a:b]
+        mid = int(run[len(run) // 2])
+        left, right = idx[:a][pool[:a]][-int(context):], idx[b:][pool[b:]][:int(context)]
+        sides = [s for s in (left, right) if len(s)]
+        if not sides:
+            skipped += [(float(wave[k]), "no continuum plane") for k in run]
+            continue
+        core = np.asarray(allowed, bool) & (r <= radius[mid])
+        if core.sum() < min_pixels:
+            skipped += [(float(wave[k]), f"{int(core.sum())} core spaxels") for k in run]
+            continue
+
+        def interpolate(values: np.ndarray, sides: list[np.ndarray] = sides, run: np.ndarray = run) -> np.ndarray:
+            return _across([(float(np.median(wave[s])), np.median(values[s], axis=0)) for s in sides], wave[run])
+
+        run_amps = interpolate(amps)
+        planes = np.concatenate([left, run, right])
+        plane_amps = amps[planes]
+        plane_amps[len(left):len(left) + len(run)] = run_amps
+        template = sum(plane_amps[:, i, None, None] * (c if len(c) == 1 else c[planes]) for i, c in enumerate(comps))
+        cube = data[planes]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            level = np.nanmedian(np.where(core[None] & np.isfinite(cube), err[planes], np.nan), axis=(1, 2))
+        fit = fit_planes(cube, np.broadcast_to(level[:, None, None], cube.shape), [template], core,
+                         background=background, origin=centre, model_error=0.0, clip=np.inf, iterations=1,
+                         min_pixels=min_pixels)
+        amp, amp_err = fit.amplitudes[:, 0], fit.errors[:, 0]
+        parts = {"left": slice(0, len(left)), "right": slice(len(left) + len(run), len(planes))}
+        points, errors = [], []
+        for name, s in (("left", left), ("right", right)):
+            got = amp[parts[name]]
+            got = got[np.isfinite(got)]
+            if len(s) and len(got):
+                centre_value = float(np.median(got))
+                spread = 1.4826 * float(np.median(np.abs(got - centre_value))) if len(got) > 2 else 0.0
+                points.append((float(np.median(wave[s])), centre_value))
+                errors.append((float(np.median(wave[s])), 1.2533 * spread / np.sqrt(len(got))))
+        if not points:
+            skipped += [(float(wave[k]), "core not fitted in the continuum") for k in run]
+            continue
+        cont = _across(points, wave[run])
+        cont_err = _across(errors, wave[run])
+        in_run = amp[len(left):len(left) + len(run)]
+        in_run_err = amp_err[len(left):len(left) + len(run)]
+        with np.errstate(invalid="ignore", divide="ignore"):
+            s_run = in_run / cont
+            s_err = np.abs(s_run) * np.sqrt((in_run_err / in_run) ** 2 + (cont_err / cont) ** 2)
+        ok = np.isfinite(s_run) & np.isfinite(cont) & (cont > 0)
+        skipped += [(float(wave[k]), "core not fitted") for k in run[~ok]]
+        rows = run[ok]
+        scale[rows], scale_err[rows] = s_run[ok], s_err[ok]
+        amps[rows] = run_amps[ok] * s_run[ok, None]
+        const[rows] = interpolate(const)[ok]
+        gradient[rows] = interpolate(gradient)[ok]
+        base_err = interpolate(total_err)[ok]
+        total_err[rows] = np.sqrt((s_run[ok] * base_err) ** 2 + (run_amps[ok].sum(axis=1) * s_err[ok]) ** 2)
+        done[rows] = True
+    return LinePlanes(line=done, scale=scale, scale_err=scale_err, amplitudes=amps, const=const, gradient=gradient,
+                      total_err=total_err, skipped=skipped)
+
+
+def unlisted_excess(flux: np.ndarray, listed: np.ndarray, *, size: int = 31, nsigma: float = 5.0) -> np.ndarray:
+    """(nw,) planes outside ``listed`` where ``flux`` stands more than ``nsigma`` robust sigma above its
+    running median over ``size`` planes: lines no list names, whose planes the fit over the field may
+    have biased the same way."""
+    from scipy.ndimage import median_filter
+
+    f = np.asarray(flux, dtype=float)
+    listed = np.asarray(listed, bool)
+    ok = np.isfinite(f)
+    if ok.sum() < size:
+        return np.zeros(len(f), bool)
+    filled = np.interp(np.arange(len(f)), np.flatnonzero(ok), f[ok])
+    excess = filled - median_filter(filled, size=int(size) | 1, mode="nearest")
+    sigma = 1.4826 * float(np.median(np.abs(excess[ok & ~listed]))) if (ok & ~listed).any() else np.nan
+    return ok & ~listed & (excess > nsigma * sigma)
+
+
 __all__ = [
     "BACKGROUND_TERMS",
+    "C_KMS",
+    "LinePlanes",
     "Located",
     "PlaneFit",
     "block_stack",
@@ -545,6 +724,7 @@ __all__ = [
     "centroid",
     "components",
     "core_coverage",
+    "feature_planes",
     "fill_amplitudes",
     "fit_planes",
     "fit_position",
@@ -553,12 +733,15 @@ __all__ = [
     "library_reach",
     "locate",
     "plane_models",
+    "plane_runs",
     "radial_nodes",
     "radial_profile",
     "radial_tents",
     "required_field",
     "ring_mask",
     "ring_residual",
+    "scale_line_planes",
     "slice_at",
+    "unlisted_excess",
     "wing_shape",
 ]

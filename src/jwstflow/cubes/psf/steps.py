@@ -219,6 +219,20 @@ class SubtractPsfNeighbour(Step):
        copies of the PSF (``halo_sigma``) can be fitted alongside for light
        the PSF model does not hold. A neighbour outside the field is fitted
        from the part of its wing inside.
+       **Line planes** (``line_planes: core``; default ``field``: fitted like
+       every plane). Gas-line emission spread over the field is more
+       structured than the background terms, and a fit over the field takes
+       part of it for the neighbour (HH 48 NE: SW's line flux 1.3-3.2x its
+       own aperture's, the excess subtracted under NE). With ``core``, the
+       planes within ``line_window`` km/s of the lines of ``line_features``
+       take the model of the ``line_context`` continuum planes on either
+       side -- every component, the wing, the background, interpolated in
+       wavelength -- scaled by the neighbour's brightness in the plane over
+       that in the continuum, both fitted on its core (``line_core`` FWHM,
+       with a local ``line_background``) with one fixed weighting, so that the
+       core's mismatch with the model cancels in the ratio. Continuum planes
+       stay exactly as with ``field``. When the core is not in the field
+       (or too little of it), the fit over the field stands (logged).
     4. **The subtraction.** The neighbour's model -- not the background
        terms -- is subtracted from every plane; the cube keeps its name and
        every extension (an edited copy of the official product; ``JWFNB*``
@@ -232,8 +246,9 @@ class SubtractPsfNeighbour(Step):
        target, and the residual there would be taken for a source by the
        mask that follows (HH 48 SW's ended NE's contour).
     5. **The record**, ``*_nbrfit.fits`` (`jwstflow.cubes.psf.subtraction`):
-       per plane the neighbour's total flux [Jy] and error, the fit's
-       chi2 and residual, and the **control ring**: the mean residual in the
+       per plane the neighbour's total flux [Jy] and error (with ``line_planes:
+       core`` also the fit over the field's, ``FLUX_FIELD``, and the scale of
+       the line planes), the fit's chi2 and residual, and the **control ring**: the mean residual in the
        annulus about the neighbour at the target's distance, outside the
        target's protected region -- what the subtraction leaves at the
        target's distance; held out of the fit by default, so it is a test
@@ -246,7 +261,7 @@ class SubtractPsfNeighbour(Step):
     inputs = ("*_s3d.fits",)
     outputs = ("nbrfit",)
     writes_official_products = True   # the cleaned cube keeps the official _s3d name; JWFNB* + HISTORY record the edit
-    version = "1"
+    version = "2"
 
     class Params(StepParams):
         ra: float | str = Field(..., description="the neighbour's right ascension [deg or sexagesimal]")
@@ -290,6 +305,21 @@ class SubtractPsfNeighbour(Step):
                                   "neighbour's model exceeds this multiple of the target's core brightness -- "
                                   "never within exclude_radius of the target or in its mask contour (0: keep all)")
         show_blocks: int = Field(4, ge=1, le=12, description="blocks of planes stored as images for the QA figure")
+        line_planes: Literal["field", "core"] = Field("field", description="the planes of gas lines: fitted over the "
+                                                      "field like every plane (field), or the neighbouring continuum "
+                                                      "planes' model scaled by the neighbour's brightness on its core, "
+                                                      "line plane over continuum (core): line emission spread over the "
+                                                      "field is then not taken for the neighbour's")
+        line_features: Any = Field(default_factory=lambda: {"gas_lines": "all"}, description="the lines whose planes "
+                                   "line_planes: core treats (jwstflow feature selection; bands are ignored)")
+        line_window: float = Field(300.0, gt=0, description="half-width [km/s] of the planes of a line")
+        line_core: float = Field(1.0, gt=0, description="radius [PSF FWHM at the line] of the neighbour's core that "
+                                 "the line planes' scale is fitted on")
+        line_context: int = Field(5, ge=1, description="continuum planes on either side of a line that its model is "
+                                  "interpolated from")
+        line_background: Literal["constant", "plane"] = Field("plane", description="local background fitted with the "
+                                                              "neighbour's model on its core (the field's emission "
+                                                              "across it)")
 
     def run(self, inputs: list[Path], ctx: RunContext, *, ra: float | str, dec: float | str,
             target_ra: float | str | None = None, target_dec: float | str | None = None, psf_stage: str = "psf_cube",
@@ -299,13 +329,16 @@ class SubtractPsfNeighbour(Step):
             wing_start: float = 1.0, wing_step: float = 1.4, wing_blocks: int = 8, model_error: float = 0.05,
             clip: float = 5.0, sampling: str = "point", ring_width: float = 0.25, holdout_ring: bool = True,
             edge: int = 1, smooth_planes: int = 1, inflate_err: bool = True, blank_core: float = 0.5,
-            show_blocks: int = 4, **params: Any) -> list[Path]:
+            show_blocks: int = 4, line_planes: str = "field", line_features: Any = None, line_window: float = 300.0,
+            line_core: float = 1.0, line_context: int = 5, line_background: str = "plane",
+            **params: Any) -> list[Path]:
         import warnings
 
         from astropy.io import fits
         from scipy.ndimage import binary_erosion
 
         from ...data.targets import parse_coords
+        from ...spectra.features import select_features
         from ..masks import mask_from_stage
         from ..morphology import dilate
         from ..wcs import celestial_wcs_from_header, hdu_wavelengths
@@ -324,6 +357,9 @@ class SubtractPsfNeighbour(Step):
 
         (cube_path,) = inputs
         halo_sigma = list(halo_sigma or [])
+        if line_planes not in ("field", "core"):
+            raise ValueError(f"line_planes must be 'field' or 'core', not {line_planes!r}")
+        line_features = {"gas_lines": "all"} if line_features is None else line_features
         with fits.open(cube_path) as hdul:
             primary = hdul[0].header.copy()
             sci_hdr = hdul["SCI"].header.copy()
@@ -455,6 +491,61 @@ class SubtractPsfNeighbour(Step):
         model = sum(amps[:, i, None, None] * c for i, c in enumerate(comps))
         model[:, ~reach] = 0.0
         bkg = fit.background(shape)
+        # the neighbour's core (blanked below) is judged on the fit over the field, in every plane
+        core = np.hypot(xx - tx, yy - ty) * pix <= fwhm_mid
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            blank_image = np.nanmedian(model, axis=0)
+        blank_level = float(np.nanmedian(nb.ring_residual(data - model - bkg, err, core)[0]))
+
+        # -- line planes: the continuum's model, scaled on the neighbour's core -----
+        field_total, field_psf = fit.total.copy(), fit.amplitudes[:, 0].copy()
+        line = np.zeros(len(wave), bool)
+        unlisted = np.zeros(len(wave), bool)
+        rescaled = None
+        if line_planes == "core":
+            centres = [f.wavelength for f in select_features(line_features)
+                       if f.kind == "line" and f.wavelength is not None]
+            line = nb.feature_planes(wave, centres, line_window)
+            unlisted = nb.unlisted_excess(field_total, line)
+            if not located.refined:
+                ctx.log.warning("%s: the neighbour's core is not in the field; its %d line planes keep the fit over "
+                                "the field", cube_path.name, int(line.sum()))
+            elif line.any():
+                rescaled = nb.scale_line_planes(
+                    usable, err, comps, amps, line, wave, centre=(x0, y0),
+                    core_radius=line_core * np.asarray(approx_fwhm_arcsec(config, wave)) / pix,
+                    allowed=fit_footprint & ~protected & reach, const=fit.const, gradient=fit.gradient,
+                    total_err=fit.total_err, valid=~filled, context=line_context, background=line_background)
+                rows = rescaled.line
+                amps[rows] = rescaled.amplitudes[rows]
+                fit.amplitudes[rows] = amps[rows]
+                fit.total[rows] = amps[rows].sum(axis=1)
+                fit.total_err[rows] = rescaled.total_err[rows]
+                fit.const[rows] = rescaled.const[rows]
+                fit.gradient[rows] = rescaled.gradient[rows]
+                line_model = sum(amps[rows][:, i, None, None] * (c if len(c) == 1 else c[rows])
+                                 for i, c in enumerate(comps))
+                line_model[:, ~reach] = 0.0
+                model[rows] = line_model
+                bkg[rows] = fit.background(shape)[rows]
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    ratio = fit.total[rows] / field_total[rows]
+                ctx.log.info("%s: %d planes of %d lines (+-%g km/s) take the continuum model scaled on the "
+                             "neighbour's core (scale %.2f-%.2f; against the fit over the field %.2f-%.2f)",
+                             cube_path.name, int(rows.sum()), len(nb.plane_runs(line)), line_window,
+                             float(np.nanmin(rescaled.scale)) if rows.any() else np.nan,
+                             float(np.nanmax(rescaled.scale)) if rows.any() else np.nan,
+                             float(np.nanmin(ratio)) if rows.any() else np.nan,
+                             float(np.nanmax(ratio)) if rows.any() else np.nan)
+                if rescaled.skipped:
+                    ctx.log.warning("%s: %d line planes keep the fit over the field (%s)", cube_path.name,
+                                    len(rescaled.skipped), "; ".join(sorted({why for _, why in rescaled.skipped})))
+            if unlisted.any():
+                at = ", ".join(f"{wave[(a + b - 1) // 2]:.3f}" for a, b in nb.plane_runs(unlisted)[:12])
+                ctx.log.warning("%s: the fitted flux of the neighbour jumps in %d planes outside the listed lines "
+                                "(at %s um): lines line_features does not name?", cube_path.name, int(unlisted.sum()),
+                                at)
         cleaned = data - model
         resid = cleaned - bkg
         new_err = err
@@ -470,7 +561,6 @@ class SubtractPsfNeighbour(Step):
         back, _, _ = nb.ring_residual(resid, err, ring & ~toward)
         before, _, _ = nb.ring_residual(data - bkg, err, ring)
         sky_far, _, _ = nb.ring_residual(resid, err, far)
-        core = np.hypot(xx - tx, yy - ty) * pix <= fwhm_mid
         target_sb, _, _ = nb.ring_residual(resid, err, core)
         with np.errstate(invalid="ignore"):
             fit_rms = np.sqrt(np.nanmean(np.where(fit_mask[None], resid, np.nan) ** 2, axis=(1, 2)))
@@ -490,6 +580,14 @@ class SubtractPsfNeighbour(Step):
             planes["FLUX_WING"] = fit.amplitudes[:, 0] * wing_share * to_jy
             planes["FLUX"] = planes["FLUX"] + planes["FLUX_WING"]
             planes["FLUX_ERR"] = planes["FLUX_ERR"] * (1.0 + wing_share)
+        if line_planes == "core":
+            planes["FLUX_FIELD"] = field_total * to_jy            # as FLUX would be without line_planes, to the bit
+            if len(nodes):
+                planes["FLUX_FIELD"] = planes["FLUX_FIELD"] + field_psf * wing_share * to_jy
+            done = rescaled.line if rescaled is not None else np.zeros(len(wave), bool)
+            planes["LINE"] = done.astype("u1")
+            planes["LINE_SCALE"] = rescaled.scale if rescaled is not None else np.full(len(wave), np.nan)
+            planes["LINE_SCALE_ERR"] = rescaled.scale_err if rescaled is not None else np.full(len(wave), np.nan)
         edges = np.linspace(0, len(wave), int(show_blocks) + 1).round().astype(int)
         firsts, lasts = edges[:-1], np.maximum(edges[1:] - 1, edges[:-1])
         with warnings.catch_warnings():
@@ -507,12 +605,11 @@ class SubtractPsfNeighbour(Step):
             profile[f"AFTER_{b}"] = nb.radial_profile(images[2, b], (x0, y0), r_edges, mask=outside)
         # the neighbour's core: its residual outshines the target, so it is not handed on as data
         blanked = np.zeros(shape, bool)
-        target_level = float(np.nanmedian(target_sb))
-        if blank_core > 0 and np.isfinite(target_level) and target_level > 0:
+        if blank_core > 0 and np.isfinite(blank_level) and blank_level > 0:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", RuntimeWarning)
                 # never within the bare exclude radius of the target, nor in its mask contour
-                blanked = (np.nanmedian(model, axis=0) > blank_core * target_level) & ~inner & ~contour
+                blanked = (blank_image > blank_core * blank_level) & ~inner & ~contour
         regions = ((fit_mask * FITTED) | (protected * PROTECTED) | (ring * RING)
                    | ((footprint & ~reach) * BEYOND_LIBRARY) | (blanked * BLANKED)).astype("u1")
 
@@ -556,7 +653,20 @@ class SubtractPsfNeighbour(Step):
             "JWFNBNFL": (int(filled.sum()), "planes with interpolated amplitudes"),
             "JWFNBBLK": (blank_core, "blanked where model > this x target core"),
             "JWFNBNBL": (int(blanked.sum()), "spaxels blanked (neighbour's core)"),
+            "JWFNBLPL": (line_planes, "line planes: field fit | core-scaled continuum"),
         }
+        if line_planes == "core":
+            keys.update({
+                "JWFNBLFT": (str(line_features)[:40], "lines treated (line_features)"),
+                "JWFNBLWN": (line_window, "[km/s] half-width of a line's planes"),
+                "JWFNBLCO": (line_core, "[FWHM] core radius of the line-plane scale"),
+                "JWFNBLCX": (line_context, "continuum planes per side of a line"),
+                "JWFNBLBG": (line_background, "local background of the core fit"),
+                "JWFNBNLN": (int(line.sum()), "planes within the window of a listed line"),
+                "JWFNBNLR": (int(rescaled.line.sum()) if rescaled is not None else 0,
+                             "line planes scaled on the neighbour's core"),
+                "JWFNBNUN": (int(unlisted.sum()), "planes with a flux jump off the listed lines"),
+            })
         out_product = ctx.derived_path(cube_path, NBRFIT_SUFFIX)
         PsfSubtraction(planes=planes, images=images, blocks={"FIRST": firsts, "LAST": lasts,
                                                              "WAVELENGTH": wave[(firsts + lasts) // 2]},
@@ -577,7 +687,8 @@ class SubtractPsfNeighbour(Step):
                 hdul["DQ"].data = dq_out
             hdr = hdul[0].header
             hdr["JWFNBSUB"] = (True, "subtract_psf_neighbour: a neighbour's PSF subtracted")
-            for k in ("JWFNBVER", "JWFNBFRA", "JWFNBFDE", "JWFNBLIB", "JWFNBHAL", "JWFNBFLX", "JWFNBRMD", "JWFNBNBL"):
+            for k in ("JWFNBVER", "JWFNBFRA", "JWFNBFDE", "JWFNBLIB", "JWFNBHAL", "JWFNBFLX", "JWFNBRMD", "JWFNBNBL",
+                      "JWFNBLPL"):
                 hdr[k] = keys[k]
             hdr["JWFNBREC"] = (out_product.name, "subtract_psf_neighbour: record of the fit")
             hdr.add_history(f"subtract_psf_neighbour v{self.version}: PSF of the neighbour at RA {fra:.6f} "
@@ -585,7 +696,10 @@ class SubtractPsfNeighbour(Step):
                             f"{', halo ' + keys['JWFNBHAL'][0] if halo_sigma else ''}) fitted plane by plane "
                             f"and subtracted from SCI; background terms fitted, not subtracted; ERR "
                             f"{'includes' if inflate_err else 'excludes'} the model error; {int(blanked.sum())} "
-                            f"spaxels of the neighbour's core blanked (DQ DO_NOT_USE); see {out_product.name}")
+                            f"spaxels of the neighbour's core blanked (DQ DO_NOT_USE)"
+                            + (f"; in {int(rescaled.line.sum())} planes of gas lines the continuum's model scaled "
+                               f"on the neighbour's core" if rescaled is not None else "")
+                            + f"; see {out_product.name}")
             hdul.writeto(out_cube, overwrite=True)
         ctx.log.info("%s: neighbour %s at (%.2f, %.2f) [given (%.2f, %.2f), core coverage %.2f]; library %.1f\" "
                      "(needs %.1f\"); median flux %.2f mJy, reduced chi2 %.2f; control ring at %.2f\": %+.3f "
