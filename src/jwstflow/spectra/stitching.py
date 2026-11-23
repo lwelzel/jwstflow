@@ -22,7 +22,17 @@ implements the generic mechanics once:
   ``reference`` segment (default: the reddest); the scale uncertainties
   accumulate in quadrature along the chain and are folded into the output
   FLUX_ERROR, so the scaling uncertainty propagates into the spectrum and
-  through any later stitch that consumes it;
+  through any later stitch that consumes it. ``combine: add`` chains
+  additive offsets instead (flux differences around the crossovers), for
+  mismatches that are additive -- a residual background over an extended
+  aperture -- which a factor would carry into every feature's depth;
+* ``fixed_scales`` multiplies named segments by a given factor (with its
+  uncertainty) -- a calibration or epoch factor measured elsewhere, e.g. the
+  flux change of a variable source between two instruments' epochs measured
+  in identical apertures on the cubes -- on top of any measured rescaling;
+* inputs may also be stitched spectra of earlier runs (``*_s1dcomb.ecsv``),
+  each one segment (labelled ``nirspec`` / ``miri`` from its name), so a
+  combine can join two instruments once instead of re-chaining all bands;
 * the result is one ECSV (WAVELENGTH/FLUX/FLUX_ERROR/SEGMENT + provenance
   metadata); the ``plot_stitch`` QA step draws the comparison figure and
   ``plot_stitch_overlaps`` the per-overlap measurement figure from it
@@ -48,7 +58,9 @@ from ..steps import RunContext, Step, StepParams
 from ..steps.naming import derived_name
 from .overlaps import (
     OverlapRatio,
+    chain_offsets,
     chain_scales,
+    measure_overlap_offset,
     measure_overlap_ratio,
     overlap_midpoints,
 )
@@ -98,10 +110,10 @@ class StitchSegments(Step):
     ratio measurement, validation) while producing byte-compatible products.
     """
 
-    inputs = ("*_s1d.fits", "*_x1d.fits", "*_c1d.fits")
+    inputs = ("*_s1d.fits", "*_x1d.fits", "*_c1d.fits", "*_s1dcomb.ecsv")
     outputs = ("s1dcomb",)
     batch = "all"
-    version = "5"   # 4 -> 5: samples with DQ != 0 are not spliced (3 -> 4: ratio window, uncertainty)
+    version = "6"   # 5 -> 6: combine add|multiply, fixed_scales, stitched ECSV inputs (4 -> 5: DQ != 0 not spliced)
 
     class Params(StepParams):
         crossovers: list[float] | None = Field(None, description="wavelengths [um] where the combination switches "
@@ -115,6 +127,12 @@ class StitchSegments(Step):
                                          "clipped to the overlap, and widened back to the whole overlap when it "
                                          "holds fewer than min_overlap_points samples")
         min_overlap_points: int = Field(5, ge=1, description="samples needed in the ratio window to measure a ratio")
+        combine: str = Field("multiply", pattern="^(multiply|add)$", description="how rescale joins segments: "
+                             "multiply (factors) or add (offsets, for additive mismatches such as a residual "
+                             "background over an extended aperture)")
+        fixed_scales: dict[str, list[float]] = Field(default_factory=dict, description="segment label -> [factor, "
+                                                     "1-sigma error]: a factor measured elsewhere, applied on top of "
+                                                     "any rescaling, its error folded into FLUX_ERROR")
         min_overlap_snr: float = Field(3.0, ge=0, description="both windowed medians must sit this many sigmas "
                                        "above zero for the ratio to count (a near-zero overlap cannot anchor a "
                                        "rescaling; its link stays at 1). 0 disables the guard")
@@ -122,6 +140,13 @@ class StitchSegments(Step):
     def segment_label(self, path: Path) -> str:
         """Short label of a segment (override for mode-specific naming)."""
         from astropy.io import fits
+
+        if Path(path).suffix == ".ecsv":       # a stitched spectrum of an earlier run: one segment
+            name = Path(path).name.lower()
+            for token in ("nirspec", "miri", "nircam", "niriss"):
+                if f"_{token}" in name:
+                    return token
+            return Path(path).stem
 
         hdr = fits.getheader(path)
         for keys in (("GRATING", "FILTER"), ("CHANNEL", "BAND")):
@@ -132,14 +157,16 @@ class StitchSegments(Step):
 
     def run(self, inputs: list[Path], ctx: RunContext, *, crossovers: list[float] | None = None,
             rescale: bool = False, reference: str | None = None, ratio_window_frac: float = 0.05,
-            min_overlap_points: int = 5, min_overlap_snr: float = 3.0, **params) -> list[Path]:
+            min_overlap_points: int = 5, min_overlap_snr: float = 3.0, combine: str = "multiply",
+            fixed_scales: dict[str, list[float]] | None = None, **params) -> list[Path]:
         from astropy.table import Table
 
         if len(inputs) < 2:
             raise ValueError(f"stitching needs at least two segments, got {len(inputs)}")
         segments = []
         for path in sorted(inputs):
-            tab = Table.read(path, hdu=self._table_hdu(path))
+            tab = Table.read(path, format="ascii.ecsv") if path.suffix == ".ecsv" else \
+                Table.read(path, hdu=self._table_hdu(path))
             arrays = {c: np.asarray(np.ma.filled(tab[c], np.nan), dtype=float)
                       for c in ("WAVELENGTH", "FLUX", "FLUX_ERROR")}
             ok = np.isfinite(arrays["FLUX"]) & np.isfinite(arrays["WAVELENGTH"])
@@ -167,17 +194,31 @@ class StitchSegments(Step):
         ratios = [self.overlap_ratio(a, b, crossover=c, ratio_window_frac=ratio_window_frac,
                                      min_overlap_points=min_overlap_points, min_overlap_snr=min_overlap_snr)
                   for a, b, c in zip(segments, segments[1:], bounds)]
-        scales, scale_errors = (chain_scales(labels, ratios, reference) if rescale
+        offsets = [measure_overlap_offset(a, b, crossover=c, ratio_window_frac=ratio_window_frac,
+                                          min_overlap_points=min_overlap_points)
+                   for a, b, c in zip(segments, segments[1:], bounds)] if combine == "add" else []
+        scales, scale_errors = (chain_scales(labels, ratios, reference) if rescale and combine == "multiply"
                                 else ([1.0] * len(segments), [0.0] * len(segments)))
+        shifts, shift_errors = (chain_offsets(labels, offsets, reference) if rescale and combine == "add"
+                                else ([0.0] * len(segments), [0.0] * len(segments)))
+        for label, value in (fixed_scales or {}).items():
+            if label not in labels:
+                raise ValueError(f"fixed_scales: segment {label!r} is not among {labels}")
+            factor, ferr = float(value[0]), float(value[1]) if len(value) > 1 else 0.0
+            i = labels.index(label)
+            rel = np.hypot(scale_errors[i] / scales[i] if scales[i] else 0.0, ferr / factor if factor else 0.0)
+            scales[i] = scales[i] * factor
+            scale_errors[i] = abs(scales[i]) * float(rel)
 
         edges = [-np.inf, *bounds, np.inf]
         pieces = []
-        for seg, scale, scale_err, lo, hi in zip(segments, scales, scale_errors, edges[:-1], edges[1:]):
+        for seg, scale, scale_err, shift, shift_err, lo, hi in zip(segments, scales, scale_errors, shifts,
+                                                                   shift_errors, edges[:-1], edges[1:]):
             keep = (seg["WAVELENGTH"] > lo) & (seg["WAVELENGTH"] <= hi)
-            # the scale uncertainty is part of the stitched error budget: it adds in
+            # the scale (offset) uncertainty is part of the stitched error budget: it adds in
             # quadrature to the measurement error of every rescaled sample
-            error = np.hypot(seg["FLUX_ERROR"][keep] * scale, seg["FLUX"][keep] * scale_err)
-            pieces.append({"WAVELENGTH": seg["WAVELENGTH"][keep], "FLUX": seg["FLUX"][keep] * scale,
+            error = np.hypot(np.hypot(seg["FLUX_ERROR"][keep] * scale, seg["FLUX"][keep] * scale_err), shift_err)
+            pieces.append({"WAVELENGTH": seg["WAVELENGTH"][keep], "FLUX": seg["FLUX"][keep] * scale + shift,
                            "FLUX_ERROR": error,
                            "SEGMENT": np.full(int(keep.sum()), seg["label"], dtype=object)})
         combined = Table({c: np.concatenate([p[c] for p in pieces]) for c in ("WAVELENGTH", "FLUX", "FLUX_ERROR", "SEGMENT")})
@@ -193,6 +234,12 @@ class StitchSegments(Step):
             "scales_applied": [float(s) for s in scales],
             "scale_errors": [float(e) for e in scale_errors],
             "rescale": bool(rescale),
+            "combine": combine,
+            "neighbour_offsets": [None if not np.isfinite(o.ratio) else float(o.ratio) for o in offsets],
+            "neighbour_offset_errors": [None if not np.isfinite(o.error) else float(o.error) for o in offsets],
+            "offsets_applied": [float(x) for x in shifts],
+            "offset_errors": [float(e) for e in shift_errors],
+            "fixed_scales": {k: [float(x) for x in v] for k, v in (fixed_scales or {}).items()},
             "inputs": [s["path"].name for s in segments],
         })
         log.info("stitched %s at %s (ratios %s, scales %s)", labels, [f"{b:.3f}" for b in bounds],

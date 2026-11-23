@@ -375,3 +375,54 @@ def test_flagged_samples_are_not_spliced(tmp_path: Path):
     assert np.nanmax(np.asarray(tab["FLUX"])) == pytest.approx(2.0)          # no flagged value spliced
     assert not np.any((np.asarray(tab["WAVELENGTH"]) > 1.40) & (np.asarray(tab["WAVELENGTH"]) < 1.45))
     assert tab.meta["neighbour_ratios"][0] == pytest.approx(2.0)             # ratio from good samples only
+
+
+def test_additive_combine_chains_offsets_onto_the_reference(tmp_path: Path):
+    """combine: add brings each segment onto its neighbour's level by an offset, not a factor."""
+    from astropy.table import Table
+
+    w1, w2 = np.linspace(1.0, 2.0, 200), np.linspace(1.8, 3.0, 200)
+    blue = synthetic_x1d(tmp_path / "jw001_nirspec_g235h-f170lp_s1d.fits", wave=w1, flux=1.0 + 0.5 * w1,
+                         instrument="NIRSPEC", GRATING="G235H", FILTER="F170LP")
+    red = synthetic_x1d(tmp_path / "jw001_nirspec_g395h-f290lp_s1d.fits", wave=w2, flux=1.0 + 0.5 * w2 + 0.3,
+                        instrument="NIRSPEC", GRATING="G395H", FILTER="F290LP")
+    out = run_step(StitchSegments, [blue, red], tmp_path,
+                   params={"rescale": True, "combine": "add", "crossovers": [1.9], "reference": "g235h-f170lp"})
+    tab = Table.read([o for o in out if o.suffix == ".ecsv"][0])
+    assert tab.meta["neighbour_offsets"][0] == pytest.approx(0.3, abs=0.01)
+    assert tab.meta["offsets_applied"] == [0.0, pytest.approx(-0.3, abs=0.01)]
+    assert tab.meta["scales_applied"] == [1.0, 1.0]
+    w, f = np.asarray(tab["WAVELENGTH"]), np.asarray(tab["FLUX"])
+    assert np.allclose(f, 1.0 + 0.5 * w, atol=0.01)                     # the slope is kept, only the level moves
+
+
+def test_fixed_scales_apply_a_measured_factor_with_its_error(tmp_path: Path):
+    from astropy.table import Table
+
+    out = run_step(StitchSegments, two_segments(tmp_path), tmp_path,
+                   params={"crossovers": [1.9], "fixed_scales": {"g235h-f170lp": [0.5, 0.05]}})
+    tab = Table.read([o for o in out if o.suffix == ".ecsv"][0])
+    w, f, e = (np.asarray(tab[c]) for c in ("WAVELENGTH", "FLUX", "FLUX_ERROR"))
+    assert np.allclose(f[w < 1.9], 0.5) and np.allclose(f[w > 1.9], 2.0)
+    assert tab.meta["scales_applied"][0] == pytest.approx(0.5)
+    assert tab.meta["scale_errors"][0] == pytest.approx(0.05)
+    assert np.all(e[w < 1.9] >= 0.5 * 0.1 - 1e-9)                    # 10 % factor error folded in
+
+
+def test_stitched_ecsv_inputs_are_single_segments(tmp_path: Path):
+    """A combine joins the stitched spectra of two runs (*_s1dcomb.ecsv) as two segments."""
+    from astropy.table import Table
+
+    for name, lo, hi, flux in (("jw001-o006_t001_nirspec_s1dcomb.ecsv", 1.7, 5.3, 1.0),
+                               ("jw001-o010_t002_miri_target_disk_s1dcomb.ecsv", 4.9, 28.0, 2.0)):
+        w = np.linspace(lo, hi, 300)
+        t = Table({"WAVELENGTH": w, "FLUX": np.full(300, flux), "FLUX_ERROR": np.full(300, 0.01),
+                   "SEGMENT": np.full(300, "x")})
+        (tmp_path / "in").mkdir(exist_ok=True)
+        t.write(tmp_path / "in" / name, format="ascii.ecsv", overwrite=True)
+    files = sorted((tmp_path / "in").glob("*.ecsv"))
+    out = run_step(StitchSegments, files, tmp_path / "out", params={"crossovers": [5.1], "rescale": True,
+                                                                    "reference": "miri"})
+    tab = Table.read([o for o in out if o.suffix == ".ecsv"][0])
+    assert tab.meta["segments"] == ["nirspec", "miri"]
+    assert tab.meta["scales_applied"] == [pytest.approx(2.0), 1.0]
