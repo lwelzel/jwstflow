@@ -113,7 +113,7 @@ class StitchSegments(Step):
     inputs = ("*_s1d.fits", "*_x1d.fits", "*_c1d.fits", "*_s1dcomb.ecsv")
     outputs = ("s1dcomb",)
     batch = "all"
-    version = "12"  # 11 -> 12: inherited_scales of stitched inputs; 10 -> 11: range_systematics; 9 -> 10: FLUX_SYS / SEGMENT of stitched inputs carried, scale_notes, target-named cross-program products; 8 -> 9: edge_trim keeps every overlap measurable; 7 -> 8: edge_trim, crossfade, fixed-scale error in FLUX_SYS; 6 -> 7: min/max_wavelength; 5 -> 6: combine add|multiply, fixed_scales, stitched ECSV inputs (4 -> 5: DQ != 0 not spliced)
+    version = "13"  # 12 -> 13: notes; 11 -> 12: inherited_scales of stitched inputs; 10 -> 11: range_systematics; 9 -> 10: FLUX_SYS / SEGMENT of stitched inputs carried, scale_notes, target-named cross-program products; 8 -> 9: edge_trim keeps every overlap measurable; 7 -> 8: edge_trim, crossfade, fixed-scale error in FLUX_SYS; 6 -> 7: min/max_wavelength; 5 -> 6: combine add|multiply, fixed_scales, stitched ECSV inputs (4 -> 5: DQ != 0 not spliced)
 
     class Params(StepParams):
         crossovers: list[float] | None = Field(None, description="wavelengths [um] where the combination switches "
@@ -130,6 +130,8 @@ class StitchSegments(Step):
         combine: str = Field("multiply", pattern="^(multiply|add)$", description="how rescale joins segments: "
                              "multiply (factors) or add (offsets, for additive mismatches such as a residual "
                              "background over an extended aperture)")
+        notes: list[str] = Field(default_factory=list, description="free-text statements recorded in the product's "
+                                 "metadata (e.g. systematics that are not in FLUX_SYS, one-sided terms)")
         range_systematics: list[list[float]] = Field(default_factory=list, description="[[lo_um, hi_um, fraction], "
                                                      "...]: a relative systematic of the stitched flux in each "
                                                      "wavelength range (e.g. a band's stray-light residual, a noisy "
@@ -209,7 +211,7 @@ class StitchSegments(Step):
             fixed_scales: dict[str, list[float]] | None = None, min_wavelength: float | None = None,
             max_wavelength: float | None = None, edge_trim: int = 0, crossfade: bool = False,
             scale_notes: dict[str, str] | None = None, range_systematics: list[list[float]] | None = None,
-            **params) -> list[Path]:
+            notes: list[str] | None = None, **params) -> list[Path]:
         from astropy.table import Table
 
         if len(inputs) < 2:
@@ -356,6 +358,7 @@ class StitchSegments(Step):
             "fixed_scale_rel_errors": [float(x) for x in fixed_rel],
             "scale_notes": {str(k): str(v) for k, v in (scale_notes or {}).items()},
             "range_systematics": [[float(x) for x in r] for r in (range_systematics or [])],
+            "notes": [str(n) for n in (notes or [])],
             # what a stitched input had applied itself (its fixed scales and their notes), by segment
             "inherited_scales": {s["label"]: s["inherited"] for s in segments if s["inherited"]},
             "instrument": self._instrument(segments),
