@@ -353,3 +353,25 @@ def test_plot_stitch_background_tolerates_missing_records(tmp_path: Path, caplog
     pngs = run_step(PlotStitchBackground, [o for o in outputs if o.suffix == ".ecsv"], tmp_path,
                     ctx=ctx, params={"segments_stage": "segments"})
     assert len(pngs) == 1 and pngs[0].name.endswith("_bkgcomp.png")
+
+
+def test_flagged_samples_are_not_spliced(tmp_path: Path):
+    """Samples with DQ != 0 (e.g. FLUX_ESTIMATED planes at a detector gap) stay out of the product and the ratio."""
+    from astropy.table import Table
+
+    from jwstflow.spectra import Spectrum1D, write_x1d
+
+    w = np.linspace(1.0, 2.0, 200)
+    f = np.full(200, 1.0)
+    dq = np.zeros(200, dtype=np.uint32)
+    bad = ((w > 1.40) & (w < 1.45)) | ((w > 1.88) & (w < 1.92))   # one block inside, one in the ratio window
+    f[bad], dq[bad] = 100.0, 2**28
+    blue = write_x1d(tmp_path / "jw001_nirspec_g235h-f170lp_s1d.fits", Spectrum1D(w, f, np.full(200, 0.05), dq),
+                     header={"INSTRUME": "NIRSPEC", "GRATING": "G235H", "FILTER": "F170LP"})
+    red = synthetic_x1d(tmp_path / "jw001_nirspec_g395h-f290lp_s1d.fits", wave=np.linspace(1.8, 3.0, 200),
+                        flux=np.full(200, 2.0), instrument="NIRSPEC", GRATING="G395H", FILTER="F290LP")
+    out = run_step(StitchSegments, [blue, red], tmp_path, params={"crossovers": [1.9]})
+    tab = Table.read([o for o in out if o.suffix == ".ecsv"][0])
+    assert np.nanmax(np.asarray(tab["FLUX"])) == pytest.approx(2.0)          # no flagged value spliced
+    assert not np.any((np.asarray(tab["WAVELENGTH"]) > 1.40) & (np.asarray(tab["WAVELENGTH"]) < 1.45))
+    assert tab.meta["neighbour_ratios"][0] == pytest.approx(2.0)             # ratio from good samples only

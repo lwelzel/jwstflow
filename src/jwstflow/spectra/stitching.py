@@ -6,7 +6,9 @@ module provides :class:`StitchSegments`, a concrete, YAML-usable step that
 implements the generic mechanics once:
 
 * segments are read from the EXTRACT1D/COMBINE1D table of each input and
-  ordered by wavelength;
+  ordered by wavelength; samples with a non-zero DQ (DO_NOT_USE, or e.g.
+  FLUX_ESTIMATED planes next to a detector gap) are left out, as
+  :attr:`~jwstflow.spectra.Spectrum1D.good` does;
 * the spectrum switches segments at ``crossovers`` (default: the midpoint of
   each overlap, or of the gap when neighbours do not overlap);
 * around each crossover the flux ratio between neighbours is measured inside
@@ -99,7 +101,7 @@ class StitchSegments(Step):
     inputs = ("*_s1d.fits", "*_x1d.fits", "*_c1d.fits")
     outputs = ("s1dcomb",)
     batch = "all"
-    version = "4"   # 3 -> 4: ratio from a window around the crossover; uncertainty into FLUX_ERROR
+    version = "5"   # 4 -> 5: samples with DQ != 0 are not spliced (3 -> 4: ratio window, uncertainty)
 
     class Params(StepParams):
         crossovers: list[float] | None = Field(None, description="wavelengths [um] where the combination switches "
@@ -141,6 +143,8 @@ class StitchSegments(Step):
             arrays = {c: np.asarray(np.ma.filled(tab[c], np.nan), dtype=float)
                       for c in ("WAVELENGTH", "FLUX", "FLUX_ERROR")}
             ok = np.isfinite(arrays["FLUX"]) & np.isfinite(arrays["WAVELENGTH"])
+            if "DQ" in tab.colnames:  # flagged samples (DO_NOT_USE, FLUX_ESTIMATED, ...) are not spliced
+                ok &= np.asarray(np.ma.filled(tab["DQ"], 1)).astype(np.int64) == 0
             if not ok.any():
                 raise ValueError(f"{path.name}: no finite flux samples")
             order = np.argsort(arrays["WAVELENGTH"][ok])
