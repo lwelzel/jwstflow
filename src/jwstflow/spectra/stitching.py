@@ -113,7 +113,7 @@ class StitchSegments(Step):
     inputs = ("*_s1d.fits", "*_x1d.fits", "*_c1d.fits", "*_s1dcomb.ecsv")
     outputs = ("s1dcomb",)
     batch = "all"
-    version = "7"   # 6 -> 7: min/max_wavelength; 5 -> 6: combine add|multiply, fixed_scales, stitched ECSV inputs (4 -> 5: DQ != 0 not spliced)
+    version = "8"   # 7 -> 8: edge_trim, crossfade, fixed-scale error in FLUX_SYS; 6 -> 7: min/max_wavelength; 5 -> 6: combine add|multiply, fixed_scales, stitched ECSV inputs (4 -> 5: DQ != 0 not spliced)
 
     class Params(StepParams):
         crossovers: list[float] | None = Field(None, description="wavelengths [um] where the combination switches "
@@ -137,6 +137,10 @@ class StitchSegments(Step):
                                              "of every segment (a noisy band end)")
         max_wavelength: float | None = Field(None, gt=0, description="samples redder than this [um] are left out "
                                              "of every segment (e.g. the end of MRS ch4-long, S/N < 2 past 27.5 um)")
+        edge_trim: int = Field(0, ge=0, description="valid samples dropped at both ends of every segment (band "
+                               "edges whose calibration falls off, e.g. the first 0.08 um of MRS 4-short)")
+        crossfade: bool = Field(False, description="blend neighbours linearly across the ratio window of each "
+                                "crossover instead of switching at it (no hard step at a join)")
         min_overlap_snr: float = Field(3.0, ge=0, description="both windowed medians must sit this many sigmas "
                                        "above zero for the ratio to count (a near-zero overlap cannot anchor a "
                                        "rescaling; its link stays at 1). 0 disables the guard")
@@ -163,7 +167,8 @@ class StitchSegments(Step):
             rescale: bool = False, reference: str | None = None, ratio_window_frac: float = 0.05,
             min_overlap_points: int = 5, min_overlap_snr: float = 3.0, combine: str = "multiply",
             fixed_scales: dict[str, list[float]] | None = None, min_wavelength: float | None = None,
-            max_wavelength: float | None = None, **params) -> list[Path]:
+            max_wavelength: float | None = None, edge_trim: int = 0, crossfade: bool = False,
+            **params) -> list[Path]:
         from astropy.table import Table
 
         if len(inputs) < 2:
@@ -184,6 +189,8 @@ class StitchSegments(Step):
             if not ok.any():
                 raise ValueError(f"{path.name}: no finite flux samples")
             order = np.argsort(arrays["WAVELENGTH"][ok])
+            if edge_trim and len(order) > 2 * edge_trim + 2:
+                order = order[edge_trim: len(order) - edge_trim]
             segments.append({"path": path, "label": self.segment_label(path),
                              **{c: v[ok][order] for c, v in arrays.items()}})
         segments.sort(key=lambda s: float(s["WAVELENGTH"].min()))
@@ -210,29 +217,59 @@ class StitchSegments(Step):
                                 else ([1.0] * len(segments), [0.0] * len(segments)))
         shifts, shift_errors = (chain_offsets(labels, offsets, reference) if rescale and combine == "add"
                                 else ([0.0] * len(segments), [0.0] * len(segments)))
+        # a fixed scale is a systematic of the whole segment (e.g. an epoch factor): its uncertainty is kept
+        # apart in FLUX_SYS (and the metadata), not folded into every sample's FLUX_ERROR
+        fixed_rel = [0.0] * len(segments)
         for label, value in (fixed_scales or {}).items():
             if label not in labels:
                 raise ValueError(f"fixed_scales: segment {label!r} is not among {labels}")
             factor, ferr = float(value[0]), float(value[1]) if len(value) > 1 else 0.0
             i = labels.index(label)
-            rel = np.hypot(scale_errors[i] / scales[i] if scales[i] else 0.0, ferr / factor if factor else 0.0)
             scales[i] = scales[i] * factor
-            scale_errors[i] = abs(scales[i]) * float(rel)
+            scale_errors[i] = scale_errors[i] * abs(factor)
+            fixed_rel[i] = abs(ferr / factor) if factor else 0.0
 
-        edges = [-np.inf, *bounds, np.inf]
+        # every segment scaled: the measured chain's uncertainty adds in quadrature to each sample's error
+        # (statistical); a fixed scale's uncertainty is carried in FLUX_SYS
+        done = []
+        for seg, scale, scale_err, shift, shift_err, frel in zip(segments, scales, scale_errors, shifts,
+                                                                 shift_errors, fixed_rel):
+            flux = seg["FLUX"] * scale + shift
+            done.append({"WAVELENGTH": seg["WAVELENGTH"], "FLUX": flux,
+                         "FLUX_ERROR": np.hypot(np.hypot(seg["FLUX_ERROR"] * scale, seg["FLUX"] * scale_err), shift_err),
+                         "FLUX_SYS": np.abs(flux) * frel})
+        # where each segment hands over: at the crossover, or -- cross-fading -- across the ratio window,
+        # the bluer segment's samples blended with the redder one's (linear weight over the window)
+        windows = []
+        for b, r in zip(bounds, ratios):
+            w = r.window if (crossfade and r.window is not None) else None
+            windows.append((float(w[0]), float(w[1])) if w is not None and w[1] > w[0] else (b, b))
+        cols = ("WAVELENGTH", "FLUX", "FLUX_ERROR", "FLUX_SYS")
         pieces = []
-        for seg, scale, scale_err, shift, shift_err, lo, hi in zip(segments, scales, scale_errors, shifts,
-                                                                   shift_errors, edges[:-1], edges[1:]):
-            keep = (seg["WAVELENGTH"] > lo) & (seg["WAVELENGTH"] <= hi)
-            # the scale (offset) uncertainty is part of the stitched error budget: it adds in
-            # quadrature to the measurement error of every rescaled sample
-            error = np.hypot(np.hypot(seg["FLUX_ERROR"][keep] * scale, seg["FLUX"][keep] * scale_err), shift_err)
-            pieces.append({"WAVELENGTH": seg["WAVELENGTH"][keep], "FLUX": seg["FLUX"][keep] * scale + shift,
-                           "FLUX_ERROR": error,
-                           "SEGMENT": np.full(int(keep.sum()), seg["label"], dtype=object)})
-        combined = Table({c: np.concatenate([p[c] for p in pieces]) for c in ("WAVELENGTH", "FLUX", "FLUX_ERROR", "SEGMENT")})
+        for i, (seg, d) in enumerate(zip(segments, done)):
+            lo = -np.inf if i == 0 else windows[i - 1][1]
+            hi = np.inf if i == len(segments) - 1 else windows[i][1]
+            keep = (d["WAVELENGTH"] > lo) & (d["WAVELENGTH"] <= hi)
+            piece = {c: d[c][keep].copy() for c in cols}
+            if i < len(segments) - 1 and windows[i][1] > windows[i][0]:
+                wlo, whi = windows[i]
+                nxt = done[i + 1]
+                inside = (piece["WAVELENGTH"] >= wlo) & (piece["WAVELENGTH"] <= whi)
+                if inside.any():
+                    wv = piece["WAVELENGTH"][inside]
+                    t = (wv - wlo) / (whi - wlo)
+                    fb = np.interp(wv, nxt["WAVELENGTH"], nxt["FLUX"])
+                    eb = np.interp(wv, nxt["WAVELENGTH"], nxt["FLUX_ERROR"])
+                    sb = np.interp(wv, nxt["WAVELENGTH"], nxt["FLUX_SYS"])
+                    piece["FLUX"][inside] = (1 - t) * piece["FLUX"][inside] + t * fb
+                    piece["FLUX_ERROR"][inside] = np.hypot((1 - t) * piece["FLUX_ERROR"][inside], t * eb)
+                    piece["FLUX_SYS"][inside] = (1 - t) * piece["FLUX_SYS"][inside] + t * sb
+            piece["SEGMENT"] = np.full(len(piece["WAVELENGTH"]), seg["label"], dtype=object)
+            pieces.append(piece)
+        combined = Table({c: np.concatenate([p[c] for p in pieces]) for c in (*cols, "SEGMENT")})
         combined["SEGMENT"] = combined["SEGMENT"].astype(str)
         combined["WAVELENGTH"].unit, combined["FLUX"].unit, combined["FLUX_ERROR"].unit = "um", "Jy", "Jy"
+        combined["FLUX_SYS"].unit = "Jy"
         combined.meta.update({
             "segments": labels, "crossovers_um": [float(b) for b in bounds],
             "neighbour_ratios": [None if not np.isfinite(r.ratio) else float(r.ratio) for r in ratios],
@@ -249,6 +286,9 @@ class StitchSegments(Step):
             "offsets_applied": [float(x) for x in shifts],
             "offset_errors": [float(e) for e in shift_errors],
             "fixed_scales": {k: [float(x) for x in v] for k, v in (fixed_scales or {}).items()},
+            "fixed_scale_rel_errors": [float(x) for x in fixed_rel],
+            "edge_trim": int(edge_trim), "crossfade": bool(crossfade),
+            "crossfade_windows_um": [[float(a), float(b)] for a, b in windows] if crossfade else [],
             "inputs": [s["path"].name for s in segments],
         })
         log.info("stitched %s at %s (ratios %s, scales %s)", labels, [f"{b:.3f}" for b in bounds],

@@ -405,8 +405,10 @@ def test_fixed_scales_apply_a_measured_factor_with_its_error(tmp_path: Path):
     w, f, e = (np.asarray(tab[c]) for c in ("WAVELENGTH", "FLUX", "FLUX_ERROR"))
     assert np.allclose(f[w < 1.9], 0.5) and np.allclose(f[w > 1.9], 2.0)
     assert tab.meta["scales_applied"][0] == pytest.approx(0.5)
-    assert tab.meta["scale_errors"][0] == pytest.approx(0.05)
-    assert np.all(e[w < 1.9] >= 0.5 * 0.1 - 1e-9)                    # 10 % factor error folded in
+    assert tab.meta["fixed_scale_rel_errors"][0] == pytest.approx(0.1)
+    # the factor's 10 % is a systematic of the segment: in FLUX_SYS, not in each sample's FLUX_ERROR
+    assert np.allclose(np.asarray(tab["FLUX_SYS"])[w < 1.9], 0.05) and np.allclose(np.asarray(tab["FLUX_SYS"])[w > 1.9], 0.0)
+    assert np.all(e[w < 1.9] < 0.05)
 
 
 def test_stitched_ecsv_inputs_are_single_segments(tmp_path: Path):
@@ -436,3 +438,25 @@ def test_wavelength_limits_drop_samples(tmp_path: Path):
     tab = Table.read([o for o in out if o.suffix == ".ecsv"][0])
     w = np.asarray(tab["WAVELENGTH"])
     assert w.min() >= 1.2 and w.max() <= 2.5
+
+
+def test_crossfade_blends_across_the_ratio_window(tmp_path: Path):
+    from astropy.table import Table
+
+    out = run_step(StitchSegments, two_segments(tmp_path), tmp_path, params={"crossovers": [1.9], "crossfade": True})
+    tab = Table.read([o for o in out if o.suffix == ".ecsv"][0])
+    w, f = np.asarray(tab["WAVELENGTH"]), np.asarray(tab["FLUX"])
+    lo, hi = tab.meta["crossfade_windows_um"][0]
+    assert np.all(f[w < lo] == pytest.approx(1.0)) and np.all(f[w > hi] == pytest.approx(2.0))
+    inside = (w > lo + 0.01) & (w < hi - 0.01)
+    assert inside.any() and np.all((f[inside] > 1.0) & (f[inside] < 2.0)) and np.all(np.diff(f[inside]) >= -1e-9)
+
+
+def test_edge_trim_drops_band_edges(tmp_path: Path):
+    from astropy.table import Table
+
+    out = run_step(StitchSegments, two_segments(tmp_path), tmp_path, params={"crossovers": [1.9], "edge_trim": 5})
+    tab = Table.read([o for o in out if o.suffix == ".ecsv"][0])
+    w = np.asarray(tab["WAVELENGTH"])
+    step = 1.0 / 199
+    assert w.min() == pytest.approx(1.0 + 5 * step) and w.max() == pytest.approx(3.0 - 5 * 1.2 / 199)

@@ -99,7 +99,8 @@ class PlotStitch(Step):
                 plot = qa.Spectrum(xscale=xscale, yscale=yscale)
                 for k, (label, scale, color, w, f, unit) in enumerate(segments):
                     plot.line(w, qa.to_mjy(f * scale, unit)[0], color=color, alpha=0.7, context=True,
-                              label=(f"{len(segments)} segments, rescaled" if k == len(segments) // 2 else None) if many
+                              label=(f"{len(segments)} segments" + (", rescaled" if any(abs(sc - 1.0) > 1e-9 for _, sc, *_ in segments) else "")
+                                     if k == len(segments) // 2 else None) if many
                               else label + (f" {qa.times(scale)}" if scale != 1.0 else ""))
                 plot.line(s["wave"], s["flux"], label="stitched")
                 plot.crossovers(s["crossovers"])
