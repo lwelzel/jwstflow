@@ -113,7 +113,7 @@ class StitchSegments(Step):
     inputs = ("*_s1d.fits", "*_x1d.fits", "*_c1d.fits", "*_s1dcomb.ecsv")
     outputs = ("s1dcomb",)
     batch = "all"
-    version = "11"  # 10 -> 11: range_systematics; 9 -> 10: FLUX_SYS / SEGMENT of stitched inputs carried, scale_notes, target-named cross-program products; 8 -> 9: edge_trim keeps every overlap measurable; 7 -> 8: edge_trim, crossfade, fixed-scale error in FLUX_SYS; 6 -> 7: min/max_wavelength; 5 -> 6: combine add|multiply, fixed_scales, stitched ECSV inputs (4 -> 5: DQ != 0 not spliced)
+    version = "12"  # 11 -> 12: inherited_scales of stitched inputs; 10 -> 11: range_systematics; 9 -> 10: FLUX_SYS / SEGMENT of stitched inputs carried, scale_notes, target-named cross-program products; 8 -> 9: edge_trim keeps every overlap measurable; 7 -> 8: edge_trim, crossfade, fixed-scale error in FLUX_SYS; 6 -> 7: min/max_wavelength; 5 -> 6: combine add|multiply, fixed_scales, stitched ECSV inputs (4 -> 5: DQ != 0 not spliced)
 
     class Params(StepParams):
         crossovers: list[float] | None = Field(None, description="wavelengths [um] where the combination switches "
@@ -151,6 +151,19 @@ class StitchSegments(Step):
         min_overlap_snr: float = Field(3.0, ge=0, description="both windowed medians must sit this many sigmas "
                                        "above zero for the ratio to count (a near-zero overlap cannot anchor a "
                                        "rescaling; its link stays at 1). 0 disables the guard")
+
+    @staticmethod
+    def _inherited_scales(tab: Any) -> dict[str, dict[str, Any]]:
+        """inner segment -> {factor, error, note} of the fixed scales a stitched input applied (and inherited)."""
+        meta = tab.meta
+        out: dict[str, dict[str, Any]] = {}
+        for inner in (meta.get("inherited_scales") or {}).values():
+            out.update(inner)
+        notes = meta.get("scale_notes") or {}
+        for label, value in (meta.get("fixed_scales") or {}).items():
+            out[str(label)] = {"factor": float(value[0]), "error": float(value[1]) if len(value) > 1 else 0.0,
+                               "note": str(notes.get(label, ""))}
+        return out
 
     @staticmethod
     def segment_instrument(path: Path, tab: Any = None) -> str:
@@ -224,6 +237,7 @@ class StitchSegments(Step):
             order = np.argsort(arrays["WAVELENGTH"][ok])
             segments.append({"path": path, "label": self.segment_label(path),
                              "instrument": self.segment_instrument(path, tab),
+                             "inherited": self._inherited_scales(tab) if path.suffix == ".ecsv" else {},
                              **{c: v[ok][order] for c, v in arrays.items()}})
         segments.sort(key=lambda s: float(s["WAVELENGTH"].min()))
         if edge_trim:
@@ -342,6 +356,8 @@ class StitchSegments(Step):
             "fixed_scale_rel_errors": [float(x) for x in fixed_rel],
             "scale_notes": {str(k): str(v) for k, v in (scale_notes or {}).items()},
             "range_systematics": [[float(x) for x in r] for r in (range_systematics or [])],
+            # what a stitched input had applied itself (its fixed scales and their notes), by segment
+            "inherited_scales": {s["label"]: s["inherited"] for s in segments if s["inherited"]},
             "instrument": self._instrument(segments),
             "edge_trim": int(edge_trim), "crossfade": bool(crossfade),
             "crossfade_windows_um": [[float(a), float(b)] for a, b in windows] if crossfade else [],

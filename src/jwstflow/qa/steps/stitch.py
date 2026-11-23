@@ -31,6 +31,7 @@ def _read_stitch(path: Path) -> dict[str, Any]:
         "labels": [str(s) for s in meta.get("segments", names)],
         "scales": [float(s) for s in meta.get("scales_applied", [1.0] * len(names))],
         "notes": {str(k): str(v) for k, v in (meta.get("scale_notes") or {}).items()},
+        "inherited": {str(k): v for k, v in (meta.get("inherited_scales") or {}).items()},
         "crossovers": [float(b) for b in meta.get("crossovers_um", [])],
         "segment_of": np.asarray(tab["SEGMENT"], dtype=str) if "SEGMENT" in tab.colnames
         else np.full(len(tab), "", dtype=object),
@@ -103,7 +104,9 @@ class PlotStitch(Step):
                               label=(f"{len(segments)} segments" + (", rescaled" if any(abs(sc - 1.0) > 1e-9 for _, sc, *_ in segments) else "")
                                      if k == len(segments) // 2 else None) if many
                               else label + (f" {qa.times(scale)}" if scale != 1.0 else "")
-                              + (f" ({s['notes'][label]})" if label in s["notes"] else ""))
+                              + (f" ({s['notes'][label]})" if label in s["notes"] else "")
+                              + "".join(f" (incl. {inner} {qa.times(v['factor'])} +- {v['error']:g})"
+                                        for inner, v in s["inherited"].get(label, {}).items()))
                 plot.line(s["wave"], s["flux"], label="stitched")
                 plot.crossovers(s["crossovers"])
                 out.append(plot.finish(ctx.output_dir / f"{inp.stem}{suffix}.png", ylabel=s["ylabel"], notes=[inp.name],
@@ -200,7 +203,10 @@ class PlotStitchOverlaps(Step):
                               None if windows[i] is None else (float(windows[i][0]), float(windows[i][1])),
                               None if ratios[i] is None else float(ratios[i]),
                               None if ratio_errors[i] is None else float(ratio_errors[i]),
-                              xscale=xscale, yscale=yscale)
+                              xscale=xscale, yscale=yscale,
+                              applied=[f"{lab} x {float(v[0]):g} +- {float(v[1]) if len(v) > 1 else 0:g} (fixed)"
+                                       for lab, v in (meta.get("fixed_scales") or {}).items()
+                                       if lab in (labels[i], labels[i + 1])])
                 if i % ncols == 0:
                     ax.set_ylabel(qa.FLUX_LABEL)
                 if i // ncols == nrows - 1 or i + ncols >= n_pairs:
@@ -217,7 +223,7 @@ def overlap_panel(ax: Any, i: int, labels: list[str], colors: list[Any],
                   segments: list[tuple[np.ndarray, np.ndarray, np.ndarray] | None],
                   crossover: float, window: tuple[float, float] | None,
                   ratio: float | None, ratio_error: float | None, *,
-                  xscale: str = "linear", yscale: str = "linear") -> None:
+                  xscale: str = "linear", yscale: str = "linear", applied: list[str] | None = None) -> None:
     """One neighbour pair (segments ``i`` and ``i + 1``) around its overlap: both segments as
     measured -- ``(wavelength, flux, error)`` in mJy, None for a missing one -- with their error
     bands, the crossover, the ratio window, the bluer segment times the measured factor, and a
@@ -254,7 +260,8 @@ def overlap_panel(ax: Any, i: int, labels: list[str], colors: list[Any],
     measured = (rf"$\times$ {qa.pm(ratio, ratio_error)}" if ratio is not None and ratio_error is not None
                 else "ratio not measured" if ratio is None else qa.times(ratio))
     missing = [labels[i + k] for k, seg in ((0, seg_a), (1, seg_b)) if seg is None]
-    qa.panel_note(ax, f"{labels[i]} | {labels[i + 1]}: {measured}"
+    qa.panel_note(ax, f"{labels[i]} | {labels[i + 1]}: {'measured ' if applied else ''}{measured}"
+                     + "".join(f"\napplied: {a}" for a in (applied or []))
                      + (f"\nsegment file missing: {', '.join(missing)}" if missing else ""))
     ax.set_xlim(*view)
     if xscale != "linear":

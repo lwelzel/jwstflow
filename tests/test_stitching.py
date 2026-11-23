@@ -502,6 +502,8 @@ def test_stitched_inputs_keep_their_systematic_and_segments(tmp_path: Path):
     kept = np.asarray(tab2["SEGMENT"]) == "g235h-f170lp"
     assert kept.any() and np.allclose(tab2["FLUX_SYS"][kept], 0.1 * tab2["FLUX"][kept])
     assert {"g235h-f170lp", "g395h-f290lp", "1-short"} <= set(np.asarray(tab2["SEGMENT"]))
+    assert tab2.meta["inherited_scales"] == {"nirspec": {"g235h-f170lp": {"factor": 1.5, "error": 0.15,
+                                                                          "note": "geometry x epoch"}}}
 
 
 def test_range_systematics_add_to_flux_sys(tmp_path: Path):
