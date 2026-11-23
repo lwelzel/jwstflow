@@ -295,3 +295,19 @@ def test_stub_declarations_are_valid():
     for cls in DEFAULT_STUBS.values():
         _, problems = check_step(cls)
         assert problems == [], f"{cls.__name__}: {problems}"
+
+
+def test_mock_run_never_leaves_its_sandbox(tmp_path):
+    """A recipe with an explicit root (e.g. ../../data/<target>/<run>) must still run inside the sandbox."""
+    from jwstflow.config.loader import load_config
+    from jwstflow.testing.mock.workflow import offline_overrides
+
+    real = tmp_path / "real_products"
+    recipe = tmp_path / "project" / "recipe.yaml"
+    recipe.parent.mkdir()
+    (recipe.parent / ".jwstflow-root").write_text("")
+    recipe.write_text(f"version: 1\ntarget: Some Disk\nrun: nirspec_ifu\nroot: {real}\nstages: []\n")
+    work = tmp_path / "sandbox"
+    cfg = load_config(recipe, overrides=offline_overrides(work))
+    assert cfg.root is None
+    assert Path(cfg.run_dir).resolve().is_relative_to(work.resolve())
