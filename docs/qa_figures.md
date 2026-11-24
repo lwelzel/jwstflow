@@ -111,8 +111,11 @@ before a figure is committed.
       peaks that no catalogue line or gas band explains (a band explains
       the peaks inside it only where the spectrum shows its forest) are labelled in grey
       with a question mark and their wavelength in um, `? [4.954]`
-      (`qa.detect_lines`; a peak is a catalogue line within one sample or
-      50 km/s of it).
+      (`detect_lines`; a peak is a catalogue line within one sample or
+      50 km/s of it). The search and these decisions live in the spectra
+      toolkit, `jwstflow.spectra.lines` (`detect_lines`, `identify_lines`;
+      `search_features` for data steps), and are re-exported by `qa`
+      (`qa.detect_lines`, `qa.IDENTIFY_VELOCITY`, `qa.FOREST_MIN_PEAKS`, ...).
     * **Series** (the H I series, the branches of the H₂ bands) are
       labelled line by line too. Only where consecutive members lie closer
       than a label is wide, and no other labelled line stands between them,
@@ -278,7 +281,7 @@ marker or line style.
 | `qa.lines` | `step`, `band`, `error_band`, `refline`, `span`, `set_wave_scale`, `set_flux_scale` |
 | `qa.frames` | `SkyFrame`, `imshow`, `sky_axes`, `colorbar`, `collapse`, `robust_limits`, `stretch_norm`, `contour_mask`, `marker`, `tag`, `panel_note` |
 | `qa.annotation` | `annotate_features` (records what to mark) |
-| `qa.labels`, `qa.placement`, `qa.layout` | the parts of the annotation: label text and species colors and the line search; geometry along one axis; `FeatureLayout`, which places everything when the figure is saved, one method per phase |
+| `qa.labels`, `qa.placement`, `qa.layout` | the parts of the annotation: label text and species colors (the line search it labels is `jwstflow.spectra.lines`, re-exported here); geometry along one axis; `FeatureLayout`, which places everything when the figure is saved, one method per phase |
 | `qa.plots` | **`Spectrum`** and **`Frame`** |
 | `qa.io` | `find_file`, `read_spectrum`, `read_background`, `read_cube`, `ancestor`, `short_labels` |
 | `qa.steps` | the steps shipped with jwstflow: `spectra`, `stitch`, `images`, `cubes`, `cube_stitch`, `psf`, `clusters`, `gaps`, `mast_compare`, `summary` |

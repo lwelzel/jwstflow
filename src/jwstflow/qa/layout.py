@@ -14,9 +14,15 @@ from typing import Any
 
 import numpy as np
 
-from .labels import (
-    UNIDENTIFIED_IN_BAND,
+from ..spectra.lines import (
+    FOREST_MIN_PEAKS,
+    FOREST_WINDOW,
     UNIDENTIFIED_SIGMA,
+    detect_lines,
+    identify_lines,
+    merge_peaks,
+)
+from .labels import (
     _band_group,
     _band_text,
     _line_label,
@@ -25,7 +31,6 @@ from .labels import (
     _photosphere_label,
     _series,
     _unidentified_label,
-    detect_lines,
     species_color,
     tex_label,
 )
@@ -51,13 +56,8 @@ FEATURE_MIN_AXES_HEIGHT = 2.9
 #: A series of lines (an H I series, a branch of an H2 band) with at least this many members
 #: in view is drawn as a comb above the plot in the comb layout (``series="combs"``).
 COMB_MIN = 4
-#: A broad gas band (a forest the catalogue names as a band, not line by line) is seen in the
-#: spectrum when at least this many emission peaks that are no catalogue line stand within this
-#: many samples of one another inside it. Measured on edge-on disks: a forest of CO, OH or water
-#: lines puts 5 to 20 there, noise and stray peaks at most 4. Only a band that is seen explains
-#: the peaks inside it, and where only the detected features are marked only such bands are drawn.
-FOREST_MIN_PEAKS = 5
-FOREST_WINDOW = 300
+# FOREST_MIN_PEAKS / FOREST_WINDOW (when a broad gas band's forest is seen) live with the search
+# for lines in jwstflow.spectra.lines and are exported from here as well.
 #: The rows of solid-state bands at the foot of the plot, top to bottom.
 BAND_ROW_ORDER = ("H2O ice", "CO2 ice", "CO ice", "other ices", "silicates", "PAH bands")
 #: Artists of the annotation that are lines carry this gid, so that they never count as data.
@@ -200,7 +200,9 @@ class FeatureLayout:
         peaks no catalogue line is within :data:`FOREST_WINDOW` samples). Only such a band explains
         the peaks inside it, in either figure, and inside it a catalogue line counts as found only
         where its peak stands above the forest around it. Solid-state bands are kept: no peak
-        search can tell them."""
+        search can tell them. The decisions are those of
+        :func:`~jwstflow.spectra.lines.identify_lines`, on every line and band recorded; this
+        phase picks the curves to search and applies them to what is in view."""
         record = self.record
         detected_only = bool(record.get("detected_only", False))
         self.data = _data_lines(self.ax)
@@ -208,52 +210,25 @@ class FeatureLayout:
             self.curves = [tuple(np.asarray(v, dtype=float) for v in record["under"])]
         else:
             self.curves = [(d[0], d[1]) for d in ([d for d in self.data if d[2]] or self.data)]
-        found = [f for f in (detect_lines(cx, cy) for cx, cy in self.curves) if f is not None]
+        peaks = merge_peaks([detect_lines(cx, cy) for cx, cy in self.curves])
         self.unidentified: list[float] = []
-        if not found:
+        if peaks is None:
             if detected_only:      # nothing could be searched, so nothing is known to be there
                 log.info("the spectrum is too short to search for lines: none labelled")
                 self.lines, self.bands = [], [e for e in self.bands if not self._gas_band(e)]
             return
-        peaks = {key: np.concatenate([f[key] for f in found]) for key in found[0]}
-
-        def hits(e: dict[str, Any], key: str) -> np.ndarray:
-            """The peaks (dips) that are line ``e``: those within their tolerance of it. A Q-branch
-            too is found at its wavelength only -- its catalogue window is a band's width and would
-            take the peaks of any forest around it."""
-            return np.abs(peaks[f"x_{key}"] - e["x"]) <= peaks[f"tol_{key}"]
-
+        # every line and band recorded takes part (a line beside the view still explains its peak,
+        # a band reaching into the view is seen by its whole forest); the marks are those in view
+        lines, bands = record["lines"], record["bands"]
+        found = identify_lines(peaks, [e["x"] for e in lines], absorption=[e["cls"] == "photosphere" for e in lines],
+                               band_lo=[e["lo"] for e in bands], band_hi=[e["hi"] for e in bands],
+                               gas_band=[self._gas_band(e) for e in bands])
+        strength = {id(e): float(s) for e, s in zip(lines, found.strength)}
         for e in self.lines:
-            key = "ab" if e["cls"] == "photosphere" else "em"
-            mine = hits(e, key)
-            e["strength"] = float(peaks[f"s_{key}"][mine].max()) if mine.any() else 0.0
-        unknown = np.ones(peaks["x_em"].size, dtype=bool)
-        for e in record["lines"]:
-            if e["cls"] != "photosphere":
-                unknown &= ~hits(e, "em")
-        loose, step = peaks["x_em"][unknown], peaks["step_em"][unknown]
-
-        def forest(e: dict[str, Any]) -> bool:
-            """Whether the spectrum shows the forest of gas band ``e``."""
-            inside = (loose >= e["lo"]) & (loose <= e["hi"])
-            x, reach = loose[inside], FOREST_WINDOW * step[inside]
-            return any(int(np.sum((x >= a) & (x <= a + r))) >= FOREST_MIN_PEAKS for a, r in zip(x, reach))
-
-        seen_bands = [e for e in record["bands"] if self._gas_band(e) and forest(e)]
-        covered = [(e["lo"], e["hi"]) for e in seen_bands]
-        # inside a forest a catalogue line is found only where it stands above the forest around
-        # it: a forest peak that happens to fall on a catalogue line is no detection of that line
-        loose_s = peaks["s_em"][unknown]
-        for e in self.lines:
-            if e["cls"] != "photosphere" and e["strength"] > 0 and any(a <= e["x"] <= b for a, b in covered):
-                near = np.abs(loose - e["x"]) <= 0.5 * FOREST_WINDOW * step
-                if near.any() and e["strength"] <= float(loose_s[near].max()):
-                    e["strength"] = 0.0
-        for xp, sp, alone in zip(peaks["x_em"], peaks["s_em"], unknown):
-            # inside a broad gas band its forest explains ordinary peaks; one that towers over it is flagged too
-            need = UNIDENTIFIED_SIGMA * (UNIDENTIFIED_IN_BAND if any(a <= xp <= b for a, b in covered) else 1.0)
-            if alone and sp >= need and self.x_lo <= xp <= self.x_hi:
-                self.unidentified.append(float(xp))
+            e["strength"] = strength[id(e)]
+        seen_bands = [e for e, seen in zip(bands, found.forest_seen) if seen]
+        self.unidentified = [float(xp) for xp, flag in zip(peaks["x_em"], found.unidentified)
+                             if flag and self.x_lo <= xp <= self.x_hi]
         seen = sum(e["strength"] > 0 for e in self.lines)
         log.info("%d of %d catalogue lines in view stand out of the spectrum; %d strong peak(s) unidentified",
                  seen, len(self.lines), len(self.unidentified))

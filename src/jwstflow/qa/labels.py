@@ -1,13 +1,23 @@
 """The text and color of feature labels: species colors, typeset formulae, the
-series a line belongs to, and the search for lines in a spectrum.
+series a line belongs to.
+
+The search for lines in a spectrum (:func:`detect_lines` and its constants) lives in
+:mod:`jwstflow.spectra.lines`; its names are importable from here as well.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-import numpy as np
-
+from ..spectra.lines import (
+    DETECT_SIGMA,
+    EDGE_SAMPLES,
+    GAP_STEP,
+    IDENTIFY_VELOCITY,
+    UNIDENTIFIED_IN_BAND,
+    UNIDENTIFIED_SIGMA,
+    detect_lines,
+)
 from .style import UM
 
 #: One color per group of gas species, sampled from the standard colormap (cmasher *torch*,
@@ -72,81 +82,8 @@ def _band_group(entry: dict[str, Any]) -> tuple[str, str]:
     return "gas bands (outline; color: species)", species_color(species)
 
 
-#: A feature counts as detected at this many times the local scatter (emission, absorption),
-#: and an emission peak this strong without a catalogue line next to it is marked "?".
-DETECT_SIGMA = (5.0, 4.0)
-UNIDENTIFIED_SIGMA = 12.0
-#: ... and inside a broad gas band (a forest of lines the band already names) this many times stronger.
-UNIDENTIFIED_IN_BAND = 3.0
-#: A peak is a catalogue line when it lies within one sample of it or this velocity [km/s],
-#: whichever is larger: the half sample by which the highest sample misses the line centre, plus
-#: the wavelength calibration and the velocity of the source. Measured on NIRSpec and MIRI
-#: spectra of edge-on disks, every line seen lies inside it; further out, the matches are those a
-#: catalogue shifted by a percent finds as well -- chance coincidences with other peaks.
-IDENTIFY_VELOCITY = 50.0
 #: The wavelength of an unidentified peak is printed with this many decimals [um].
 UNIDENTIFIED_DECIMALS = 3
-#: A step between samples this many times wider than the steps beside it is a gap in the spectrum;
-#: the first and last this many samples of every stretch between gaps are not searched for lines.
-GAP_STEP = 4.0
-EDGE_SAMPLES = 3
-
-
-def detect_lines(x: Any, y: Any, *, window: int = 50) -> dict[str, np.ndarray] | None:
-    """Emission peaks and absorption dips of a spectrum, for deciding which lines to label.
-
-    The spectrum is compared with its running median over ``2 * window + 1``
-    samples; the local scatter is the running median of the absolute
-    residual (x 1.4826). An emission peak is a local maximum at least
-    ``DETECT_SIGMA[0]`` scatters above the median whose neighbour stands
-    out too (one sample alone is a spike, not a line); an absorption dip
-    the same downwards with ``DETECT_SIGMA[1]``. The :data:`EDGE_SAMPLES`
-    samples at either end of the spectrum and of every stretch between gaps
-    are left out (an edge rises or falls, it is no line). Returns the positions
-    ``x_em`` / ``x_ab``, their significances ``s_em`` / ``s_ab``, the
-    sample step there ``step_em`` / ``step_ab`` and the
-    tolerances ``tol_em`` / ``tol_ab`` within which a peak is the line of a
-    catalogue (one sample or :data:`IDENTIFY_VELOCITY`, whichever is
-    larger; the sample is the step to the nearer neighbour, so a gap in the
-    spectrum never widens it); None for a spectrum too short to search.
-    """
-    from numpy.lib.stride_tricks import sliding_window_view
-
-    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
-    ok = np.isfinite(x) & np.isfinite(y)
-    x, y = x[ok], y[ok]
-    order = np.argsort(x, kind="stable")
-    x, y = x[order], y[order]
-    if x.size < 4 * window:
-        return None
-
-    def running(values: np.ndarray) -> np.ndarray:
-        return np.median(sliding_window_view(np.pad(values, window, mode="reflect"), 2 * window + 1), axis=1)
-
-    residual = y - running(y)
-    scatter = 1.4826 * running(np.abs(residual))
-    positive = scatter[scatter > 0]
-    if not positive.size:
-        return None
-    significance = residual / np.maximum(scatter, 0.05 * float(np.median(positive)))
-    step = np.abs(np.diff(x))
-    sample = np.minimum(np.append(step[:1], step), np.append(step, step[-1:]))     # never across a gap
-    tolerance = np.maximum(sample, IDENTIFY_VELOCITY / 299792.458 * np.abs(x))
-    # a gap is a step far wider than the steps on either side of it (a change of sampling is not);
-    # the samples next to a gap or an end of the spectrum are no lines: they rise and fall with the edge
-    around = np.maximum(np.append(step[1:], step[-1]), np.append(step[0], step[:-1]))
-    starts = np.concatenate([[0], np.nonzero(step > GAP_STEP * around)[0] + 1, [x.size]])
-    index = np.arange(x.size)
-    run = np.searchsorted(starts, index, side="right") - 1
-    inner = np.minimum(index - starts[run], starts[run + 1] - 1 - index) >= EDGE_SAMPLES
-    core, left, right = significance[1:-1], significance[:-2], significance[2:]
-    out: dict[str, np.ndarray] = {}
-    for key, sign, level in (("em", 1.0, DETECT_SIGMA[0]), ("ab", -1.0, DETECT_SIGMA[1])):
-        hit = (sign * core >= level) & (sign * core >= sign * left) & (sign * core >= sign * right) \
-            & (np.maximum(sign * left, sign * right) >= 0.4 * level) & inner[1:-1]
-        out[f"x_{key}"], out[f"s_{key}"], out[f"tol_{key}"] = x[1:-1][hit], sign * core[hit], tolerance[1:-1][hit]
-        out[f"step_{key}"] = sample[1:-1][hit]
-    return out
 
 
 def _series(label: str) -> tuple[str, str] | None:

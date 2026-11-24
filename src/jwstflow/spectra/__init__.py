@@ -3,6 +3,9 @@
 * :mod:`.x1d` -- the jwst ``x1d`` table layout: :class:`Spectrum1D`, :func:`read_x1d`,
   :func:`write_x1d` and the columns and keywords that travel through 1-D processing;
 * :mod:`.features` -- the line and band datasets shipped with jwstflow (``features:`` in YAML);
+* :mod:`.lines` -- the search for lines in a spectrum and which catalogue lines it shows
+  (:func:`~.lines.search_features`: the lines found, the gas bands whose forest is seen, the
+  strong peaks no line explains -- the decisions the QA figures label);
 * :mod:`.stitching` -- the stitching contract: the ``stitch_segments`` step that splices
   overlapping segments, and that step packages subclass.
 
