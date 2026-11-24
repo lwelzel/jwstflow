@@ -218,3 +218,64 @@ def _median_error_from_flux_errors(errors: np.ndarray) -> float | None:
     if not len(usable):
         return None
     return 1.2533 * float(np.sqrt(np.mean(usable**2) / len(errors)))
+
+
+def measure_overlap_offset(a: dict[str, Any], b: dict[str, Any], *, crossover: float,
+                           ratio_window_frac: float = 0.05, min_overlap_points: int = 5) -> OverlapRatio:
+    """Flux difference ``b - a`` around the crossover, with its uncertainty (an :class:`OverlapRatio`
+    whose ``ratio`` field holds the difference).
+
+    The additive twin of :func:`measure_overlap_ratio`, for segments whose mismatch is an additive
+    error -- a residual background level over an extended aperture, which a multiplicative factor
+    would carry into the depth of every feature of the segment. Same window, same medians and
+    uncertainties; no significance guard (a difference near zero is a fine measurement).
+    """
+    r = measure_overlap_ratio(a, b, crossover=crossover, ratio_window_frac=ratio_window_frac,
+                              min_overlap_points=min_overlap_points, min_overlap_snr=0.0)
+    if r.window is None or r.n < min_overlap_points:
+        return OverlapRatio.unmeasurable(r.window, r.n)
+    lo, hi = r.window
+    ina = (a["WAVELENGTH"] >= lo) & (a["WAVELENGTH"] <= hi)
+    wave = a["WAVELENGTH"][ina]
+    fa, ea = a["FLUX"][ina], a["FLUX_ERROR"][ina]
+    fb = np.interp(wave, b["WAVELENGTH"], b["FLUX"])
+    eb = np.interp(wave, b["WAVELENGTH"], b["FLUX_ERROR"])
+    ok = np.isfinite(fa) & np.isfinite(fb)
+    med_a, scatter_a = _median_and_error(fa[ok])
+    med_b, scatter_b = _median_and_error(fb[ok])
+    prop_a, prop_b = _median_error_from_flux_errors(ea[ok]), _median_error_from_flux_errors(eb[ok])
+    err_a = prop_a if prop_a is not None else scatter_a
+    err_b = prop_b if prop_b is not None else scatter_b
+    return OverlapRatio(float(med_b - med_a), float(np.hypot(err_a, err_b)), r.window, int(ok.sum()))
+
+
+def chain_offsets(labels: list[str], offsets: list[OverlapRatio], reference: str | None) -> tuple[list[float], list[float]]:
+    """Chain the neighbour differences so the reference segment keeps offset 0 (error 0).
+
+    The additive twin of :func:`chain_scales`: each segment gets the offset that brings it onto the
+    level of its neighbour on the reference side; the uncertainties of the differences crossed on the
+    way add in quadrature. Unmeasurable links stay at offset 0. Returns offsets and their 1-sigma
+    uncertainties (flux units), one per segment.
+    """
+    if reference in (None, "longest"):
+        ref = len(labels) - 1
+    elif reference == "shortest":
+        ref = 0
+    elif reference in labels:
+        ref = labels.index(reference)
+    else:
+        raise ValueError(f"reference segment {reference!r} is not among {labels} (nor 'shortest'/'longest')")
+    out, var = [0.0] * len(labels), [0.0] * len(labels)
+
+    def link(r: OverlapRatio) -> tuple[float, float]:
+        if not np.isfinite(r.ratio):
+            return 0.0, 0.0
+        return r.ratio, (r.error ** 2 if np.isfinite(r.error) else 0.0)
+
+    for i in range(ref - 1, -1, -1):        # bluewards: a + (b - a) sits on b
+        d, v = link(offsets[i])
+        out[i], var[i] = out[i + 1] + d, var[i + 1] + v
+    for i in range(ref, len(labels) - 1):   # redwards: b - (b - a) sits on a
+        d, v = link(offsets[i])
+        out[i + 1], var[i + 1] = out[i] - d, var[i] + v
+    return out, [float(np.sqrt(v)) for v in var]

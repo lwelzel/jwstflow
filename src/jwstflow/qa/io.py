@@ -85,14 +85,60 @@ def column_unit(hdu: Any, column: str) -> str | None:
 
 
 def spectrum_name(hdu: Any, index: int) -> str:
-    """What to call one of several spectra in a file: its slit, its source, else its position."""
-    return str(hdu.header.get("SLTNAME") or hdu.header.get("SRCNAME") or f"ext {index + 1}")
+    """What to call one of several spectra in a file: its aperture, its slit, its source, else its position."""
+    return str(hdu.header.get("APERNAME") or hdu.header.get("SLTNAME") or hdu.header.get("SRCNAME")
+               or f"ext {index + 1}").strip()
+
+
+def select_spectra(tables: list[Any], aperture: str | None = "disk") -> list[Any]:
+    """The spectrum tables a spectrum figure draws.
+
+    A file whose tables are named apertures of one extraction (``APERNAME``:
+    the target aperture, tighter contours, outflows, objects) gives the one
+    called ``aperture`` -- or, without such a name, its first table, the
+    extraction's target. A file of unnamed tables (several slits or sources,
+    NIRSpec MOS) gives all of them, as does ``aperture=None``.
+    """
+    tables = list(tables)
+    if aperture is None or len(tables) < 2 or not any(h.header.get("APERNAME") for h in tables):
+        return tables
+    match = [h for h in tables if str(h.header.get("APERNAME", "")).strip() == aperture]
+    return match[:1] or tables[:1]
+
+
+def read_target_spectrum(path: Path, aperture: str | None = "disk") -> tuple[np.ndarray, np.ndarray, np.ndarray,
+                                                                             str | None]:
+    """:func:`read_spectrum` of the target aperture of a file of named apertures (:func:`select_spectra`);
+    a stitched spectrum (``*.ecsv``) as it is."""
+    from astropy.io import fits
+
+    if Path(path).suffix == ".ecsv":
+        return read_spectrum(path)
+    with fits.open(path) as hdul:
+        tables = select_spectra([h for h in hdul if h.name in SPECTRUM_EXTENSIONS], aperture)
+        if not tables:
+            raise ValueError(f"{path}: no EXTRACT1D/COMBINE1D extension")
+        tab = tables[0].data
+        wave = np.asarray(tab["WAVELENGTH"], dtype=float)
+        error = np.asarray(tab["FLUX_ERROR"], dtype=float) if "FLUX_ERROR" in tab.names \
+            else np.full(len(wave), np.nan)
+        return wave, np.asarray(tab["FLUX"], dtype=float), error, column_unit(tables[0], "FLUX")
 
 
 def read_spectrum(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, str | None]:
     """(wavelength, flux, flux error, flux unit) of the first EXTRACT1D/COMBINE1D table of a
-    1-D product (the error all-NaN when the table carries no FLUX_ERROR column)."""
+    1-D product (the error all-NaN when the table carries no FLUX_ERROR column) -- or of a
+    stitched spectrum (``*.ecsv``, a segment of a later stitch)."""
     from astropy.io import fits
+
+    if Path(path).suffix == ".ecsv":
+        from astropy.table import Table
+
+        tab = Table.read(path, format="ascii.ecsv")
+        wave = np.asarray(tab["WAVELENGTH"], dtype=float)
+        error = np.asarray(tab["FLUX_ERROR"], dtype=float) if "FLUX_ERROR" in tab.colnames \
+            else np.full(len(wave), np.nan)
+        return wave, np.asarray(tab["FLUX"], dtype=float), error, str(tab["FLUX"].unit or "Jy")
 
     with fits.open(path) as hdul:
         for name in SPECTRUM_EXTENSIONS:
@@ -166,6 +212,8 @@ __all__ = [
     "read_cube",
     "read_spectrum",
     "short_labels",
+    "read_target_spectrum",
+    "select_spectra",
     "spectrum_name",
     "stage_of",
 ]

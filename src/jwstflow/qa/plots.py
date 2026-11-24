@@ -163,9 +163,9 @@ class Frame:
         contour_mask(self.ax, mask, color, ls=ls or ("solid" if self._overlays == 0 else "dashed"), label=label)
         self._overlays += 1
 
-    def mark(self, x: float, y: float, *, label: str | None = None) -> None:
-        """A position marker (pixel coordinates)."""
-        marker(self.ax, x, y, label=label)
+    def mark(self, x: float, y: float, *, label: str | None = None, symbol: str = "+") -> None:
+        """A position marker (pixel coordinates); ``symbol`` tells kinds of source apart."""
+        marker(self.ax, x, y, label=label, symbol=symbol)
 
     def note(self) -> str:
         """Where the offsets of this frame are measured from (empty without a sky frame)."""

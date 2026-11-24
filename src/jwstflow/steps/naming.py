@@ -37,6 +37,7 @@ CUSTOM_SUFFIXES: set[str] = {
     "clustermask",  # bad spaxel clusters found in a per-dither cube (jwstflow.cubes.clusters)
     "gapcov",    # coverage next to the NIRSpec detector gap, per group of exposures (jwstflow.cubes.gaps)
     "s3dcomb",   # joint cube: the band cubes of one instrument joined along wavelength (jwstflow.cubes.stitching)
+    "nbrfit",    # a bright neighbour's PSF fitted to and subtracted from a cube: the record (jwstflow.cubes.psf)
 }
 
 _SUFFIX_RE = re.compile(r"^(?P<base>.+)_(?P<suffix>[a-z0-9]+(?:-[a-z0-9]+)?)$")

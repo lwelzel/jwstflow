@@ -353,3 +353,168 @@ def test_plot_stitch_background_tolerates_missing_records(tmp_path: Path, caplog
     pngs = run_step(PlotStitchBackground, [o for o in outputs if o.suffix == ".ecsv"], tmp_path,
                     ctx=ctx, params={"segments_stage": "segments"})
     assert len(pngs) == 1 and pngs[0].name.endswith("_bkgcomp.png")
+
+
+def test_flagged_samples_are_not_spliced(tmp_path: Path):
+    """Samples with DQ != 0 (e.g. FLUX_ESTIMATED planes at a detector gap) stay out of the product and the ratio."""
+    from astropy.table import Table
+
+    from jwstflow.spectra import Spectrum1D, write_x1d
+
+    w = np.linspace(1.0, 2.0, 200)
+    f = np.full(200, 1.0)
+    dq = np.zeros(200, dtype=np.uint32)
+    bad = ((w > 1.40) & (w < 1.45)) | ((w > 1.88) & (w < 1.92))   # one block inside, one in the ratio window
+    f[bad], dq[bad] = 100.0, 2**28
+    blue = write_x1d(tmp_path / "jw001_nirspec_g235h-f170lp_s1d.fits", Spectrum1D(w, f, np.full(200, 0.05), dq),
+                     header={"INSTRUME": "NIRSPEC", "GRATING": "G235H", "FILTER": "F170LP"})
+    red = synthetic_x1d(tmp_path / "jw001_nirspec_g395h-f290lp_s1d.fits", wave=np.linspace(1.8, 3.0, 200),
+                        flux=np.full(200, 2.0), instrument="NIRSPEC", GRATING="G395H", FILTER="F290LP")
+    out = run_step(StitchSegments, [blue, red], tmp_path, params={"crossovers": [1.9]})
+    tab = Table.read([o for o in out if o.suffix == ".ecsv"][0])
+    assert np.nanmax(np.asarray(tab["FLUX"])) == pytest.approx(2.0)          # no flagged value spliced
+    assert not np.any((np.asarray(tab["WAVELENGTH"]) > 1.40) & (np.asarray(tab["WAVELENGTH"]) < 1.45))
+    assert tab.meta["neighbour_ratios"][0] == pytest.approx(2.0)             # ratio from good samples only
+
+
+def test_additive_combine_chains_offsets_onto_the_reference(tmp_path: Path):
+    """combine: add brings each segment onto its neighbour's level by an offset, not a factor."""
+    from astropy.table import Table
+
+    w1, w2 = np.linspace(1.0, 2.0, 200), np.linspace(1.8, 3.0, 200)
+    blue = synthetic_x1d(tmp_path / "jw001_nirspec_g235h-f170lp_s1d.fits", wave=w1, flux=1.0 + 0.5 * w1,
+                         instrument="NIRSPEC", GRATING="G235H", FILTER="F170LP")
+    red = synthetic_x1d(tmp_path / "jw001_nirspec_g395h-f290lp_s1d.fits", wave=w2, flux=1.0 + 0.5 * w2 + 0.3,
+                        instrument="NIRSPEC", GRATING="G395H", FILTER="F290LP")
+    out = run_step(StitchSegments, [blue, red], tmp_path,
+                   params={"rescale": True, "combine": "add", "crossovers": [1.9], "reference": "g235h-f170lp"})
+    tab = Table.read([o for o in out if o.suffix == ".ecsv"][0])
+    assert tab.meta["neighbour_offsets"][0] == pytest.approx(0.3, abs=0.01)
+    assert tab.meta["offsets_applied"] == [0.0, pytest.approx(-0.3, abs=0.01)]
+    assert tab.meta["scales_applied"] == [1.0, 1.0]
+    w, f = np.asarray(tab["WAVELENGTH"]), np.asarray(tab["FLUX"])
+    assert np.allclose(f, 1.0 + 0.5 * w, atol=0.01)                     # the slope is kept, only the level moves
+
+
+def test_fixed_scales_apply_a_measured_factor_with_its_error(tmp_path: Path):
+    from astropy.table import Table
+
+    out = run_step(StitchSegments, two_segments(tmp_path), tmp_path,
+                   params={"crossovers": [1.9], "fixed_scales": {"g235h-f170lp": [0.5, 0.05]}})
+    tab = Table.read([o for o in out if o.suffix == ".ecsv"][0])
+    w, f, e = (np.asarray(tab[c]) for c in ("WAVELENGTH", "FLUX", "FLUX_ERROR"))
+    assert np.allclose(f[w < 1.9], 0.5) and np.allclose(f[w > 1.9], 2.0)
+    assert tab.meta["scales_applied"][0] == pytest.approx(0.5)
+    assert tab.meta["fixed_scale_rel_errors"][0] == pytest.approx(0.1)
+    # the factor's 10 % is a systematic of the segment: in FLUX_SYS, not in each sample's FLUX_ERROR
+    assert np.allclose(np.asarray(tab["FLUX_SYS"])[w < 1.9], 0.05) and np.allclose(np.asarray(tab["FLUX_SYS"])[w > 1.9], 0.0)
+    assert np.all(e[w < 1.9] < 0.05)
+
+
+def test_stitched_ecsv_inputs_are_single_segments(tmp_path: Path):
+    """A combine joins the stitched spectra of two runs (*_s1dcomb.ecsv) as two segments."""
+    from astropy.table import Table
+
+    for name, lo, hi, flux in (("jw001-o006_t001_nirspec_s1dcomb.ecsv", 1.7, 5.3, 1.0),
+                               ("jw001-o010_t002_miri_target_disk_s1dcomb.ecsv", 4.9, 28.0, 2.0)):
+        w = np.linspace(lo, hi, 300)
+        t = Table({"WAVELENGTH": w, "FLUX": np.full(300, flux), "FLUX_ERROR": np.full(300, 0.01),
+                   "SEGMENT": np.full(300, "x")})
+        (tmp_path / "in").mkdir(exist_ok=True)
+        t.write(tmp_path / "in" / name, format="ascii.ecsv", overwrite=True)
+    files = sorted((tmp_path / "in").glob("*.ecsv"))
+    out = run_step(StitchSegments, files, tmp_path / "out", params={"crossovers": [5.1], "rescale": True,
+                                                                    "reference": "miri"})
+    tab = Table.read([o for o in out if o.suffix == ".ecsv"][0])
+    assert tab.meta["segments"] == ["nirspec", "miri"]
+    assert tab.meta["scales_applied"] == [pytest.approx(2.0), 1.0]
+
+
+def test_wavelength_limits_drop_samples(tmp_path: Path):
+    from astropy.table import Table
+
+    out = run_step(StitchSegments, two_segments(tmp_path), tmp_path,
+                   params={"crossovers": [1.9], "min_wavelength": 1.2, "max_wavelength": 2.5})
+    tab = Table.read([o for o in out if o.suffix == ".ecsv"][0])
+    w = np.asarray(tab["WAVELENGTH"])
+    assert w.min() >= 1.2 and w.max() <= 2.5
+
+
+def test_crossfade_blends_across_the_ratio_window(tmp_path: Path):
+    from astropy.table import Table
+
+    out = run_step(StitchSegments, two_segments(tmp_path), tmp_path, params={"crossovers": [1.9], "crossfade": True})
+    tab = Table.read([o for o in out if o.suffix == ".ecsv"][0])
+    w, f = np.asarray(tab["WAVELENGTH"]), np.asarray(tab["FLUX"])
+    lo, hi = tab.meta["crossfade_windows_um"][0]
+    assert np.all(f[w < lo] == pytest.approx(1.0)) and np.all(f[w > hi] == pytest.approx(2.0))
+    inside = (w > lo + 0.01) & (w < hi - 0.01)
+    assert inside.any() and np.all((f[inside] > 1.0) & (f[inside] < 2.0)) and np.all(np.diff(f[inside]) >= -1e-9)
+
+
+def test_edge_trim_drops_band_edges(tmp_path: Path):
+    from astropy.table import Table
+
+    out = run_step(StitchSegments, two_segments(tmp_path), tmp_path, params={"crossovers": [1.9], "edge_trim": 5})
+    tab = Table.read([o for o in out if o.suffix == ".ecsv"][0])
+    w = np.asarray(tab["WAVELENGTH"])
+    step = 1.0 / 199
+    assert w.min() == pytest.approx(1.0 + 5 * step) and w.max() == pytest.approx(3.0 - 5 * 1.2 / 199)
+
+
+def test_edge_trim_keeps_a_narrow_overlap(tmp_path: Path):
+    """A trim larger than a narrow overlap allows leaves min_overlap_points samples on each side."""
+    from astropy.table import Table
+
+    blue = synthetic_x1d(tmp_path / "jw001_nirspec_g235h-f170lp_s1d.fits", wave=np.linspace(1.0, 2.0, 200),
+                         flux=np.full(200, 1.0), instrument="NIRSPEC", GRATING="G235H", FILTER="F170LP")
+    red = synthetic_x1d(tmp_path / "jw001_nirspec_g395h-f290lp_s1d.fits", wave=np.linspace(1.94, 3.0, 200),
+                        flux=np.full(200, 2.0), instrument="NIRSPEC", GRATING="G395H", FILTER="F290LP")
+    out = run_step(StitchSegments, [blue, red], tmp_path, params={"edge_trim": 20})
+    tab = Table.read([o for o in out if o.suffix == ".ecsv"][0])
+    assert tab.meta["neighbour_ratios"][0] == pytest.approx(2.0)          # still measured
+    w = np.asarray(tab["WAVELENGTH"])
+    assert np.max(np.diff(w)) < 0.02                                       # no hole at the join
+
+
+def test_stitched_inputs_keep_their_systematic_and_segments(tmp_path: Path):
+    """A fixed scale's FLUX_SYS and the SEGMENT names of a stitched input survive the next stitch;
+    a combination across programs is named after the target and instrument(s)."""
+    from astropy.table import Table
+
+    blue, red = two_segments(tmp_path)
+    (tmp_path / "one").mkdir()
+    out = run_step(StitchSegments, [blue, red], tmp_path / "one", params=dict(
+        crossovers=[1.9], rescale=False, fixed_scales={"g235h-f170lp": [1.5, 0.15]},
+        scale_notes={"g235h-f170lp": "geometry x epoch"}))
+    out = [o for o in out if o.suffix == ".ecsv"]
+    tab = Table.read(out[0], format="ascii.ecsv")
+    assert tab.meta["scale_notes"] == {"g235h-f170lp": "geometry x epoch"} and tab.meta["instrument"] == "nirspec"
+    blue_part = np.asarray(tab["SEGMENT"]) == "g235h-f170lp"
+    assert np.allclose(tab["FLUX_SYS"][blue_part], 0.1 * tab["FLUX"][blue_part])
+    other = synthetic_x1d(tmp_path / "jw002_miri_ch1-short_s1d.fits", wave=np.linspace(2.8, 4.0, 200),
+                          flux=np.full(200, 2.0), instrument="MIRI", CHANNEL="1", BAND="SHORT")
+    (tmp_path / "two").mkdir()
+    out2 = [o for o in run_step(StitchSegments, [out[0], other], tmp_path / "two",
+                                params=dict(crossovers=[2.9], rescale=False)) if o.suffix == ".ecsv"]
+    assert out2[0].name == "test-target_jwst_s1dcomb.ecsv"
+    tab2 = Table.read(out2[0], format="ascii.ecsv")
+    kept = np.asarray(tab2["SEGMENT"]) == "g235h-f170lp"
+    assert kept.any() and np.allclose(tab2["FLUX_SYS"][kept], 0.1 * tab2["FLUX"][kept])
+    assert {"g235h-f170lp", "g395h-f290lp", "1-short"} <= set(np.asarray(tab2["SEGMENT"]))
+    assert tab2.meta["inherited_scales"] == {"nirspec": {"g235h-f170lp": {"factor": 1.5, "error": 0.15,
+                                                                          "note": "geometry x epoch"}}}
+
+
+def test_range_systematics_add_to_flux_sys(tmp_path: Path):
+    from astropy.table import Table
+
+    out = [o for o in run_step(StitchSegments, two_segments(tmp_path), tmp_path, params=dict(
+        crossovers=[1.9], rescale=False, fixed_scales={"g395h-f290lp": [1.0, 0.03]},
+        range_systematics=[[2.5, 3.5, 0.04]], notes=["normalisation 4-7 % not included"])) if o.suffix == ".ecsv"]
+    tab = Table.read(out[0], format="ascii.ecsv")
+    w, f, sy = (np.asarray(tab[c], float) for c in ("WAVELENGTH", "FLUX", "FLUX_SYS"))
+    red = w >= 2.5
+    assert np.allclose(sy[red], 0.05 * f[red]) and np.allclose(sy[(w > 1.95) & (w < 2.5)], 0.03 * f[(w > 1.95) & (w < 2.5)])
+    assert tab.meta["range_systematics"] == [[2.5, 3.5, 0.04]]
+    assert tab.meta["notes"] == ["normalisation 4-7 % not included"]

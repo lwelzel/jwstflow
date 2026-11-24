@@ -405,7 +405,9 @@ Guidelines that follow from the rules:
 
 | step | kind | inputs | figure |
 |---|---|---|---|
-| `plot_spectrum` | spectrum | `*_x1d` / `*_c1d` / `*_s1d(comb)` | every EXTRACT1D/COMBINE1D spectrum in mJy with its 1σ band; with 2+ spectra also a combined log-log overview (`<stage>_all.png`); optional feature annotation, and with it a second figure labelling only the lines the spectrum shows (`*_detected.png`) |
+| `plot_spectrum` | spectrum | `*_x1d` / `*_c1d` / `*_s1d(comb)` | the spectrum in mJy with its 1σ band -- of a file of named apertures (`APERNAME`) the target `aperture` (default `disk`), of unnamed spectra (slits, sources) all of them; with 2+ spectra also a combined log-log overview (`<stage>_all.png`); features annotated by default, and a second figure labelling only the lines the spectrum shows (`*_detected.png`) |
+| `plot_spectrum_apertures` | spectrum | `*_x1d` / `*_s1d(comb)` | every aperture of a file side by side, labelled by `APERNAME`, the target in black (`*_apertures.png`); no annotation by default |
+| `plot_archival` | spectrum | `*_x1d` / `*_s1d` / stitched `*.ecsv` | archival photometry and spectra (`<target>/archival/*.ecsv`, `docs/archival_data.md`) over the spectrum: over its range (`*_archival.png`) and the whole SED (`*_archival_sed.png`); one marker and color per source, upper limits hollow with an arrow |
 | `plot_snr` | spectrum | `*_x1d` / `*_c1d` / `*_s1d(comb)` | signal-to-noise ratio per sample against wavelength (`*_snr.png`), median S/N in the legend, features annotated by default |
 | `plot_spectrum_stages` | spectrum | the spectra of the last 1-D processing stage | the same spectrum at each named earlier stage, and the ratio of every stage to the one before it (`*_stages.png`): what defringing, cleaning, ... did |
 | `plot_stitch` | spectrum | `*_s1dcomb.ecsv` | stitched spectrum (black) over its rescaled segments; with features also only the lines the spectrum shows (`*_detected.png`) and the series as combs (`*_series.png`); when the stitch rescaled anything, the segments as extracted (`*_unscaled.png`); with 2+ stitched spectra a combined overview |
@@ -415,6 +417,7 @@ Guidelines that follow from the rules:
 | `qa_cube_summary` | frames + spectra | `*_s3d.fits`, `*_s3dcomb.fits` | median image, coverage and signal-to-noise maps; under them, over the full width, the field-integrated flux and the filled fraction of the footprint against wavelength (`*_summary.png`) |
 | `qa_cube_slices` | frames | `*_s3d.fits`, `*_s3dcomb.fits` | channel maps: the cube in `n_slices` wavelength bins on one display scale (`*_slices.png`) |
 | `qa_psf_cube` | frames + lines | `*_psfcube.fits` | PSF slices across wavelength, FWHM against the diffraction limit, in-field energy |
+| `qa_psf_neighbour` | frames + lines | `*_nbrfit.fits` | data / neighbour model / residual per block of planes, the neighbour's flux, the control ring against wavelength, the radial profile about the neighbour before and after |
 | `mast_compare` | spectrum | `*_s3d` / `*_x1d` | jwstflow vs. MAST spectra and their ratio |
 | `qa_spaxel_clusters` | thumbnails | `*_clustermask.fits` | per band and region: one row per dither cube, one column per wavelength plane (`*_<region>_clusters.png`) |
 | `qa_gap_coverage` | frames | `*_gapcov.fits` | the coverage next to the NIRSpec detector gap on the sky: where all exposures stop before and after it, and how long the partially covered stretch beyond is (nm), per group of exposures |

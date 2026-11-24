@@ -388,7 +388,8 @@ The two columns never import each other:
 **Where a step is defined.**
 
 * A data step lives with the feature it implements: `stitch_segments` in
-  `jwstflow.spectra.stitching`, `psf_cube` in `jwstflow.cubes.psf.steps`, the
+  `jwstflow.spectra.stitching`, `psf_cube` and `subtract_psf_neighbour` in
+  `jwstflow.cubes.psf.steps`, the
   cluster steps in `jwstflow.cubes.clusters.steps`, `flag_gap_outliers` in
   `jwstflow.cubes.gaps.steps`, `stitch_cubes` in
   `jwstflow.cubes.stitching.steps` and `cube_build_matched` -- a subclass of
@@ -440,7 +441,8 @@ in the archive. Custom steps derive names with `jwstflow.steps.naming.derived_na
 and may not use a suffix the pipeline reserves (`_x1d`, `_s3d`, `_cal`, …);
 jwstflow's own product types are `_s1d` (extracted spectra), `_s1dcomb`
 (stitched spectra), `_s3dcomb` (joint cubes), `_bkgspec` (background
-spectra), `_lsr`, `_psfcube` (PSF cubes), `_clustermask` (bad spaxel
+spectra), `_lsr`, `_psfcube` (PSF cubes), `_nbrfit` (a neighbour's PSF
+fitted to and subtracted from a cube), `_clustermask` (bad spaxel
 clusters of a per-dither cube) and `_gapcov` (coverage at the NIRSpec
 detector gap). Edited copies of an official product (a DQ-flagged `_cal`) keep the
 official name and record the edit in the header.

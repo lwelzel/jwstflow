@@ -499,11 +499,12 @@ def contour_proxy(ax: Any, color: str, *, ls: str = "solid", label: str | None =
     return handle
 
 
-def marker(ax: Any, x: float, y: float, *, label: str | None = None) -> Any:
-    """A position marker on an image (a source, the target): a white plus with a dark outline."""
+def marker(ax: Any, x: float, y: float, *, label: str | None = None, symbol: str = "+") -> Any:
+    """A position marker on an image (a source, the target): a white ``symbol`` (a plus by default;
+    ``x`` for a second kind of source) with a dark outline."""
     import matplotlib.patheffects as pe
 
-    return ax.plot([x], [y], "+", color="white", ms=9, mew=1.2, ls="none", label=label,
+    return ax.plot([x], [y], symbol, color="white", ms=9 if symbol == "+" else 7, mew=1.2, ls="none", label=label,
                    path_effects=[pe.withStroke(linewidth=2.6, foreground="black")])[0]
 
 

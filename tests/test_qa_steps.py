@@ -37,11 +37,53 @@ def test_spectrum_steps_draw_annotated_spectrum_like_figures(tmp_path):
     assert detected.name == "t_s1d_detected.png"                     # with features: only the lines found, too
     (alone,) = run_step(PlotSpectrum, [spectrum], tmp_path, stage="plot_spectrum_one",
                         params={"features": "all", "detected": False})
-    (bare,) = run_step(PlotSpectrum, [spectrum], tmp_path, stage="plot_spectrum_bare")    # no features, one figure
+    (bare,) = run_step(PlotSpectrum, [spectrum], tmp_path, stage="plot_spectrum_bare",   # no features, one figure
+                       params={"features": None})
+    default = run_step(PlotSpectrum, [spectrum], tmp_path, stage="plot_spectrum_default")  # annotated by default
+    assert [p.name for p in default] == ["t_s1d.png", "t_s1d_detected.png"]
     assert alone.name == bare.name == "t_s1d.png"
     (snr,) = run_step(PlotSnr, [spectrum], tmp_path, stage="plot_snr")                  # features annotated by default
     (plain,) = run_step(PlotSnr, [spectrum], tmp_path, stage="plot_snr_plain", params={"features": None})
     assert snr.name == "t_s1d_snr.png" and snr.stat().st_size > plain.stat().st_size
+
+
+def _apertures(path):
+    """An extraction with named apertures: the disk, a tighter contour and a faint outflow."""
+    from astropy.io import fits
+
+    _x1d(path)
+    with fits.open(path) as hdul:
+        disk = hdul["EXTRACT1D"].copy()
+        disk.header["APERNAME"] = "disk"
+        tight, outflow = disk.copy(), disk.copy()
+        tight.header["APERNAME"] = "disk_eta0.5"
+        outflow.header["APERNAME"] = "outflow1"
+        outflow.data["FLUX"] = outflow.data["FLUX"] * 1e-3
+        fits.HDUList([hdul[0].copy(), outflow, disk, tight]).writeto(path, overwrite=True)
+    return path
+
+
+def test_spectrum_figure_draws_the_target_aperture_and_the_apertures_figure_all(tmp_path):
+    from astropy.io import fits
+
+    from jwstflow import qa
+    from jwstflow.qa.steps import PlotSpectrumApertures
+
+    path = _apertures(tmp_path / "e_s1d.fits")
+    with fits.open(path) as hdul:
+        tables = [h for h in hdul if h.name == "EXTRACT1D"]
+        assert [h.header["APERNAME"] for h in qa.select_spectra(tables)] == ["disk"]        # by name, not position
+        assert [h.header["APERNAME"] for h in qa.select_spectra(tables, "nothere")] == ["outflow1"]   # else the first
+        assert len(qa.select_spectra(tables, None)) == 3
+        unnamed = [h.copy() for h in tables]
+        for h in unnamed:
+            del h.header["APERNAME"]
+        assert len(qa.select_spectra(unnamed)) == 3                                          # slits / sources: all
+        assert qa.spectrum_name(tables[1], 1) == "disk"
+    figures = run_step(PlotSpectrum, [path], tmp_path, stage="plot_spectrum", params={"features": None})
+    assert [p.name for p in figures] == ["e_s1d.png"]
+    (apertures,) = run_step(PlotSpectrumApertures, [path], tmp_path, stage="plot_spectrum_apertures")
+    assert apertures.name == "e_s1d_apertures.png" and apertures.stat().st_size > 20_000
 
 
 def test_stage_comparison_finds_the_ancestor_by_name(tmp_path):

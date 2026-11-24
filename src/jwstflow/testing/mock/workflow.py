@@ -15,11 +15,13 @@ def offline_overrides(work: Path, *, backend: str = "serial", extra: Iterable[st
     The CRDS context is pinned to a fixed name (never contacted -- the stubs
     replace every CRDS-using stage), prefetch and the workflow graph are off,
     the run tree goes to ``<work>/reductions``, and tasks run serially so the
-    in-process stub registry applies.
+    in-process stub registry applies. A recipe's own ``root`` is cleared: it would
+    take precedence over the workspace and point the mock run at real products.
     """
     work = Path(work)
     return [
         f"workspace={work / 'reductions'}",
+        "root=",
         f"crds.path={work / 'crds_cache'}",
         "crds.context=jwst_1364.pmap",
         "crds.prefetch=false",
@@ -52,6 +54,10 @@ def run_mock_workflow(
     from ...engine.runner import Runner
 
     cfg = load_config(config_path, overrides=offline_overrides(Path(work), extra=overrides))
+    run_dir = Path(cfg.run_dir).resolve()
+    if not run_dir.is_relative_to(Path(work).resolve()):
+        raise RuntimeError(f"mock run of {config_path} would write to {run_dir}, outside its sandbox {work}; "
+                           "refusing (a root/workspace override reached past offline_overrides)")
     with stub_pipelines(stubs):
         summary = Runner(cfg, skip_download=True, only=only, start=start, until=until, force=force).run()
     return cfg, summary
