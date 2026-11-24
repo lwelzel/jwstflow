@@ -259,8 +259,28 @@ def _as_list(value: Any) -> list[Any]:
     return list(value) if isinstance(value, (list, tuple)) else [value]
 
 
+def _env_in_path(value: Any) -> Any:
+    """``${env:VAR}`` / ``${env:VAR,default}`` in a path field resolved before the path is anchored
+    (``root``, ``workspace`` and ``download.dest`` are fixed before the rest is interpolated)."""
+    if not isinstance(value, str) or "${env:" not in value:
+        return value
+
+    def one(m: re.Match[str]) -> str:
+        ref = m.group(1)
+        if not ref.startswith("env:"):
+            raise ConfigError(f"only ${{env:...}} can be used in a path that is fixed before interpolation: ${{{ref}}}")
+        name, comma, default = ref[4:].partition(",")
+        if name in os.environ:
+            return os.environ[name]
+        if comma:
+            return default
+        raise ConfigError(f"environment variable {name!r} is not set (used as ${{{ref}}})")
+
+    return _INTERP.sub(one, value)
+
+
 def _absolute(value: Any, base_dir: Path | None) -> str:
-    path = Path(str(value)).expanduser()
+    path = Path(str(_env_in_path(value))).expanduser()
     if base_dir is not None and not path.is_absolute():
         path = base_dir / path
     return str(path.resolve())
