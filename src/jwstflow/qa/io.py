@@ -106,6 +106,25 @@ def select_spectra(tables: list[Any], aperture: str | None = "disk") -> list[Any
     return match[:1] or tables[:1]
 
 
+def read_target_spectrum(path: Path, aperture: str | None = "disk") -> tuple[np.ndarray, np.ndarray, np.ndarray,
+                                                                             str | None]:
+    """:func:`read_spectrum` of the target aperture of a file of named apertures (:func:`select_spectra`);
+    a stitched spectrum (``*.ecsv``) as it is."""
+    from astropy.io import fits
+
+    if Path(path).suffix == ".ecsv":
+        return read_spectrum(path)
+    with fits.open(path) as hdul:
+        tables = select_spectra([h for h in hdul if h.name in SPECTRUM_EXTENSIONS], aperture)
+        if not tables:
+            raise ValueError(f"{path}: no EXTRACT1D/COMBINE1D extension")
+        tab = tables[0].data
+        wave = np.asarray(tab["WAVELENGTH"], dtype=float)
+        error = np.asarray(tab["FLUX_ERROR"], dtype=float) if "FLUX_ERROR" in tab.names \
+            else np.full(len(wave), np.nan)
+        return wave, np.asarray(tab["FLUX"], dtype=float), error, column_unit(tables[0], "FLUX")
+
+
 def read_spectrum(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, str | None]:
     """(wavelength, flux, flux error, flux unit) of the first EXTRACT1D/COMBINE1D table of a
     1-D product (the error all-NaN when the table carries no FLUX_ERROR column) -- or of a
@@ -193,6 +212,7 @@ __all__ = [
     "read_cube",
     "read_spectrum",
     "short_labels",
+    "read_target_spectrum",
     "select_spectra",
     "spectrum_name",
     "stage_of",

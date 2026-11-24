@@ -157,6 +157,8 @@ class PlotSpectrumApertures(PlotSpectrum):
     ``xscale`` / ``yscale: linear``.
     """
 
+    level = "qa"
+    batch = "all"
     version = "1"
     figure_suffix = "_apertures"
     overview = False

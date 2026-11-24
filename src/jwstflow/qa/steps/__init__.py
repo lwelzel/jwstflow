@@ -7,6 +7,7 @@ and :class:`jwstflow.qa.Frame`:
 
 * :mod:`.spectra` -- 1-D spectra: ``plot_spectrum``, ``plot_spectrum_apertures``, ``plot_snr``,
   ``plot_spectrum_stages``
+* :mod:`.archival` -- archival photometry and spectra over the spectra: ``plot_archival``
 * :mod:`.stitch` -- stitched spectra: ``plot_stitch``, ``plot_stitch_overlaps``, ``plot_stitch_background``
 * :mod:`.images` -- ``quicklook_image``
 * :mod:`.cubes` -- IFU cubes: ``qa_cube_summary``, ``qa_cube_slices``
@@ -25,6 +26,7 @@ from .gaps import QaGapCoverage
 from .images import QuicklookImage
 from .mast_compare import MastCompare
 from .psf import QaPsfCube
+from .archival import PlotArchival
 from .spectra import PlotSnr, PlotSpectrum, PlotSpectrumApertures, PlotSpectrumStages
 from .stitch import PlotStitch, PlotStitchBackground, PlotStitchOverlaps
 from .summary import HeaderSummary
@@ -33,6 +35,7 @@ __all__ = [
     "HeaderSummary",
     "MastCompare",
     "PlotSnr",
+    "PlotArchival",
     "PlotSpectrum",
     "PlotSpectrumApertures",
     "PlotSpectrumStages",
