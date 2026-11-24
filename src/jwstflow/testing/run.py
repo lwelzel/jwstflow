@@ -6,7 +6,7 @@ import inspect
 from pathlib import Path
 from typing import Any
 
-from ..steps import FunctionStep, RunContext, Step, check_outputs, make_step
+from ..steps import FunctionStep, RunContext, Step, check_outputs, figures_in, make_step
 
 
 def make_context(tmp_path: Path, *, stage: str = "test_step", target: str = "Test Target",
@@ -27,7 +27,7 @@ def run_step(step: str | type | Step | Any, inputs: list[Path] | Path, tmp_path:
              params: dict[str, Any] | None = None, ctx: RunContext | None = None, **ctx_kwargs: Any) -> list[Path]:
     """Run ``step`` (spec string, class, instance or function) on ``inputs`` like a worker would:
     parameters validated against ``Params``, outputs checked (exist, in the output directory,
-    non-reserved suffix). Returns the outputs."""
+    non-reserved suffix, figures from QA steps only). Returns the outputs."""
     obj = make_step(step) if isinstance(step, str) else step
     if inspect.isclass(obj):
         obj = obj()
@@ -36,5 +36,6 @@ def run_step(step: str | type | Step | Any, inputs: list[Path] | Path, tmp_path:
     ctx = ctx or make_context(tmp_path, **ctx_kwargs)
     files = [Path(p) for p in ([inputs] if isinstance(inputs, (str, Path)) else inputs)]
     validated = obj.validate_params(dict(params or {}))
+    figures = figures_in(ctx.output_dir)
     outputs = obj.run(files, ctx, **validated)
-    return check_outputs(outputs, ctx, obj)
+    return check_outputs(outputs, ctx, obj, figures_before=figures)

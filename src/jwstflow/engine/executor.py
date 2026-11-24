@@ -67,7 +67,7 @@ def default_thread_env(n: int) -> dict[str, str]:
 
 def execute_task(payload: Payload) -> Result:
     """Run one task. Never raises; failures are reported in the result dict."""
-    from ..steps import RunContext, check_outputs, make_step
+    from ..steps import RunContext, check_outputs, figures_in, make_step
 
     init_worker(payload.get("env", {}), payload.get("sys_path"))
     t0 = time.time()
@@ -99,8 +99,10 @@ def execute_task(payload: Payload) -> Result:
                 reference_dir=Path(payload["reference_dir"]) if payload.get("reference_dir") else None,
             )
             ctx.output_dir.mkdir(parents=True, exist_ok=True)
+            # figures already there: check_outputs fails a data step that adds one without returning it
+            figures = None if getattr(step, "level", 4) == "qa" else figures_in(ctx.output_dir)
             outputs = step.run([Path(p) for p in payload["inputs"]], ctx, **payload["parameters"])
-            outputs = check_outputs(outputs, ctx, step)
+            outputs = check_outputs(outputs, ctx, step, figures_before=figures)
             result["outputs"] = sorted({str(Path(o)) for o in outputs})
             result["status"] = "success"
             logger.info("done: %d output(s)", len(result["outputs"]))

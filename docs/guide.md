@@ -505,8 +505,8 @@ portable text artifact.
 ## QA figures
 
 All figures of a reduction come from QA steps (`level = "qa"`), never from
-data steps, so each one lands in `qa/<step name>/` -- the subdirectory names
-the step that made it. They all follow one standard (no titles, mJy flux
+data steps (a data step that returns or writes a figure fails), so each one
+lands in `qa/<step name>/` -- the subdirectory names the step that made it. They all follow one standard (no titles, mJy flux
 units, mid-point step plots, height-matched colorbars, nan-aware cube
 collapses, the cmasher `torch` palette with black main lines, units in
 square brackets), set in this repo and implemented by the `jwstflow.qa` package;

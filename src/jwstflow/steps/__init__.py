@@ -34,6 +34,7 @@ the code is laid out by concern, and no step is defined in this package:
 from .adapters import STPIPE_LEVELS, JwstStepAdapter, identity_of, is_stpipe_step
 from .descriptions import BUILTIN_DESCRIPTIONS, step_description
 from .interface import (
+    FIGURE_SUFFIXES,
     LEVEL_DIRS,
     FunctionStep,
     RunContext,
@@ -42,6 +43,7 @@ from .interface import (
     StepResult,
     check_declaration,
     check_outputs,
+    figures_in,
     split_description,
 )
 from .plugins import (
@@ -71,6 +73,7 @@ __all__ = [
     "BUILTIN_ALIASES",
     "BUILTIN_DESCRIPTIONS",
     "ENTRY_POINT_GROUP",
+    "FIGURE_SUFFIXES",
     "LEVEL_DIRS",
     "STPIPE_LEVELS",
     "FunctionStep",
@@ -83,6 +86,7 @@ __all__ = [
     "check_declaration",
     "check_outputs",
     "describe_target",
+    "figures_in",
     "identity_of",
     "import_file",
     "import_object",

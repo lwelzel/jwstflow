@@ -31,6 +31,11 @@ log = logging.getLogger(__name__)
 #: Directory of each calibration level inside a run (``stage1/`` ... ``stage4/``, ``qa/``).
 LEVEL_DIRS: dict[int | str, str] = {1: "stage1", 2: "stage2", 3: "stage3", 4: "stage4", "qa": "qa"}
 
+#: Extensions of figure files. Only QA steps (``level = "qa"``) write them: a data step records what a
+#: figure needs in its product and a QA step reads the product and draws (docs/qa_figures.md, rule 3).
+FIGURE_SUFFIXES: frozenset[str] = frozenset(
+    {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".svg", ".svgz", ".pdf", ".eps", ".ps"})
+
 
 # ---------------------------------------------------------------------------
 # run context & result
@@ -129,7 +134,10 @@ class Step(ABC):
     * ``parameters:`` in the YAML match ``Params`` (unknown keys are errors);
     * every path returned by ``run`` exists, lies in ``ctx.output_dir`` and,
       for FITS files, carries a non-reserved suffix; files written but not
-      returned are reported as orphans.
+      returned are reported as orphans;
+    * figures (``.png``, ``.pdf``, ``.svg``, ... -- :data:`FIGURE_SUFFIXES`) come
+      from QA steps only: a step whose ``level`` is not ``"qa"`` that returns a
+      figure, or leaves a new one in ``ctx.output_dir``, fails.
 
     ``jwstflow check-step my_module:MyStep`` runs these checks, and
     ``jwstflow.testing.run_step`` executes a step on synthetic data in a test.
@@ -257,21 +265,55 @@ class FunctionStep(Step):
         return self.func(inputs, ctx, **params)
 
 
-def check_outputs(outputs: Iterable[Path] | None, ctx: RunContext, step: Any) -> list[Path]:
-    """Verify what a step returned: paths exist, live in the output directory and (for custom
-    steps) use no reserved jwst suffix. Raises ValueError on a violation."""
+def figures_in(directory: Path) -> dict[Path, int]:
+    """The figure files under ``directory`` (resolved) with their modification times in ns. Taken
+    before a step runs, it lets :func:`check_outputs` tell the figures the step wrote from those
+    that were there already."""
+    directory = Path(directory)
+    if not directory.is_dir():
+        return {}
+    found: dict[Path, int] = {}
+    for p in directory.rglob("*"):
+        if p.suffix.lower() in FIGURE_SUFFIXES:
+            try:
+                if p.is_file():
+                    found[p.resolve()] = p.stat().st_mtime_ns
+            except OSError:   # removed meanwhile
+                pass
+    return found
+
+
+def _figure_violation(step: Any, what: str) -> str:
+    name = getattr(getattr(step, "func", None), "__name__", None) or type(step).__name__
+    return (f"{name} is a level-{getattr(step, 'level', 4)} step and {what}; figures come from QA steps only "
+            "(level = 'qa', written to qa/<step name>/): record what the figure needs in the product and draw "
+            "it in a QA step that reads the product (docs/qa_figures.md, rule 3)")
+
+
+def check_outputs(outputs: Iterable[Path] | None, ctx: RunContext, step: Any, *,
+                  figures_before: dict[Path, int] | None = None) -> list[Path]:
+    """Verify what a step returned: paths exist, live in the output directory, (for custom
+    steps) use no reserved jwst suffix and -- unless the step is a QA step -- are no figures.
+    With ``figures_before`` (:func:`figures_in` of the output directory, taken before the step
+    ran) a figure the step wrote there without returning it fails the step too. Raises
+    ValueError on a violation."""
     from .adapters import JwstStepAdapter
     from .naming import JWST_PRODUCT_SUFFIXES, split_suffix
 
     paths = [Path(o) for o in (outputs or [])]
     out_dir = ctx.output_dir.resolve()
     declared = tuple(getattr(step, "outputs", ()) or ())
+    qa_step = getattr(step, "level", 4) == "qa"
+    # figures a data step wrote without returning them: new since the snapshot, or rewritten
+    returned = {p.resolve() for p in paths}
+    unreturned = [] if qa_step or figures_before is None else sorted(
+        f for f, mtime in figures_in(out_dir).items() if f not in returned and figures_before.get(f) != mtime)
 
     def violation(message: str) -> ValueError:
         # the task fails: take its files with it, so downstream stages never consume
         # the products of a failed task and a fixed step reruns from a clean directory
         removed = 0
-        for q in paths:
+        for q in [*paths, *unreturned]:
             if q.exists() and out_dir in q.resolve().parents:
                 q.unlink()
                 removed += 1
@@ -284,6 +326,8 @@ def check_outputs(outputs: Iterable[Path] | None, ctx: RunContext, step: Any) ->
             raise violation(f"step returned a file that does not exist: {p}")
         if out_dir not in p.resolve().parents and p.resolve() != out_dir:
             raise violation(f"step returned a file outside its output directory {out_dir}: {p}")
+        if not qa_step and p.suffix.lower() in FIGURE_SUFFIXES:
+            raise violation(_figure_violation(step, f"returned a figure ({p.name})"))
         if p.suffix.lower() == ".fits" and not isinstance(step, JwstStepAdapter):
             _, suffix = split_suffix(p.stem)
             if suffix in JWST_PRODUCT_SUFFIXES and not getattr(step, "writes_official_products", False):
@@ -295,6 +339,10 @@ def check_outputs(outputs: Iterable[Path] | None, ctx: RunContext, step: Any) ->
             official_copy = suffix in JWST_PRODUCT_SUFFIXES and getattr(step, "writes_official_products", False)
             if declared and suffix is not None and suffix not in declared and not official_copy:
                 log.warning("%s: output %s has suffix %r, not among the declared outputs %s", type(step).__name__, p.name, suffix, declared)
+    if unreturned:
+        names = ", ".join(f.name for f in unreturned[:3]) + (", ..." if len(unreturned) > 3 else "")
+        raise violation(_figure_violation(
+            step, f"wrote {len(unreturned)} figure(s) into its output directory without returning them ({names})"))
     return paths
 
 

@@ -42,6 +42,7 @@ What jwstflow enforces, and when:
 | `parameters:` match `Params` (types, ranges, no typos) | `jwstflow validate`, config load | `ConfigError` naming the stage and field |
 | inputs match the declared `inputs` patterns | planning | warning |
 | returned files exist, lie in the stage directory, use no reserved suffix | after `run` | task fails with the reason |
+| a step whose `level` is not `"qa"` returns no figure (`.png`, `.pdf`, `.svg`, ...) and leaves no new one in the stage directory | after `run` | task fails with the reason, its files removed |
 | files written but not returned | after the stage | orphan warning |
 
 The context gives a step everything it may need: `ctx.output_dir`,

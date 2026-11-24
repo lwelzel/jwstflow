@@ -42,7 +42,10 @@ before a figure is committed.
    steps. Data steps record what a figure needs *inside their products*
    (the mask contract, extra extensions, JSON keys, the mask bits of a
    table); a QA step reads the product and draws. Every QA stage writes
-   into `qa/<step name>/`, so the directory names the step.
+   into `qa/<step name>/`, so the directory names the step. jwstflow
+   enforces it: a task of any other level that returns a figure (`.png`,
+   `.pdf`, `.svg`, ... -- `jwstflow.steps.FIGURE_SUFFIXES`), or leaves a new
+   one in its output directory, fails and its files are removed.
 4. **One figure, one question.** Two quantities of different scale get two
    panels sharing the wavelength axis, never a second y axis.
 
