@@ -9,18 +9,21 @@ from typing import Any
 
 import numpy as np
 
+from ..spectra.lines import (
+    EXTENDED_DATASET,
+    FEATURE_NARROW_BAND,
+    PHOTOSPHERIC_DATASET,
+    line_wavelength,
+)
 from .layout import FEATURE_LABEL_OFFSET, FeatureLayout
 from .style import _defer
 
 log = logging.getLogger(__name__)
 
-#: Bands of the gas catalogue narrower than this fraction of their wavelength (Q-branches,
-#: bandheads) are annotated like lines; broader ones are rectangles in the band rows.
-FEATURE_NARROW_BAND = 0.02
-#: The opt-in catalogue of stellar photospheric absorption lines (:mod:`jwstflow.spectra.features`).
-PHOTOSPHERIC_DATASET = "photospheric_lines"
-#: The opt-in table of further gas lines, annotated together with ``gas_lines``.
-EXTENDED_DATASET = "gas_lines_extended"
+# FEATURE_NARROW_BAND (the narrow bands of the gas catalogue are lines), PHOTOSPHERIC_DATASET and
+# EXTENDED_DATASET come from jwstflow.spectra.lines, which sorts features into lines and bands
+# for the search for lines as well; they are exported from here too.
+
 #: The note of a figure that marks only the features its spectrum shows (``detected_only``).
 DETECTED_NOTE = "labelled: only the lines and gas bands detected in the spectrum (solid-state bands: all in range)"
 
@@ -48,7 +51,8 @@ def annotate_features(ax: Any, features: Any, *, wave_min: float, wave_max: floa
       colormap). When the selection contains gas lines, the opt-in
       ``gas_lines_extended`` table is annotated with them
       (``extended=False`` keeps to the selection). Narrow bands of the gas
-      catalogue (Q-branches) count as lines.
+      catalogue (Q-branches; :data:`FEATURE_NARROW_BAND`,
+      :func:`~jwstflow.spectra.lines.line_wavelength`) count as lines.
     * **Each label stands at its own line**: a constant factor
       (``label_offset``) above the spectrum there, so the labels follow the
       spectrum instead of forming a row. A line that towers over its
@@ -86,8 +90,8 @@ def annotate_features(ax: Any, features: Any, *, wave_min: float, wave_max: floa
       bands, and a photospheric line that has no room beside them is
       labelled above the spectrum instead.
     * The spectrum is searched for peaks that stand out of its running
-      median (:func:`detect_lines`); a peak is a catalogue line when it
-      stands within one sample or :data:`IDENTIFY_VELOCITY` of it (of the
+      median (:func:`~jwstflow.spectra.lines.detect_lines`); a peak is a catalogue line when it
+      stands within one sample or :data:`~jwstflow.spectra.lines.IDENTIFY_VELOCITY` of it (of the
       wavelength of a Q-branch). A strong peak that no catalogue line
       explains gets a grey label of a question mark and its wavelength,
       ``? [4.954]``, over it (inside a broad gas band whose forest the
@@ -95,9 +99,10 @@ def annotate_features(ax: Any, features: Any, *, wave_min: float, wave_max: floa
     * ``detected_only=True`` marks only what the spectrum shows: the lines
       found (emission peaks for gas lines, absorption dips for photospheric
       lines) and the broad gas bands whose forest it shows -- at least
-      :data:`FOREST_MIN_PEAKS` peaks that are no catalogue line within
-      :data:`FOREST_WINDOW` samples; inside such a forest a line counts
-      only where its peak stands above the forest around it. The ``?``
+      :data:`~jwstflow.spectra.lines.FOREST_MIN_PEAKS` peaks that are no catalogue line within
+      :data:`~jwstflow.spectra.lines.FOREST_WINDOW` samples; inside such a forest a line counts
+      only where its peak stands above the forest around it
+      (:func:`~jwstflow.spectra.lines.identify_lines`). The ``?``
       labels are the same as without it; the solid-state
       bands are kept (no peak search can tell them). A spectrum too short
       to search gets no line labels.
@@ -152,9 +157,8 @@ def annotate_features(ax: Any, features: Any, *, wave_min: float, wave_max: floa
     for group, cls in ((selected, None), (stellar, "photosphere")):
         for f in group:
             lo, hi = f.window(line_width_um, resolving_power)
-            narrow = f.kind != "line" and f.dataset in ("gas_lines", EXTENDED_DATASET) and (hi - lo) <= FEATURE_NARROW_BAND * centre(lo, hi)
-            if f.kind == "line" or narrow:
-                w = f.wavelength if f.wavelength is not None else centre(lo, hi)
+            w = line_wavelength(f, lo, hi, centre(lo, hi))       # lines and the narrow bands of the gas catalogue
+            if w is not None:
                 if wave_min <= w <= wave_max:
                     record["lines"].append({"x": float(w), "label": f.label, "species": f.species, "cls": cls or "line",
                                             "notes": f.notes})

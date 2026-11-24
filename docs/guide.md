@@ -337,6 +337,7 @@ jwstflow/
 
                 -- science, by the kind of data: a toolkit for step authors, plus the bundled features
   spectra/      1-D spectra: the x1d format (x1d.py), line and band datasets (features.py),
+                the search for lines in a spectrum and which catalogue lines it shows (lines.py),
                 overlap ratios and chained scales (overlaps.py), the stitching contract and
                 its step (stitching.py)
   cubes/        IFU cubes: WCS and regridding (wcs.py), the detector pixels behind a cube
@@ -414,6 +415,7 @@ from jwstflow import Step, StepParams, RunContext, qa
 from jwstflow.steps.naming import derived_name, slug
 from jwstflow.spectra import Spectrum1D, read_x1d, write_x1d
 from jwstflow.spectra.features import feature_windows
+from jwstflow.spectra.lines import search_features
 from jwstflow.spectra.stitching import StitchSegments
 from jwstflow.spectra.overlaps import measure_overlap_ratio, chain_scales
 from jwstflow.cubes import celestial_wcs, cube_wavelengths, write_mask_product, load_apcorr
