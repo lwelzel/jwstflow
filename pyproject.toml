@@ -68,6 +68,7 @@ cube_build_matched = "jwstflow.cubes.stitching.matched:CubeBuildMatched"
 fix_msa_metafile = "jwstflow.data.msa:fix_msa_metafile"
 # QA steps: jwstflow.qa.steps
 plot_spectrum = "jwstflow.qa.steps.spectra:PlotSpectrum"
+plot_spectrum_apertures = "jwstflow.qa.steps.spectra:PlotSpectrumApertures"
 plot_snr = "jwstflow.qa.steps.spectra:PlotSnr"
 plot_spectrum_stages = "jwstflow.qa.steps.spectra:PlotSpectrumStages"
 plot_stitch = "jwstflow.qa.steps.stitch:PlotStitch"

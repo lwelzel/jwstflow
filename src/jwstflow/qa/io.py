@@ -85,8 +85,25 @@ def column_unit(hdu: Any, column: str) -> str | None:
 
 
 def spectrum_name(hdu: Any, index: int) -> str:
-    """What to call one of several spectra in a file: its slit, its source, else its position."""
-    return str(hdu.header.get("SLTNAME") or hdu.header.get("SRCNAME") or f"ext {index + 1}")
+    """What to call one of several spectra in a file: its aperture, its slit, its source, else its position."""
+    return str(hdu.header.get("APERNAME") or hdu.header.get("SLTNAME") or hdu.header.get("SRCNAME")
+               or f"ext {index + 1}").strip()
+
+
+def select_spectra(tables: list[Any], aperture: str | None = "disk") -> list[Any]:
+    """The spectrum tables a spectrum figure draws.
+
+    A file whose tables are named apertures of one extraction (``APERNAME``:
+    the target aperture, tighter contours, outflows, objects) gives the one
+    called ``aperture`` -- or, without such a name, its first table, the
+    extraction's target. A file of unnamed tables (several slits or sources,
+    NIRSpec MOS) gives all of them, as does ``aperture=None``.
+    """
+    tables = list(tables)
+    if aperture is None or len(tables) < 2 or not any(h.header.get("APERNAME") for h in tables):
+        return tables
+    match = [h for h in tables if str(h.header.get("APERNAME", "")).strip() == aperture]
+    return match[:1] or tables[:1]
 
 
 def read_spectrum(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, str | None]:
@@ -176,6 +193,7 @@ __all__ = [
     "read_cube",
     "read_spectrum",
     "short_labels",
+    "select_spectra",
     "spectrum_name",
     "stage_of",
 ]

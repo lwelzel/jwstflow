@@ -20,11 +20,16 @@ log = logging.getLogger(__name__)
 class PlotSpectrum(Step):
     """Figure of every 1-D spectrum (``*_x1d.fits`` / ``*_c1d.fits``), flux in mJy.
 
-    For each input file, every EXTRACT1D/COMBINE1D table extension is read,
+    For each input file the EXTRACT1D/COMBINE1D table of the spectrum is read,
     its flux column (``column``, default FLUX) converted to mJy from whatever
     unit the table declares, and drawn as a mid-point step plot over
-    wavelength -- all extensions of one file share a figure, labelled per
-    slit/source when a file carries several spectra (e.g. NIRSpec MOS).
+    wavelength. A file of named apertures of one extraction (``APERNAME``,
+    e.g. ``extract_extended``: the disk, tighter contours, outflows) is drawn
+    as its target aperture only -- ``aperture`` (default ``disk``; the first
+    table when no aperture has that name); the apertures side by side are
+    ``plot_spectrum_apertures``. A file of unnamed spectra (several slits or
+    sources, e.g. NIRSpec MOS) draws them all in one figure, labelled per
+    slit/source.
     Inputs without such an extension are skipped with a warning. One figure
     per input file, named after it, following the jwstflow QA figure
     standard (``docs/qa_figures.md``); both axes are logarithmic unless
@@ -32,8 +37,9 @@ class PlotSpectrum(Step):
     range to waste). With two or more spectra a combined overview figure
     (``<stage>_all.png``) draws every spectrum on one log-log axis, coloured
     from the standard colormap. With ``features`` the selected spectral
-    features (jwstflow ``features:`` grammar; ``all`` takes every bundled
-    dataset in range) are annotated on every figure
+    features (jwstflow ``features:`` grammar; ``all``, the default, takes
+    every bundled dataset in range; ``features: null`` for none) are annotated
+    on every figure
     (``qa.annotate_features``: every gas line labelled at a constant factor
     ``label_offset`` over the spectrum at its own wavelength, colored by
     species; the absorption lines of the stellar photosphere dashed, labelled
@@ -49,7 +55,9 @@ class PlotSpectrum(Step):
 
     level = "qa"
     batch = "all"   # all inputs in one task, so the combined overview sees every spectrum
-    version = "8"   # 7 -> 8: a figure of the detected lines; "? [wavelength]" for unidentified peaks
+    version = "9"   # 8 -> 9: the target aperture of a file of apertures; features annotated by default; 7 -> 8: detected lines
+    figure_suffix = ""   # appended to each per-file figure's name
+    overview = True      # the combined <stage>_all figure
 
     def run(
         self,
@@ -60,15 +68,25 @@ class PlotSpectrum(Step):
         column: str = "FLUX",
         xscale: str = "log",
         yscale: str = "log",
-        features: Any = None,
+        features: Any = "all",
         label_offset: float = qa.FEATURE_LABEL_OFFSET,
         photospheric: bool = True,
         errors: bool = True,
         detected: bool = True,
+        aperture: str | None = "disk",
         dpi: int = 150,
         fmt: str = "png",
         **_: Any,
     ) -> Iterable[Path]:
+        return self._figures(inputs, ctx, ylim=ylim, column=column, xscale=xscale, yscale=yscale, features=features,
+                             label_offset=label_offset, photospheric=photospheric, errors=errors, detected=detected,
+                             aperture=aperture, select=True, dpi=dpi, fmt=fmt)
+
+    def _figures(self, inputs: list[Path], ctx: RunContext, *, ylim: Any, column: str, xscale: str, yscale: str,
+                 features: Any, label_offset: float, photospheric: bool, errors: bool, detected: bool,
+                 aperture: str | None, select: bool, dpi: int, fmt: str, max_labels: int = 12) -> list[Path]:
+        """The per-file figures (and the overview): the target ``aperture`` of each file when ``select``,
+        else every table of it, the target aperture among them in black."""
         from astropy.io import fits
 
         out: list[Path] = []
@@ -80,16 +98,17 @@ class PlotSpectrum(Step):
             ylabel = ""
             with fits.open(inp) as hdul:
                 tables = [h for h in hdul if h.name in qa.SPECTRUM_EXTENSIONS]
+                tables = qa.select_spectra(tables, aperture) if select else tables
                 if not tables:
                     log.warning("%s has no EXTRACT1D/COMBINE1D extension; skipped", inp.name)
                     continue
-                for i, (h, color) in enumerate(zip(tables, qa.line_colors(len(tables)))):
+                for i, (h, color) in enumerate(zip(tables, self._colors(tables, aperture))):
                     tab = h.data
                     if "WAVELENGTH" not in tab.names or column not in tab.names:
                         continue
                     wave = np.asarray(tab["WAVELENGTH"], dtype=float)
                     values, ylabel = qa.to_mjy(tab[column], qa.column_unit(h, column))
-                    label = qa.spectrum_name(h, i) if 1 < len(tables) <= 12 else None
+                    label = qa.spectrum_name(h, i) if 1 < len(tables) <= max_labels else None
                     error_column = f"{column}_ERROR"
                     sigma = qa.to_mjy(tab[error_column], qa.column_unit(h, error_column))[0] \
                         if errors and error_column in tab.names else None
@@ -98,16 +117,57 @@ class PlotSpectrum(Step):
             for suffix, detected_only in variants:
                 plot = qa.Spectrum(xscale=xscale, yscale=yscale)
                 for i, (wave, values, sigma, label, color) in enumerate(series):
+                    on_top = {"zorder": 3} if len(series) > 1 and color == qa.MAIN_COLOR else {}   # the target aperture
                     plot.line(wave, values, error=sigma, color=color, label=label,
-                              error_label=qa.SIGMA_BAND_LABEL if i == 0 else None)
-                out.append(plot.finish(ctx.output_dir / f"{inp.stem}{suffix}.{fmt}", ylabel=ylabel or column,
+                              error_label=qa.SIGMA_BAND_LABEL if i == 0 else None, **on_top)
+                out.append(plot.finish(ctx.output_dir / f"{inp.stem}{self.figure_suffix}{suffix}.{fmt}",
+                                       ylabel=ylabel or column,
                                        notes=[inp.name], features=features, label_offset=label_offset,
                                        photospheric=photospheric, ylim=ylim, dpi=dpi, detected_only=detected_only))
         overview = all_spectra_figure(combined, ctx.output_dir / f"{ctx.stage}_all.{fmt}", what="spectra", dpi=dpi,
-                                      features=features, label_offset=label_offset, photospheric=photospheric)
+                                      features=features, label_offset=label_offset,
+                                      photospheric=photospheric) if self.overview else None
         if overview is not None:
             out.append(overview)
         return out
+
+    @staticmethod
+    def _colors(tables: list[Any], aperture: str | None) -> list[Any]:
+        """The standard colormap's colors -- the target aperture among several in black (the main color)."""
+        colors = list(qa.line_colors(len(tables)))
+        if aperture is not None and len(tables) > 1:
+            for k, h in enumerate(tables):
+                if str(h.header.get("APERNAME", "")).strip() == aperture:
+                    colors[k] = qa.MAIN_COLOR
+        return colors
+
+
+class PlotSpectrumApertures(PlotSpectrum):
+    """The spectra of all apertures of a 1-D product side by side, flux in mJy.
+
+    One figure per input file (``*_apertures.png``): every EXTRACT1D/COMBINE1D
+    table of the file -- for an extraction with several apertures (the disk,
+    tighter contours, outflows, objects, the nebulae of a disk) each one,
+    labelled by its ``APERNAME`` (slit or source for unnamed tables), the
+    target ``aperture`` (default ``disk``) in black, the others in the colors
+    of the standard colormap. A comparison of the apertures, not the
+    annotated spectrum of ``plot_spectrum``: no features (``features: all``
+    annotates them), no 1-sigma bands (``errors: true`` draws them), no
+    detected-lines figure and no combined overview. Logarithmic axes unless
+    ``xscale`` / ``yscale: linear``.
+    """
+
+    version = "1"
+    figure_suffix = "_apertures"
+    overview = False
+
+    def run(self, inputs: list[Path], ctx: RunContext, *, ylim: tuple[float, float] | list[float] | None = None,
+            column: str = "FLUX", xscale: str = "log", yscale: str = "log", features: Any = None,
+            label_offset: float = qa.FEATURE_LABEL_OFFSET, photospheric: bool = True, errors: bool = False,
+            aperture: str = "disk", dpi: int = 150, fmt: str = "png", **_: Any) -> Iterable[Path]:
+        return self._figures(inputs, ctx, ylim=ylim, column=column, xscale=xscale, yscale=yscale, features=features,
+                             label_offset=label_offset, photospheric=photospheric, errors=errors, detected=False,
+                             aperture=aperture, select=False, dpi=dpi, fmt=fmt, max_labels=16)
 
 
 class PlotSnr(Step):
@@ -118,7 +178,8 @@ class PlotSnr(Step):
     (``column``, default FLUX) divided by its ``<column>_ERROR``, per
     wavelength sample, on logarithmic axes -- where the spectrum is
     trustworthy and where it is not, which the flux figure of
-    ``plot_spectrum`` does not show. The spectral ``features`` (default: every
+    ``plot_spectrum`` does not show. Like ``plot_spectrum`` it draws the target
+    ``aperture`` (default ``disk``) of a file of named apertures. The spectral ``features`` (default: every
     bundled dataset in range; ``features: null`` for none) are annotated as on
     every spectrum-like figure, so a dip or a spike in the signal-to-noise
     ratio can be read against the line or band that causes it. Samples
@@ -128,18 +189,19 @@ class PlotSnr(Step):
     """
 
     level = "qa"
-    version = "3"   # 2 -> 3: "? [wavelength]" for unidentified peaks, lines identified within one sample / 50 km/s
+    version = "4"   # 3 -> 4: the target aperture of a file of apertures; 2 -> 3: "? [wavelength]" for unidentified peaks
 
     def run(self, inputs: list[Path], ctx: RunContext, *, column: str = "FLUX", xscale: str = "log",
             yscale: str = "log", features: Any = "all", label_offset: float = qa.FEATURE_LABEL_OFFSET,
-            photospheric: bool = True, dpi: int = 150, **_: Any) -> Iterable[Path]:
+            photospheric: bool = True, aperture: str | None = "disk", dpi: int = 150, **_: Any) -> Iterable[Path]:
         from astropy.io import fits
 
         out: list[Path] = []
         for inp in sorted(inputs):
             with fits.open(inp) as hdul:
                 series = []
-                for i, h in enumerate(h for h in hdul if h.name in qa.SPECTRUM_EXTENSIONS):
+                tables = qa.select_spectra([h for h in hdul if h.name in qa.SPECTRUM_EXTENSIONS], aperture)
+                for i, h in enumerate(tables):
                     tab = h.data
                     error_column = f"{column}_ERROR"
                     if not {"WAVELENGTH", column, error_column} <= set(tab.names):
