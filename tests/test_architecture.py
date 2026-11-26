@@ -22,7 +22,8 @@ PACKAGE = Path(jwstflow.__file__).parent
 CONTRACT = {"steps"}                                     # the step framework
 ORCHESTRATION = {"config", "data", "engine"}             # the YAML, the input files, the run model
 TOOLKIT = {"spectra", "cubes", "images", "qa"}           # what steps are built from, by domain
-FEATURES = {"spectra.stitching", "cubes.psf", "cubes.clusters", "cubes.gaps", "cubes.stitching", "qa.steps"}   # where the steps are
+FEATURES = {"spectra.stitching", "cubes.psf", "cubes.clusters", "cubes.gaps", "cubes.stitching", "images.astrometry",
+            "qa.steps"}   # where the steps are
 TOOLS = {"cli", "testing", "scaffold", "__init__"}
 SCIENCE = TOOLKIT | FEATURES
 
@@ -30,7 +31,7 @@ SCIENCE = TOOLKIT | FEATURES
 #: feature it implements, every QA step in jwstflow.qa.steps").
 DATA_STEP_MODULES = {"jwstflow.spectra.stitching", "jwstflow.cubes.psf.steps", "jwstflow.cubes.clusters.steps",
                      "jwstflow.cubes.gaps.steps", "jwstflow.cubes.stitching.steps", "jwstflow.cubes.stitching.matched",
-                     "jwstflow.data.msa"}
+                     "jwstflow.images.astrometry.steps", "jwstflow.data.msa"}
 QA_STEP_PACKAGE = "jwstflow.qa.steps"
 #: Step subclasses that are not steps of the package: the framework's own, and the test stand-ins.
 NOT_BUNDLED = {"jwstflow.steps.interface", "jwstflow.steps.adapters", "jwstflow.testing.mock.stubs"}

@@ -8,8 +8,10 @@ The toolkit, importable from here (``from jwstflow.images import read_image, ban
 * :mod:`.filters` -- the imaging filters of NIRCam, NIRISS and MIRI (pivot wavelength, width,
   edges; ``refdata/filters``) and the diffraction-limited resolution at a wavelength.
 
-There are no image features in jwstflow yet: the stock figures of imaging products are QA steps
-(``jwstflow.qa.steps.images``), the science of particular sources lives in contributed packages.
+One feature is built on it: :mod:`.astrometry` (``image_astrometry``), how well the images of a
+run are registered to each other and to Gaia DR3. The stock figures of imaging products are QA
+steps (``jwstflow.qa.steps.images``), the science of particular sources lives in contributed
+packages.
 """
 
 from .filters import Band, all_bands, band_of, diffraction_fwhm_arcsec
