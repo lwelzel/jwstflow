@@ -12,7 +12,10 @@ Outputs (``qa/mast_compare/``):
 * ``<name>_s3ddiff.fits``: DIFF = jwstflow - MAST and RATIO cubes (when the two
   cubes share the same grid), plus a SUMMARY table of per-plane statistics;
 * ``<name>_x1ddiff.fits``: table WAVELENGTH, FLUX_JWSTFLOW, FLUX_MAST (interpolated
-  onto jwstflow's wavelengths), DIFF, RATIO, and a PNG with both spectra and the ratio.
+  onto jwstflow's wavelengths), DIFF, RATIO, and a PNG with both spectra and the ratio;
+* ``<name>_i2ddiff.fits``: around the target, jwstflow's mosaic, MAST's interpolated onto its
+  grid, DIFF = jwstflow - MAST, with the flux ratio, the sky offset and the shift between the two
+  mosaics in the header, and a PNG with the three frames.
 
 Every output records both provenances: CAL_VER/CRDS_CTX of the jwstflow product
 (``JWFCAL``, ``JWFCTX``) and of the archive product (``MASTCAL``, ``MASTCTX``,
@@ -46,18 +49,28 @@ class MastCompare(Step):
       grid) plus a SUMMARY table of per-plane statistics -> ``*_s3ddiff.fits``;
     * ``_x1d``: a table WAVELENGTH / FLUX_JWSTFLOW / FLUX_MAST (interpolated
       onto jwstflow's wavelengths) / DIFF / RATIO -> ``*_x1ddiff.fits``, and a
-      figure with both spectra and their ratio.
+      figure with both spectra and their ratio;
+    * ``_i2d``: a box of ``size`` arcsec around the target on jwstflow's
+      mosaic, MAST's mosaic interpolated onto it (bilinear: the two are never
+      on one grid -- their alignments differ), DIFF = jwstflow - MAST ->
+      ``*_i2ddiff.fits``; the header and the figure (both images under one
+      stretch, the difference on a signed scale) give the median ratio over
+      pixels jwstflow holds at S/N > 10 and the ratio of the sums over the
+      pixels at S/N > 3 (both of the light above each image's own sky), the
+      difference of the skies (medians over the pixels within jwstflow's sky
+      scatter of its clipped sky level) and the shift between
+      the mosaics (cross-correlation peak, pixels and arcsec).
 
     Every output records both provenances (CAL_VER/CRDS context of each side).
     Inputs without a reference are skipped with a warning.
     """
 
     level = "qa"
-    version = "3"   # 2 -> 3: logarithmic wavelength axis on the spectrum figure
+    version = "4"   # 3 -> 4: resampled images (_i2d); 2 -> 3: logarithmic wavelength axis on the spectrum figure
     needs_reference_products = True   # the run waits for the background download of the MAST products
 
     def run(self, inputs: list[Path], ctx: RunContext, *, reference_dir: str | None = None,
-            plot: bool = True, **params: Any) -> list[Path]:
+            plot: bool = True, size: float = 12.0, **params: Any) -> list[Path]:
         (ours,) = inputs
         reference = Path(reference_dir).expanduser() if reference_dir else ctx.reference_dir
         if reference is None:
@@ -71,7 +84,9 @@ class MastCompare(Step):
             return compare_cubes(ours, theirs, ctx.output_dir)
         if ours.name.endswith("_x1d.fits"):
             return compare_spectra(ours, theirs, ctx.output_dir, plot=plot)
-        log.warning("%s: only _s3d and _x1d products are compared", ours.name)
+        if ours.name.endswith("_i2d.fits"):
+            return compare_images(ours, theirs, ctx.output_dir, size=size, plot=plot, target=ctx.target_coords)
+        log.warning("%s: only _s3d, _x1d and _i2d products are compared", ours.name)
         return []
 
 
@@ -173,6 +188,121 @@ def compare_spectra(ours: Path, theirs: Path, out_dir: Path, *, plot: bool = Tru
     if plot:
         outputs.append(_plot(out.with_suffix(".png"), wa, fa, fb_on_a, ratio, out.name, prov))
     return outputs
+
+
+def compare_images(ours: Path, theirs: Path, out_dir: Path, *, size: float = 12.0, plot: bool = True,
+                   target: dict[str, Any] | None = None) -> list[Path]:
+    """A resampled image against MAST's: around the target, MAST's mosaic on jwstflow's grid."""
+    from astropy.io import fits
+
+    from ...cubes import resample_image
+    from ...images import read_image
+
+    a, b = read_image(ours), read_image(theirs)
+    if a is None or b is None or a.wcs is None or b.wcs is None:
+        log.warning("%s: no comparable images", ours.name)
+        return []
+    ra, dec = (target or {}).get("ra"), (target or {}).get("dec")
+    if ra is None or dec is None:
+        ra, dec = float(a.primary.get("TARG_RA")), float(a.primary.get("TARG_DEC"))
+    cut = a.cutout(float(ra), float(dec), size)
+    mast = resample_image(b.data, b.wcs, cut.wcs, cut.shape)
+    from .images import sky_statistics
+
+    with np.errstate(all="ignore"):
+        diff = cut.data - mast
+        both = np.isfinite(cut.data) & np.isfinite(mast)
+        # the sky of each, over the pixels where jwstflow's image holds nothing (within its sky scatter
+        # of its sky level): the ratio is of the light above each sky, the skies' difference on its own
+        level, scatter, _ = sky_statistics(np.where(both, cut.data, np.nan))
+        faint = both & (np.abs(cut.data - level) < scatter)
+        enough = faint.sum() >= 50
+        sky_a = float(np.median(cut.data[faint])) if enough else 0.0
+        sky_b = float(np.median(mast[faint])) if enough else 0.0
+        sky = sky_a - sky_b if enough else float("nan")
+        snr = (cut.data - sky_a) / cut.error if cut.error is not None else np.full(cut.shape, np.nan)
+        strong = both & (snr > 10.0)
+        ratio = float(np.median((cut.data[strong] - sky_a) / (mast[strong] - sky_b))) if strong.sum() >= 10 \
+            else float("nan")
+        bright = both & (snr > 3.0)
+        sum_ratio = float((cut.data[bright] - sky_a).sum() / (mast[bright] - sky_b).sum()) if bright.sum() >= 10 \
+            else float("nan")
+    dy, dx = _shift(cut.data, mast, both)
+    scale = cut.pixscale_arcsec or float("nan")
+    prov = _provenance(a.primary, b.primary, theirs)
+    prim = fits.PrimaryHDU()
+    for k, v in {**prov,
+                 "JWFRATIO": (_or_none(ratio), "jwstflow/MAST above sky, median, S/N>10"),
+                 "JWFSUMRT": (_or_none(sum_ratio), "jwstflow/MAST above sky, sums, S/N>3"),
+                 "JWFSKYDF": (_or_none(sky), "sky jwstflow - MAST [MJy/sr]"),
+                 "JWFSHFTX": (_or_none(dx), "[pix] shift of jwstflow against MAST, x"),
+                 "JWFSHFTY": (_or_none(dy), "[pix] shift of jwstflow against MAST, y"),
+                 "JWFCMPSZ": (float(size), "[arcsec] side of the compared box"),
+                 "JWFINTRP": ("bilinear", "MAST interpolated onto our grid")}.items():
+        if v[0] is not None:
+            prim.header[k] = v
+    header = cut.header.copy()
+    hdus = [prim, fits.ImageHDU(cut.data.astype("f4"), header=header, name="JWSTFLOW"),
+            fits.ImageHDU(mast.astype("f4"), header=header, name="MAST"),
+            fits.ImageHDU(diff.astype("f4"), header=header, name="DIFF")]
+    out = out_dir / ours.name.replace("_i2d.fits", "_i2ddiff.fits")
+    fits.HDUList(hdus).writeto(out, overwrite=True)
+    log.info("%s vs MAST: median ratio %.4f (S/N > 10), sum ratio %.4f (S/N > 3), sky difference %.3g, shift "
+             "(%.2f, %.2f) pix", ours.name, ratio, sum_ratio, sky, dx, dy)
+    outputs = [out]
+    if plot:
+        outputs.append(_plot_images(out.with_suffix(".png"), cut, mast, diff, ours.name, theirs.name, prov,
+                                    ratio=ratio, sum_ratio=sum_ratio, sky=sky, shift=(dx, dy), scale=scale))
+    return outputs
+
+
+def _or_none(value: float) -> float | None:
+    return float(value) if np.isfinite(value) else None
+
+
+def _shift(a: np.ndarray, b: np.ndarray, both: np.ndarray) -> tuple[float, float]:
+    """(dy, dx) [pix] by which ``a`` is displaced against ``b``: the peak of their cross-correlation
+    (over the pixels both hold, each less its median), refined by a parabola through its neighbours."""
+    if both.sum() < 50:
+        return float("nan"), float("nan")
+    fa = np.where(both, a - np.median(a[both]), 0.0)
+    fb = np.where(both, b - np.median(b[both]), 0.0)
+    corr = np.fft.ifft2(np.fft.fft2(fa) * np.conj(np.fft.fft2(fb))).real
+    corr = np.fft.fftshift(corr)
+    py, px = np.unravel_index(int(np.argmax(corr)), corr.shape)
+    def vertex(c_m: float, c_0: float, c_p: float) -> float:
+        den = c_m - 2 * c_0 + c_p
+        return 0.0 if den == 0 else 0.5 * (c_m - c_p) / den
+    ny, nx = corr.shape
+    sub_y = vertex(corr[py - 1, px], corr[py, px], corr[(py + 1) % ny, px]) if 0 < py else 0.0
+    sub_x = vertex(corr[py, px - 1], corr[py, px], corr[py, (px + 1) % nx]) if 0 < px else 0.0
+    return float(py - ny // 2 + sub_y), float(px - nx // 2 + sub_x)
+
+
+def _plot_images(path: Path, cut: Any, mast: np.ndarray, diff: np.ndarray, name: str, theirs: str,
+                 prov: dict[str, Any], *, ratio: float, sum_ratio: float, sky: float, shift: tuple[float, float],
+                 scale: float) -> Path:
+    from ... import qa
+
+    sky_frame = qa.SkyFrame.from_header(cut.header, cut.shape, primary=cut.primary)
+    fig, axes = qa.subplots(1, 3, figsize=(15.0, 4.6))
+    shown = [qa.to_mjy(v, cut.unit)[0] for v in (cut.data, mast)]        # the norm acts on what is drawn
+    norm = qa.stretch_norm(np.concatenate([v[np.isfinite(v)] for v in shown]), "asinh", (1.0, 99.5))
+    qa.Frame(axes[0]).image(cut.data, unit=cut.unit, sky=sky_frame, norm=norm, sides="lbt", cbar=False)
+    qa.tag(axes[0], "jwstflow")
+    qa.Frame(axes[1]).image(mast, unit=cut.unit, sky=sky_frame, norm=norm, sides="bt")
+    qa.tag(axes[1], "MAST, on jwstflow's grid")
+    qa.Frame(axes[2]).image(diff, unit=cut.unit, sky=sky_frame, center=0.0, sides="btr")
+    qa.tag(axes[2], "jwstflow $-$ MAST")
+    qa.annotate(axes[0], name, f"MAST: {theirs} ({prov['MASTCAL'][0]}, {prov['MASTCTX'][0]}); jwstflow: "
+                f"{prov['JWFCAL'][0]}, {prov['JWFCTX'][0]}",
+                f"jwstflow / MAST above each sky: median {ratio:.4f} over S/N > 10, {sum_ratio:.4f} summed over "
+                f"S/N > 3; sky difference {sky:.3g} {cut.unit or ''}",
+                f"shift of jwstflow against MAST ({shift[1]:+.2f}, {shift[0]:+.2f}) pix = "
+                f"({shift[1] * scale * 1e3:+.0f}, {shift[0] * scale * 1e3:+.0f}) mas in x, y; MAST interpolated "
+                "(bilinear) onto jwstflow's grid", sky_frame.note() if sky_frame is not None else "")
+    qa.figlegend(fig)
+    return qa.save(fig, path)
 
 
 def _wavelengths(hdr: Any) -> np.ndarray:

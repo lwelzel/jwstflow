@@ -119,3 +119,35 @@ def test_image_summary_draws_the_image_its_exposures_and_signal_to_noise(tmp_pat
 
     level, scatter, n = sky_statistics(scene)
     assert abs(level) < 0.01 and 0.04 < scatter < 0.06 and n > 9000
+
+
+def test_mast_compare_of_resampled_images_finds_the_ratio_the_sky_and_the_shift(tmp_path):
+    """jwstflow's mosaic against MAST's on a grid shifted by (3, -2) pixels: the ratio of the fluxes,
+    the sky offset and the shift come back, and both files and the figure are written."""
+    from astropy.io import fits
+
+    from jwstflow.qa.steps import MastCompare
+
+    yy, xx = np.mgrid[:160, :180]
+    def scene(dy, dx):
+        return (40.0 * np.exp(-((xx - 90 - dx) ** 2 + (yy - 80 - dy) ** 2) / 20.0)
+                + 15.0 * np.exp(-((xx - 40 - dx) ** 2 + (yy - 120 - dy) ** 2) / 6.0))
+    rng = np.random.default_rng(1)
+    name = "jw01234-o001_t001_nircam_clear-f200w_i2d.fits"
+    run = tmp_path / "test-target" / "test_run"
+    ours = run / "stage3" / "calwebb_image3" / name
+    ours.parent.mkdir(parents=True)
+    synthetic_i2d(ours, data=1.02 * scene(0, 0) + 0.05 + rng.normal(0, 0.02, yy.shape), error=0.02)
+    theirs = tmp_path / "test-target" / "mast_reference" / "test_run" / "stage3" / "calwebb_image3" / name
+    theirs.parent.mkdir(parents=True)
+    # the same sky on a grid moved by (3, -2) pixels: the sources sit at other pixels, the WCS says so
+    synthetic_i2d(theirs, data=scene(3, -2) + rng.normal(0, 0.02, yy.shape), error=0.02,
+                  crpix=((180 + 1) / 2.0 - 2, (160 + 1) / 2.0 + 3))
+    ctx = make_context(tmp_path, stage="mast_compare")
+    ctx.reference_dir = theirs.parents[2]
+    outputs = MastCompare().run([ours], ctx, size=4.0)
+    assert [o.suffix for o in outputs] == [".fits", ".png"]
+    h = fits.getheader(outputs[0])
+    assert h["JWFRATIO"] == pytest.approx(1.02, abs=0.01)
+    assert h["JWFSKYDF"] == pytest.approx(0.05, abs=0.01)
+    assert abs(h["JWFSHFTX"]) < 0.2 and abs(h["JWFSHFTY"]) < 0.2      # the WCS carried the move: no shift
