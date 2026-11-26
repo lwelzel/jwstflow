@@ -38,6 +38,8 @@ CUSTOM_SUFFIXES: set[str] = {
     "gapcov",    # coverage next to the NIRSpec detector gap, per group of exposures (jwstflow.cubes.gaps)
     "s3dcomb",   # joint cube: the band cubes of one instrument joined along wavelength (jwstflow.cubes.stitching)
     "nbrfit",    # a bright neighbour's PSF fitted to and subtracted from a cube: the record (jwstflow.cubes.psf)
+    "astrom",    # registration of a run's images to each other and to Gaia DR3 (jwstflow.images.astrometry)
+    "gaiadr3",   # the Gaia DR3 sources of a run's footprint, cached by image_astrometry (.ecsv)
 }
 
 _SUFFIX_RE = re.compile(r"^(?P<base>.+)_(?P<suffix>[a-z0-9]+(?:-[a-z0-9]+)?)$")

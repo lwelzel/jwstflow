@@ -298,6 +298,36 @@ fixed in core and plugins build on them instead of inventing variants:
   `qa_cube_stitch` draws the join, the overlaps and the positions from the
   product alone.
 
+* **Image registration** (`jwstflow.images.astrometry`): science that
+  compares the images of one source across filters -- where the dark lane
+  of an edge-on disk lies at 1, 4 and 21 um -- needs to know how well the
+  mosaics agree on the sky. `image3` aligns every filter on its own (to
+  Gaia DR3 where it finds unsaturated Gaia stars), nothing aligns the
+  filters to each other. `image_astrometry` (`batch: all`, `*_i2d.fits`)
+  measures what came out from the source catalogues `source_catalog` wrote
+  next to the mosaics (`<base>_cat.ecsv`): point sources (`is_extended`
+  false, S/N, isolation and a complete core, all in units of the band's
+  FWHM), matched in two passes (a bulk shift from all pairs within
+  `search`, then mutual nearest neighbours within `match_radius` FWHM) to
+  a reference image (`reference`, default the one with the most point
+  sources) and to Gaia DR3 -- queried once for the union of the
+  footprints (ESA archive, else the STScI service `tweakreg` reads),
+  cached as `<base>_gaiadr3.ecsv` and moved with the proper motions to
+  each image's epoch; a failed query leaves the relative comparison.
+  Offsets are image minus reference [mas]: per comparison N, the clipped
+  median, the robust scatter and the error of the median, and every
+  matched source, in one self-describing `<base>_astrom.fits` (IMAGES,
+  SUMMARY, MATCHES; cuts and conventions in the header), drawn by
+  `qa_image_astrometry`:
+
+  ```yaml
+  - step: image_astrometry             # -> stage4/image_astrometry
+    inputs: [{stage: calwebb_image3, pattern: "*_i2d.fits"}]
+  - step: qa_image_astrometry
+    inputs: [{stage: image_astrometry, pattern: "*_astrom.fits"}]
+    tags: [qa]
+  ```
+
 Extraction steps additionally share `jwstflow.cubes.apcorr`: the CRDS
 aperture-correction reference (MIRI MRS and NIRSpec IFU layouts) normalised
 to one plain-array table and evaluated per plane, so contributed extraction
@@ -314,7 +344,7 @@ the derived names, and `--set stages.<name>.…` accepts the name or the step.
 
 ## How the package is laid out
 
-`src/jwstflow/` holds the command line and ten subpackages -- no loose
+`src/jwstflow/` holds the command line and eleven subpackages -- no loose
 modules. Each subpackage is one of three things:
 
 ```
@@ -345,6 +375,10 @@ jwstflow/
                 (instrument.py), the mask-product contract (masks.py), aperture corrections
                 (apcorr.py); psf/, clusters/, gaps/ and stitching/ (joint cubes), each with
                 its library, its product and its steps.py
+  images/       imaging products: an i2d / cal image with its WCS and band (io.py), the
+                imaging filters and their resolution (filters.py); astrometry/ (registration
+                of a run's images to each other and to Gaia), with its library, its product
+                and its steps.py
   qa/           the QA figure standard; qa/steps/ holds every QA step
 
                 -- tools around it
@@ -361,7 +395,8 @@ jwstflow/
 cli · testing · scaffold                            tools: may import anything below
 
 engine              qa.steps · cubes.psf · cubes.clusters · cubes.gaps · cubes.stitching · spectra.stitching    the features
-   |                qa · cubes · spectra                                                                        the toolkits
+   |                · images.astrometry
+   |                qa · cubes · spectra · images                                                               the toolkits
    |                     |
    +------> data <-------+           files and headers, MAST, target positions
               |
@@ -395,7 +430,8 @@ The two columns never import each other:
   `jwstflow.cubes.gaps.steps`, `stitch_cubes` in
   `jwstflow.cubes.stitching.steps` and `cube_build_matched` -- a subclass of
   the official `cube_build`, so a module of its own that imports jwst -- in
-  `jwstflow.cubes.stitching.matched`, `fix_msa_metafile` in
+  `jwstflow.cubes.stitching.matched`, `image_astrometry` in
+  `jwstflow.images.astrometry.steps`, `fix_msa_metafile` in
   `jwstflow.data.msa`.
 * Every QA step lives in `jwstflow.qa.steps`, one module per kind of product
   (`spectra`, `stitch`, `images`, `cubes`, `cube_stitch`, `psf`, `clusters`,
@@ -445,8 +481,9 @@ jwstflow's own product types are `_s1d` (extracted spectra), `_s1dcomb`
 (stitched spectra), `_s3dcomb` (joint cubes), `_bkgspec` (background
 spectra), `_lsr`, `_psfcube` (PSF cubes), `_nbrfit` (a neighbour's PSF
 fitted to and subtracted from a cube), `_clustermask` (bad spaxel
-clusters of a per-dither cube) and `_gapcov` (coverage at the NIRSpec
-detector gap). Edited copies of an official product (a DQ-flagged `_cal`) keep the
+clusters of a per-dither cube), `_gapcov` (coverage at the NIRSpec
+detector gap), `_astrom` (the registration of a run's images) and `_gaiadr3`
+(the Gaia DR3 sources of its footprint, `.ecsv`). Edited copies of an official product (a DQ-flagged `_cal`) keep the
 official name and record the edit in the header.
 
 ## Data products shipped with jwstflow
