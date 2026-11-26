@@ -174,3 +174,16 @@ def test_deep_merge_semantics():
 def test_slugify():
     assert slugify("ESO-Ha 569") == "eso-ha-569"
     assert slugify("  weird__Name!! ") == "weird-name"
+
+
+@pytest.mark.parametrize("preset", sorted(p.stem for p in (Path(__file__).parents[1] / "src" / "jwstflow" / "config"
+                                                             / "presets").glob("*.yaml")))
+def test_every_preset_validates(tmp_path: Path, preset: str):
+    """A workflow that only names its target and extends a shipped preset is a valid workflow."""
+    wf = write(tmp_path / "wf.yaml", f"""
+        extends: preset:{preset}
+        target: ESO-Ha 569
+        workflow_graph: false
+        """)
+    cfg = load_config(wf)
+    assert cfg.stages and cfg.run == preset

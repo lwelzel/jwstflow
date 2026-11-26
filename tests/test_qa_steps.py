@@ -13,10 +13,11 @@ from jwstflow.qa.steps import (
     PlotSpectrumStages,
     QaCubeSlices,
     QaCubeSummary,
+    QaImageSummary,
     QuicklookImage,
 )
 from jwstflow.steps import resolve_target
-from jwstflow.testing import make_context, run_step, synthetic_cube, synthetic_x1d
+from jwstflow.testing import make_context, run_step, synthetic_cube, synthetic_i2d, synthetic_x1d
 
 
 def _x1d(path, scale: float = 1.0):
@@ -105,3 +106,16 @@ def test_cube_steps_draw_frames_with_both_sets_of_axes(tmp_path):
     (quick,) = run_step(QuicklookImage, [cube], tmp_path, stage="quicklook_image")
     assert (summary.name, slices.name, quick.name) == ("t_s3d_summary.png", "t_s3d_slices.png", "t_s3d.png")
     assert all(p.stat().st_size > 15_000 for p in (summary, slices, quick))
+
+
+def test_image_summary_draws_the_image_its_exposures_and_signal_to_noise(tmp_path):
+    yy, xx = np.mgrid[:90, :110]
+    scene = 0.05 * np.random.default_rng(3).normal(size=(90, 110)) + 5.0 * np.exp(-((xx - 60) ** 2 + (yy - 40) ** 2) / 18.0)
+    scene[:, :4] = np.nan                                   # a strip without data stays grey
+    i2d = synthetic_i2d(tmp_path / "jw01234-o001_t001_nircam_clear-f200w_i2d.fits", data=scene, error=0.05)
+    (png,) = run_step(QaImageSummary, [i2d], tmp_path, stage="qa_image_summary")
+    assert png.name == "jw01234-o001_t001_nircam_clear-f200w_i2d_summary.png" and png.stat().st_size > 30_000
+    from jwstflow.qa.steps.images import sky_statistics
+
+    level, scatter, n = sky_statistics(scene)
+    assert abs(level) < 0.01 and 0.04 < scatter < 0.06 and n > 9000

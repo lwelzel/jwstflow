@@ -1,0 +1,50 @@
+# yaml-language-server: $schema=jwstflow.schema.json
+# NIRCam imaging: uncal -> detector1 -> image2 -> image3 (one mosaic per filter + pupil) -> quick-looks
+# Start from it with:   jwstflow init nircam_imaging --extend -o my_run.yaml
+version: 1
+run: nircam_imaging
+# target: set in your workflow (extends: preset:...); results go to <workspace>/<target>/nircam_imaging/
+
+crds: {path: "${env:CRDS_PATH,~/crds_cache}", context: null}
+parallel: {backend: process, workers: 4}
+
+download:
+  program: 1234
+  instrument: NIRCAM
+  modes: [IMAGE]
+  products: [UNCAL]
+
+stages:
+  - step: detector1
+    inputs:
+      - {stage: raw, pattern: "*_uncal.fits", filters: {EXP_TYPE: [NRC_IMAGE]}}
+    parameters:
+      steps:
+        jump: {expand_large_events: true}        # snowball flagging
+        clean_flicker_noise: {skip: true}         # set false for 1/f cleaning (masks the sources itself)
+
+  - step: image2
+    inputs:
+      - {stage: calwebb_detector1, pattern: "*_rate.fits"}
+    association:
+      mode: per_exposure
+      level: 2
+
+  - step: image3
+    inputs:
+      - {stage: calwebb_image2, pattern: "*_cal.fits"}
+    association:
+      mode: group
+      level: 3
+      group_by: [PROGRAM, OBSERVTN, FILTER, PUPIL]   # short- and long-wavelength channels, both modules
+      product_name: "jw{PROGRAM}-o{OBSERVTN}_{TARGID}_nircam_{OPTELEM}"   # {OPTELEM}: clear-f200w, f405n-f444w
+    parameters:
+      steps:
+        tweakreg: {skip: false}
+        skymatch: {skymethod: match}
+        source_catalog: {snr_threshold: 5}
+
+  - step: quicklook_image
+    inputs:
+      - {stage: calwebb_image3, pattern: "*_i2d.fits"}
+    tags: [qa]

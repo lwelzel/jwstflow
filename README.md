@@ -96,7 +96,7 @@ Outputs land in `reductions/<target>/<run>/` split by calibration level
 (`stage1/ ... stage4/`, `qa/`), raw data is shared per target, and stage
 names come from the steps themselves so every run looks the same everywhere.
 Start from a preset (`extends: preset:nirspec_ifu`; also `nirspec_mos`,
-`miri_mrs`, `miri_imaging`) and override only what your data needs.
+`miri_mrs`, `miri_imaging`, `nircam_imaging`) and override only what your data needs.
 
 ### The rest of the interface
 

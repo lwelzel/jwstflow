@@ -1,4 +1,4 @@
-"""Small JWST-like products for tests: a rate/cal image, an IFU cube, an extracted spectrum."""
+"""Small JWST-like products for tests: a rate/cal image, a resampled image, an IFU cube, an extracted spectrum."""
 
 from __future__ import annotations
 
@@ -31,6 +31,41 @@ def synthetic_image(path: Path, *, instrument: str = "NIRSPEC", shape: tuple[int
     sci = np.full(shape, value, dtype="f4")
     fits.HDUList([_primary(instrument, **keys), fits.ImageHDU(sci, name="SCI"), fits.ImageHDU(np.full(shape, 0.1, "f4"), name="ERR"),
                   fits.ImageHDU(np.zeros(shape, "u4"), name="DQ")]).writeto(path, overwrite=True)
+    return Path(path)
+
+
+def synthetic_i2d(path: Path, *, data: np.ndarray | None = None, instrument: str = "NIRCAM", filter: str = "F200W",
+                  pupil: str | None = "CLEAR", shape: tuple[int, int] = (120, 100), pix_arcsec: float = 0.031,
+                  ra: float = 10.0, dec: float = -20.0, crpix: tuple[float, float] | None = None, error: float = 1.0,
+                  n_exp: int = 3, **keys: Any) -> Path:
+    """A resampled image as image3 writes it: SCI / ERR / WHT / CON on a north-up TAN grid in MJy/sr.
+
+    ``data`` is the scene (default: a ramp, every pixel different); the grid is centred on
+    (``ra``, ``dec``) unless ``crpix`` (1-based x, y) says otherwise. The context image has ``n_exp``
+    exposures, exposure k covering all but the last 10 k columns.
+    """
+    from astropy.io import fits
+
+    if data is None:
+        data = np.arange(shape[0] * shape[1], dtype="f4").reshape(shape)
+    data = np.asarray(data, dtype="f4")
+    ny, nx = data.shape
+    keys = {"FILTER": filter, "TARG_RA": ra, "TARG_DEC": dec, "EXP_TYPE": "NRC_IMAGE" if instrument == "NIRCAM"
+            else "MIR_IMAGE" if instrument == "MIRI" else "NIS_IMAGE", **keys}
+    if pupil is not None:
+        keys["PUPIL"] = pupil
+    sci = fits.ImageHDU(data, name="SCI")
+    cx, cy = crpix if crpix is not None else ((nx + 1) / 2.0, (ny + 1) / 2.0)
+    sci.header.update({"BUNIT": "MJy/sr", "CTYPE1": "RA---TAN", "CTYPE2": "DEC--TAN", "CUNIT1": "deg", "CUNIT2": "deg",
+                       "CRVAL1": ra, "CRVAL2": dec, "CRPIX1": cx, "CRPIX2": cy, "CDELT1": -pix_arcsec / 3600.0,
+                       "CDELT2": pix_arcsec / 3600.0, "PIXAR_SR": (pix_arcsec / 206264.80624709636) ** 2,
+                       "PIXAR_A2": pix_arcsec**2})
+    con = np.zeros((1, ny, nx), dtype="i4")
+    for k in range(n_exp):
+        con[0, :, : max(nx - 10 * k, 1)] |= 1 << k
+    fits.HDUList([_primary(instrument, **keys), sci, fits.ImageHDU(np.full(data.shape, error, "f4"), name="ERR"),
+                  fits.ImageHDU(np.full(data.shape, 1.0 / error**2, "f4"), name="WHT"),
+                  fits.ImageHDU(con, name="CON")]).writeto(path, overwrite=True)
     return Path(path)
 
 

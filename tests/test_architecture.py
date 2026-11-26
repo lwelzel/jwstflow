@@ -21,7 +21,7 @@ PACKAGE = Path(jwstflow.__file__).parent
 #: count on their own, because the toolkit of a domain must not depend on what is built with it.
 CONTRACT = {"steps"}                                     # the step framework
 ORCHESTRATION = {"config", "data", "engine"}             # the YAML, the input files, the run model
-TOOLKIT = {"spectra", "cubes", "qa"}                     # what steps are built from, by domain
+TOOLKIT = {"spectra", "cubes", "images", "qa"}           # what steps are built from, by domain
 FEATURES = {"spectra.stitching", "cubes.psf", "cubes.clusters", "cubes.gaps", "cubes.stitching", "qa.steps"}   # where the steps are
 TOOLS = {"cli", "testing", "scaffold", "__init__"}
 SCIENCE = TOOLKIT | FEATURES
