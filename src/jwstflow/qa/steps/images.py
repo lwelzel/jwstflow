@@ -118,7 +118,8 @@ class QaImageSummary(Step):
     * the number of input exposures behind every pixel, counted from the context image (CON: one
       bit per exposure) -- dither gaps, the gaps between detectors and the edges of the mosaic show
       up here; where the product has no CON, its weight map (WHT) instead;
-    * the signal-to-noise ratio per pixel (SCI / ERR, log stretch).
+    * the signal-to-noise ratio per pixel above the sky level of the notes ((SCI - sky) / ERR, asinh
+      stretch): where the sources are, also on an image that still carries its background.
 
     The notes name the band (pivot wavelength), the pixel scale and size of the field, and the sky:
     the median and the scatter (1.4826 x MAD) of the pixels with data, sigma-clipped so that the
@@ -129,7 +130,7 @@ class QaImageSummary(Step):
     name = "qa_image_summary"
     level = "qa"
     inputs = ("*_i2d.fits",)
-    version = "1"
+    version = "2"   # 1 -> 2: S/N above the sky level
 
     def run(self, inputs: list[Path], ctx: RunContext, *, stretch: str = "asinh",
             percentiles: tuple[float, float] | list[float] = (1.0, 99.5), width: float = 13.0, dpi: int = 150,
@@ -161,16 +162,18 @@ class QaImageSummary(Step):
                 ax_exp.set_axis_off()
                 log.info("%s: neither CON nor WHT; no exposure map", path.name)
 
+            level, scatter, n_sky = sky_statistics(data)
             if image.error is not None:
+                # above the sky: an image that still carries its background (MIRI's thermal sky) is
+                # otherwise at high S/N everywhere and the sources do not show
                 with np.errstate(all="ignore"):
-                    snr = np.where(image.error > 0, data / image.error, np.nan)
-                qa.Frame(ax_snr).image(snr, sky=sky, stretch="log", percentiles=(5.0, 99.5),
-                                       cbar_label="S/N per pixel", sides="btr")
+                    snr = np.where(image.error > 0, (data - (level if np.isfinite(level) else 0.0)) / image.error, np.nan)
+                qa.Frame(ax_snr).image(snr, sky=sky, stretch="asinh", percentiles=(1.0, 99.5),
+                                       cbar_label="S/N per pixel above the sky", sides="btr")
             else:
                 ax_snr.set_axis_off()
                 log.info("%s: no ERR extension; no signal-to-noise map", path.name)
 
-            level, scatter, n_sky = sky_statistics(data)
             scale = image.pixscale_arcsec
             band = image.band
             band_note = f"{band.name} ({qa.um(band.pivot_um)} pivot)" if band is not None else image.label
