@@ -65,6 +65,18 @@ def test_header_cache_tracks_file_identity(tmp_path: Path):
     assert cache2.get(img)["EXP_TYPE"] == "MIR_MRS"
 
 
+def test_header_cache_rereads_entries_cached_with_other_keywords(tmp_path: Path):
+    """Records cached before a keyword was added to HEADER_KEYWORDS (PUPIL for NIRCam) are read
+    again: the cache key is path, size and mtime only, so the keyword set travels with the record."""
+    img = synthetic_image(tmp_path / "a_rate.fits", EXP_TYPE="NRC_IMAGE", instrument="NIRCAM", PUPIL="CLEAR")
+    cache = HeaderCache(tmp_path / "headers.json")
+    key = cache._key(img)
+    cache._data[key] = {"KIND": "fits", "EXP_TYPE": "NRC_IMAGE"}       # an entry from before PUPIL
+    assert cache.get(img)["PUPIL"] == "CLEAR"
+    cache._data[key]["EXP_TYPE"] = "POISONED"                           # current entries stay cached
+    assert cache.get(img)["EXP_TYPE"] == "POISONED"
+
+
 def test_association_files_are_summarised(tmp_path: Path):
     (tmp_path / "x_asn.json").write_text(
         '{"asn_type": "spec3", "products": [{"name": "p", "members": [{"expname": "a_cal.fits"}]}]}')

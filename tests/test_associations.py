@@ -110,3 +110,19 @@ def test_write_and_members_roundtrip(tmp_path: Path):
     data = json.loads(relative.read_text())
     assert not Path(data["products"][0]["members"][0]["expname"]).is_absolute()
     assert members_of(relative) == [tmp_path / "asn_rel" / ".." / "m_rate.fits"]
+
+
+def test_optelem_follows_the_dms_rule_for_imagers(tmp_path: Path):
+    """{OPTELEM} of imaging products is MAST's: filter and pupil wheel, empty ones dropped, sorted
+    case-blind (jwst dms_base.get_opt_element) -- spectroscopic modes keep their own forms."""
+    def name(**keys):
+        rec = FileRecord(tmp_path / "x.fits", {"PROGRAM": "2562", "OBSERVTN": "1", "TARGID": "t001", **keys})
+        return product_name("jw{PROGRAM}-o{OBSERVTN}_{TARGID}_{INSTRUME}_{OPTELEM}", rec)
+
+    assert name(INSTRUME="NIRCAM", FILTER="F200W", PUPIL="CLEAR") == "jw02562-o001_t001_nircam_clear-f200w"
+    assert name(INSTRUME="NIRCAM", FILTER="F444W", PUPIL="F405N") == "jw02562-o001_t001_nircam_f405n-f444w"
+    assert name(INSTRUME="NIRISS", FILTER="CLEAR", PUPIL="F150W") == "jw02562-o001_t001_niriss_clear-f150w"
+    assert name(INSTRUME="MIRI", FILTER="F770W") == "jw02562-o001_t001_miri_f770w"
+    assert name(INSTRUME="MIRI", FILTER="F1280W", PUPIL="N/A") == "jw02562-o001_t001_miri_f1280w"
+    assert name(INSTRUME="MIRI", CHANNEL="12", BAND="SHORT") == "jw02562-o001_t001_miri_12-short"
+    assert name(INSTRUME="NIRSPEC", GRATING="G395H", FILTER="F290LP") == "jw02562-o001_t001_nirspec_g395h-f290lp"

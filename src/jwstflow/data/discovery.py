@@ -8,6 +8,7 @@ Association JSON files are also understood (they are inputs to *3 pipelines).
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
 import logging
 import re
@@ -33,10 +34,12 @@ HEADER_KEYWORDS: tuple[str, ...] = (
     "DETECTOR",
     "EXP_TYPE",
     "FILTER",
+    "PUPIL",
     "GRATING",
     "CHANNEL",
     "BAND",
     "SUBARRAY",
+    "MODULE",
     "TARGPROP",
     "TARGNAME",
     "TARG_RA",
@@ -60,6 +63,10 @@ HEADER_KEYWORDS: tuple[str, ...] = (
     "CRDS_CTX",
     "DATAMODL",
 )
+
+#: Fingerprint of HEADER_KEYWORDS, stored with every cached FITS record so that adding a keyword
+#: re-reads the headers cached before (the cache key is the file's path, size and mtime only).
+_KEYSET = hashlib.sha1(",".join(HEADER_KEYWORDS).encode()).hexdigest()[:8]
 
 
 @dataclass
@@ -103,7 +110,9 @@ class HeaderCache:
 
     def get(self, p: Path) -> dict[str, Any]:
         key = self._key(p)
-        if key not in self._data:
+        if key not in self._data or (self._data[key].get("KIND") == "fits"
+                                       and self._data[key].get("_KEYSET") != _KEYSET):
+            # unknown, or cached when HEADER_KEYWORDS was a different list: read again
             self._data[key] = read_metadata(p)
             self._dirty = True
         return self._data[key]
@@ -144,7 +153,7 @@ def read_metadata(p: Path) -> dict[str, Any]:
     except Exception as exc:  # unreadable file: keep going, filters will exclude it
         log.warning("cannot read header of %s: %s", p, exc)
         return {"KIND": "fits", "ERROR": str(exc)}
-    meta: dict[str, Any] = {"KIND": "fits"}
+    meta: dict[str, Any] = {"KIND": "fits", "_KEYSET": _KEYSET}
     for k in HEADER_KEYWORDS:
         if k in hdr:
             v = hdr[k]

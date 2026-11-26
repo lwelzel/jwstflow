@@ -112,7 +112,18 @@ def _optelem(rec: FileRecord) -> str:
         return f"{rec.get('GRATING', 'none')}-{rec.get('FILTER', 'none')}"
     if inst == "MIRI" and rec.get("CHANNEL"):
         return f"{rec.get('CHANNEL')}-{rec.get('BAND', 'none')}"
-    return str(rec.get("FILTER", rec.get("GRATING", "none")))
+    if rec.get("FILTER") is not None or rec.get("PUPIL") is not None:
+        # the DMS rule (jwst.associations dms_base.get_opt_element): filter and pupil wheel, the
+        # empty ones dropped, sorted case-blind, joined by '-': NIRCam clear-f200w / f405n-f444w,
+        # NIRISS clear-f150w, MIRI imaging f770w (no pupil)
+        elems = sorted((str(v) for v in (rec.get("FILTER"), rec.get("PUPIL"))
+                        if v is not None and str(v).strip().upper() not in _EMPTY_ELEM), key=str.lower)
+        return "-".join(elems) or "clear"
+    return str(rec.get("GRATING", "none"))
+
+
+#: Optical-element values that do not enter a DMS product name.
+_EMPTY_ELEM = {"", "N/A", "ANY", "NONE"}
 
 
 class _SafeMap(dict):

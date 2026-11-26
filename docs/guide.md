@@ -582,7 +582,7 @@ checkpoint: {fingerprint: fast, require_outputs: true}   # fast = size+mtime, co
 download:                    # optional; astroquery.mast by default
   program: 1234
   observations: [3, 4]
-  instrument: NIRSPEC        # NIRSPEC | MIRI
+  instrument: NIRSPEC        # NIRSPEC | MIRI | NIRCAM | NIRISS
   modes: [IFU]               # MAST sub-modes: IFU, MSA, SLIT, IMAGE, SLITLESS, MRS...
   products: [UNCAL]          # MAST productSubGroupDescription
   filename_patterns: null    # e.g. ['*_nrs1_*']

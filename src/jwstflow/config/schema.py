@@ -145,7 +145,7 @@ class CheckpointConfig(_Base):
 # Data acquisition
 # ----------------------------------------------------------------------------
 
-Instrument = Literal["NIRSPEC", "MIRI"]
+Instrument = Literal["NIRSPEC", "MIRI", "NIRCAM", "NIRISS"]
 
 
 class DownloadConfig(_Base):
