@@ -122,6 +122,13 @@ def _optelem(rec: FileRecord) -> str:
     return str(rec.get("GRATING", "none"))
 
 
+def _subarray_suffix(rec: FileRecord) -> str:
+    """The DMS product name's subarray part (jwst dms_base.get_subarray): '-<subarray>' in lower case,
+    empty for the full array or when the keyword is missing -- jw04290-o004_t002_miri_f770w-brightsky."""
+    sub = str(rec.get("SUBARRAY") or "").strip().lower()
+    return "" if sub in ("", "full", "n/a", "none") else f"-{sub}"
+
+
 #: Optical-element values that do not enter a DMS product name.
 _EMPTY_ELEM = {"", "N/A", "ANY", "NONE"}
 
@@ -134,6 +141,7 @@ class _SafeMap(dict):
 def product_name(template: str, rec: FileRecord) -> str:
     values = _SafeMap({k: v for k, v in rec.meta.items()})
     values["OPTELEM"] = _optelem(rec)
+    values["SUBARRAY_SUFFIX"] = _subarray_suffix(rec)
     if not values.get("TARGID"):  # DMS target id comes from the MAST log; slug of the proposal name otherwise
         values["TARGID"] = sanitize(str(rec.get("TARGPROP") or rec.get("TARGNAME") or "target"))
     if "PROGRAM" in values:

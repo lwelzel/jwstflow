@@ -311,7 +311,9 @@ class AssociationConfig(_Base):
         "level-3 convention jw<PPPPP>-o<OOO>_<tTTT>_<instrument>: {TARGID} is the MAST target id "
         "recorded at download time (falls back to a slug of TARGPROP), {INSTRUME} is lower-cased "
         "and cube_build appends the band / grating-filter itself. {OPTELEM} expands to "
-        "'g395h-f290lp' / 'ch1-short' when a product name needs it (NIRSpec IFU: use _{GRATING}).",
+        "'g395h-f290lp' / 'ch1-short' when a product name needs it (NIRSpec IFU: use _{GRATING}), "
+        "and for imagers to filter and pupil as DMS names them ('clear-f200w', 'f405n-f444w', 'f770w'); "
+        "{SUBARRAY_SUFFIX} is DMS's subarray part, '-brightsky' / '-sub640', empty for the full array.",
     )
     relative_paths: bool = Field(
         default=False,

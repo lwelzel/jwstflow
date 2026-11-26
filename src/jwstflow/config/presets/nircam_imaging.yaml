@@ -36,8 +36,8 @@ stages:
     association:
       mode: group
       level: 3
-      group_by: [PROGRAM, OBSERVTN, FILTER, PUPIL]   # short- and long-wavelength channels, both modules
-      product_name: "jw{PROGRAM}-o{OBSERVTN}_{TARGID}_nircam_{OPTELEM}"   # {OPTELEM}: clear-f200w, f405n-f444w
+      group_by: [PROGRAM, OBSERVTN, FILTER, PUPIL, SUBARRAY]   # short- and long-wavelength channels, both modules
+      product_name: "jw{PROGRAM}-o{OBSERVTN}_{TARGID}_nircam_{OPTELEM}{SUBARRAY_SUFFIX}"   # clear-f200w, f405n-f444w-sub640
     parameters:
       steps:
         tweakreg: {skip: false}

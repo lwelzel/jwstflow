@@ -126,3 +126,18 @@ def test_optelem_follows_the_dms_rule_for_imagers(tmp_path: Path):
     assert name(INSTRUME="MIRI", FILTER="F1280W", PUPIL="N/A") == "jw02562-o001_t001_miri_f1280w"
     assert name(INSTRUME="MIRI", CHANNEL="12", BAND="SHORT") == "jw02562-o001_t001_miri_12-short"
     assert name(INSTRUME="NIRSPEC", GRATING="G395H", FILTER="F290LP") == "jw02562-o001_t001_nirspec_g395h-f290lp"
+
+
+def test_subarray_suffix_follows_the_dms_rule(tmp_path: Path):
+    """DMS appends the subarray, in lower case, unless it is the full array (MAST's
+    jw04290-o004_t002_miri_f770w-brightsky_i2d.fits)."""
+    template = "jw{PROGRAM}-o{OBSERVTN}_{TARGID}_{INSTRUME}_{OPTELEM}{SUBARRAY_SUFFIX}"
+    def name(**keys):
+        rec = FileRecord(tmp_path / "x.fits", {"PROGRAM": "4290", "OBSERVTN": "4", "TARGID": "t002", **keys})
+        return product_name(template, rec)
+
+    assert name(INSTRUME="MIRI", FILTER="F770W", SUBARRAY="BRIGHTSKY") == "jw04290-o004_t002_miri_f770w-brightsky"
+    assert name(INSTRUME="MIRI", FILTER="F770W", SUBARRAY="FULL") == "jw04290-o004_t002_miri_f770w"
+    assert name(INSTRUME="NIRCAM", FILTER="F444W", PUPIL="CLEAR") == "jw04290-o004_t002_nircam_clear-f444w"
+    assert name(INSTRUME="NIRCAM", FILTER="F200W", PUPIL="CLEAR", SUBARRAY="SUB640") == \
+        "jw04290-o004_t002_nircam_clear-f200w-sub640"

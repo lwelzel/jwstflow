@@ -35,8 +35,8 @@ stages:
     association:
       mode: group
       level: 3
-      group_by: [PROGRAM, OBSERVTN, FILTER]
-      product_name: "jw{PROGRAM}-o{OBSERVTN}_{TARGID}_miri_{FILTER}"
+      group_by: [PROGRAM, OBSERVTN, FILTER, SUBARRAY]
+      product_name: "jw{PROGRAM}-o{OBSERVTN}_{TARGID}_miri_{OPTELEM}{SUBARRAY_SUFFIX}"   # f770w, f770w-brightsky
     parameters:
       steps:
         tweakreg: {skip: false}
