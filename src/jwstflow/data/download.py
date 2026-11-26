@@ -168,6 +168,29 @@ def build_query(cfg: DownloadConfig) -> dict[str, object]:
     return crit
 
 
+def query_observations(cfg: DownloadConfig, observations: Any = None) -> Any:
+    """The MAST observations of ``cfg``: one ``query_criteria`` per observation pattern, stacked.
+
+    MAST honours only the first of several wildcard values of ``obs_id`` (a list of
+    ``jw01234-o006*``, ``jw01234-o016*`` returns observation 6 alone), so every observation is
+    asked for on its own. ``observations`` stands in for ``astroquery.mast.Observations`` (tests).
+    """
+    if observations is None:
+        from astroquery.mast import Observations as observations
+    crit = build_query(cfg)
+    patterns = crit.get("obs_id")
+    if not isinstance(patterns, list) or len(patterns) < 2:
+        return observations.query_criteria(**crit)
+    from astropy.table import unique, vstack
+
+    results = [observations.query_criteria(**dict(crit, obs_id=p)) for p in patterns]
+    parts = [t for t in results if len(t)]
+    if not parts:
+        return results[0]                               # nothing anywhere: an empty table
+    table = vstack(parts, metadata_conflicts="silent")
+    return unique(table, keys="obs_id") if "obs_id" in table.colnames else table
+
+
 def _download_astroquery(cfg: DownloadConfig, dest: Path, *, dry_run: bool) -> list[Path]:
     try:
         from astroquery.mast import Observations
@@ -195,7 +218,7 @@ def _download_astroquery(cfg: DownloadConfig, dest: Path, *, dry_run: bool) -> l
 
     crit = build_query(cfg)
     log.info("querying MAST: %s", crit)
-    obs = Observations.query_criteria(**crit)
+    obs = query_observations(cfg, Observations)
     if len(obs) == 0:
         log.warning("MAST query returned no observations")
         return sorted(dest.glob("*.fits"))
@@ -332,7 +355,7 @@ def download_reference_products(cfg: DownloadConfig, dest: Path, *, dry_run: boo
 
     dest = Path(dest).expanduser()
     dest.mkdir(parents=True, exist_ok=True)
-    obs = Observations.query_criteria(**build_query(cfg))
+    obs = query_observations(cfg, Observations)
     if len(obs) == 0:
         log.warning("MAST reference products: query returned no observations")
         return []
