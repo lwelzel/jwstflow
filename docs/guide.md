@@ -375,8 +375,9 @@ jwstflow/
                 (instrument.py), the mask-product contract (masks.py), aperture corrections
                 (apcorr.py); psf/, clusters/, gaps/ and stitching/ (joint cubes), each with
                 its library, its product and its steps.py
-  images/       imaging products: an i2d / cal image with its WCS and band (io.py), the
-                imaging filters and their resolution (filters.py); astrometry/ (registration
+  images/       imaging products: an i2d / cal image with its WCS and band, cutouts that keep
+                a WCS of their own (io.py), the imaging filters, their throughput curves,
+                band averages of spectra and their resolution (filters.py); astrometry/ (registration
                 of a run's images to each other and to Gaia), with its library, its product
                 and its steps.py
   qa/           the QA figure standard; qa/steps/ holds every QA step
@@ -488,9 +489,11 @@ official name and record the edit in the header.
 
 ## Data products shipped with jwstflow
 
-Curated reference tables (`spectral_features/*.ecsv` today) ship **inside**
+Curated reference tables (`spectral_features/*.ecsv`; `filters/*.ecsv`, the
+imaging filters of NIRCam, NIRISS and MIRI with their throughput curves,
+generated from stpsf's by `scripts/build_filter_table.py`) ship **inside**
 the package (`jwstflow/refdata/`), so every install has them. A project can
-override them with a `data/spectral_features/` directory at its project root,
+override them with a `data/spectral_features/` (`data/filters/`) directory at its project root,
 or point `$JWSTFLOW_DATA_DIR` somewhere else; lookup order is env var,
 project override, package. Observational data and run products are never
 mixed into either.
@@ -697,7 +700,11 @@ your YAML for autocompletion and inline validation in VS Code and friends.
   exposures also get their own product so that level 3 can use them.
 * `group` (level 3): one association per unique combination of `group_by`
   header values; `product_name` is a template over header keywords
-  (`{OPTELEM}` becomes `g395h-f290lp` or `ch1-short` etc.). For IFU cubes
+  (`{OPTELEM}` becomes `g395h-f290lp` or `ch1-short` etc., and for imagers the
+  filter and pupil as DMS names them: `clear-f200w`, `f405n-f444w`, `f770w`;
+  `{SUBARRAY_SUFFIX}` is DMS's subarray part, `-brightsky` / `-sub640`, empty for
+  the full array -- imaging products named `..._{OPTELEM}{SUBARRAY_SUFFIX}` are
+  MAST's names, which `mast_compare` relies on). For IFU cubes
   follow the DMS convention and leave the band out of the product name
   (`..._nirspec_{GRATING}` for NIRSpec, `..._miri` for MRS): `cube_build`
   appends `_<grating>-<filter>` / `_ch1-short` itself. Association file
@@ -783,5 +790,8 @@ verified against jwst 3.0.0 / stpipe 1.1.0.
 * streaming DAG (start spec2 on an exposure as soon as its detector1 finished)
   instead of stage-level barriers
 * `dask-jobqueue` presets for SLURM/PBS
-* NIRCam / NIRISS presets (the machinery is instrument-agnostic)
+* NIRISS imaging preset (NIRCam and MIRI imaging have theirs; the machinery and
+  `jwstflow.images` are instrument-agnostic)
+* a PSF library for imaging filters (`psf_cube` covers the IFUs), for aperture
+  corrections of image photometry
 * HTML run report from the checkpoint records
