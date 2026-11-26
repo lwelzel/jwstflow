@@ -12,6 +12,7 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 #: JWST's primary mirror, the diameter that sets the diffraction limit lambda / D.
 TELESCOPE_DIAMETER_M = 6.5
@@ -20,6 +21,7 @@ TELESCOPE_DIAMETER_M = 6.5
 #: F2550W -- MIRI F560W / F770W are broadened by the detector by 10-15 %).
 FWHM_LAMBDA_OVER_D = 1.03
 TABLE = "jwst_imaging_filters.ecsv"
+CURVES = "jwst_imaging_throughputs.ecsv"
 
 
 @dataclass(frozen=True)
@@ -92,3 +94,54 @@ def band_of(instrument: str | None, filter: str | None, pupil: str | None = None
     found = [bands[(inst, str(v).strip().upper())] for v in (filter, pupil)
              if v is not None and (inst, str(v).strip().upper()) in bands]
     return min(found, key=lambda b: b.width_um) if found else None
+
+
+@lru_cache(maxsize=4)
+def _curves(directory: str) -> dict[tuple[str, str], tuple[Any, Any]]:
+    import numpy as np
+    from astropy.table import Table
+
+    table = Table.read(Path(directory) / "filters" / CURVES, format="ascii.ecsv")
+    out: dict[tuple[str, str], tuple[Any, Any]] = {}
+    keys = [(str(i).upper(), str(f).upper()) for i, f in zip(table["instrument"], table["filter"])]
+    wave, thr = np.asarray(table["wavelength_um"], float), np.asarray(table["throughput"], float)
+    for key in dict.fromkeys(keys):
+        sel = np.array([k == key for k in keys])
+        out[key] = (wave[sel], thr[sel])
+    return out
+
+
+def throughput(band: Band) -> tuple[Any, Any]:
+    """(wavelength [um], relative throughput) of a band, from ``refdata/filters`` (stpsf's curves)."""
+    return _curves(str(data_dir()))[(band.instrument, band.name)]
+
+
+def band_average(wavelength_um: Any, flux_nu: Any, band: Band, *, min_coverage: float = 0.95) -> float:
+    """The flux density a photon-counting detector behind ``band`` measures of a spectrum: the
+    average of F_nu weighted by T(lambda) / lambda (the pivot-wavelength convention of the JWST
+    photometric calibration, Tokunaga & Vacca 2005), in the units of ``flux_nu``.
+
+    The spectrum is interpolated onto the curve's samples; NaN when it covers less than
+    ``min_coverage`` of the band's weight (gaps, or the band running off the spectrum's ends).
+    """
+    import numpy as np
+
+    w, t = throughput(band)
+    wave = np.asarray(wavelength_um, float)
+    flux = np.asarray(flux_nu, float)
+    ok = np.isfinite(wave) & np.isfinite(flux)
+    if ok.sum() < 2:
+        return float("nan")
+    order = np.argsort(wave[ok])
+    ws, fs = wave[ok][order], flux[ok][order]
+    weight = t / w * np.gradient(w)          # per sample: a sum over samples, never across a gap
+    inside = (w >= ws[0]) & (w <= ws[-1])
+    # a gap in the spectrum larger than the curve's sampling is not bridged
+    step = np.median(np.diff(ws)) if ws.size > 2 else np.inf
+    idx = np.clip(np.searchsorted(ws, w), 1, ws.size - 1)
+    gap = (ws[idx] - ws[idx - 1]) > max(10 * step, np.median(np.diff(w)))
+    use = inside & ~gap
+    if weight[use].sum() < min_coverage * weight.sum():
+        return float("nan")
+    f = np.interp(w[use], ws, fs)
+    return float(np.sum(f * weight[use]) / np.sum(weight[use]))

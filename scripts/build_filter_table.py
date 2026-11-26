@@ -13,7 +13,11 @@ density FND are not filters a science image is named by and are skipped) it reco
   wavelength at which a flux density per unit frequency and per unit wavelength convert into each
   other exactly for the band (Tokunaga & Vacca 2005, PASP 117, 421);
 * ``width_um`` -- the equivalent width int T dlambda / max T;
-* ``wave_min_um`` / ``wave_max_um`` -- where the throughput crosses half its maximum, outermost.
+* ``wave_min_um`` / ``wave_max_um`` -- where the throughput crosses half its maximum, outermost;
+
+and, in ``jwst_imaging_throughputs.ecsv``, the curve itself (relative throughput against wavelength,
+200 samples over where it exceeds 0.1 % of its peak) for band averages of spectra
+(``jwstflow.images.filters.band_average``).
 
 The curves are the relative system throughputs stpsf ships (normalised to a peak of one), so the
 table carries wavelengths and widths, not absolute throughputs. Nothing is written without
@@ -30,6 +34,10 @@ from pathlib import Path
 import numpy as np
 
 TABLE = Path(__file__).resolve().parents[1] / "src" / "jwstflow" / "refdata" / "filters" / "jwst_imaging_filters.ecsv"
+CURVES = TABLE.with_name("jwst_imaging_throughputs.ecsv")
+#: The curves are kept at this many samples per filter (linear interpolation of stpsf's, over the range
+#: where the throughput exceeds CURVE_FLOOR of its peak): enough for band averages to 1e-4.
+CURVE_SAMPLES, CURVE_FLOOR = 200, 1e-3
 INSTRUMENTS = {"NIRCam": "NIRCAM", "NIRISS": "NIRISS", "MIRI": "MIRI"}
 SKIP = {"WLP4", "CLEAR", "FND"}
 
@@ -57,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = Path(os.environ.get("STPSF_PATH", "~/data/stpsf-data")).expanduser()
     version = (root / "version.txt").read_text().strip() if (root / "version.txt").exists() else "unknown"
-    rows = []
+    rows, curves = [], []
     for folder, instrument in INSTRUMENTS.items():
         for path in sorted((root / folder / "filters").glob("*_throughput.fits")):
             name = path.name.split("_")[0].upper()
@@ -67,6 +75,12 @@ def main(argv: list[str] | None = None) -> int:
             wave = np.asarray(data["WAVELENGTH"], dtype=float) * 1e-4        # Angstrom -> um
             pivot, width, lo, hi = band_numbers(wave, np.asarray(data["THROUGHPUT"], dtype=float))
             rows.append((instrument, name, round(pivot, 4), round(width, 4), round(lo, 4), round(hi, 4)))
+            t = np.clip(np.asarray(data["THROUGHPUT"], dtype=float), 0.0, None)
+            order = np.argsort(wave)
+            inside = np.nonzero(t[order] >= CURVE_FLOOR * t.max())[0]
+            grid = np.linspace(wave[order][inside[0]], wave[order][inside[-1]], CURVE_SAMPLES)
+            for w, v in zip(grid, np.interp(grid, wave[order], t[order]) / t.max()):
+                curves.append((instrument, name, round(float(w), 5), round(float(v), 5)))
             print(f"{instrument:7s} {name:7s} pivot {pivot:8.4f} um  width {width:7.4f} um  "
                   f"half-max {lo:8.4f}-{hi:8.4f} um")
     table = Table(rows=rows, names=("instrument", "filter", "pivot_um", "width_um", "wave_min_um", "wave_max_um"))
@@ -83,10 +97,21 @@ def main(argv: list[str] | None = None) -> int:
                       f"(data version {version}); pivot wavelength after Tokunaga & Vacca 2005, PASP 117, 421",
         "usage": "jwstflow.images.filters.band_of(instrument, filter, pupil)",
     })
+    curve_table = Table(rows=curves, names=("instrument", "filter", "wavelength_um", "throughput"))
+    curve_table["wavelength_um"].unit = "um"
+    curve_table["throughput"].description = "relative system throughput (peak 1)"
+    curve_table.meta.update({
+        "dataset": "jwst_imaging_throughputs",
+        "description": f"the curves of jwst_imaging_filters: {CURVE_SAMPLES} samples per filter where the throughput "
+                       f"exceeds {CURVE_FLOOR:g} of its peak",
+        "provenance": table.meta["provenance"],
+        "usage": "jwstflow.images.filters.throughput(band), band_average(wavelength, flux, band)",
+    })
     if args.write:
         TABLE.parent.mkdir(parents=True, exist_ok=True)
         table.write(TABLE, format="ascii.ecsv", overwrite=True)
-        print(f"wrote {len(table)} filters to {TABLE}")
+        curve_table.write(CURVES, format="ascii.ecsv", overwrite=True)
+        print(f"wrote {len(table)} filters to {TABLE} and their curves to {CURVES}")
     return 0
 
 

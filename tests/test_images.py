@@ -54,3 +54,20 @@ def test_read_image_and_a_cutout_keep_the_sky_where_it_is(tmp_path: Path):
     assert edge.origin == (0, 0) and edge.shape == (20, 20)        # 2 + 17 + 1 pixels
     nested = cut.cutout(*cut.world(17.0, 17.0), 0.5)        # a cutout of a cutout knows the parent's origin
     assert nested.world(0, 0) == pytest.approx(image.world(nested.origin[0], nested.origin[1]), abs=1e-10)
+
+
+def test_band_average_is_the_photon_weighted_mean_of_f_nu():
+    from jwstflow.images import band_average, throughput
+
+    band = band_of("NIRCAM", "F444W", "CLEAR")
+    w, t = throughput(band)
+    assert w.size == 200 and t.max() == pytest.approx(1.0, abs=1e-3) and w.min() < band.wave_min_um < band.wave_max_um < w.max()
+    wave = np.linspace(3.0, 6.0, 3000)
+    assert band_average(wave, np.full_like(wave, 7.0), band) == pytest.approx(7.0)
+    power = (wave / 4.4) ** 2                                   # F_nu rising with wavelength
+    direct = np.trapezoid(np.interp(w, wave, power) * t / w, w) / np.trapezoid(t / w, w)
+    assert band_average(wave, power, band) == pytest.approx(direct, rel=1e-4)      # sums over 200 samples
+    assert np.isnan(band_average(wave[wave < 4.4], power[wave < 4.4], band))         # half the band missing
+    holed = np.where((wave > 4.2) & (wave < 4.6), np.nan, power)
+    assert np.isnan(band_average(wave, holed, band))                                 # a gap inside the band
+    assert np.isfinite(band_average(np.linspace(5, 30, 5000), np.ones(5000), band_of("MIRI", "F2100W")))

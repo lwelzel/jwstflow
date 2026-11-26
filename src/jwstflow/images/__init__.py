@@ -6,13 +6,15 @@ The toolkit, importable from here (``from jwstflow.images import read_image, ban
   SCI / ERR / WHT / CON / DQ, the celestial WCS, the pixel solid angle, the band; cutouts around
   a sky position that keep a WCS of their own;
 * :mod:`.filters` -- the imaging filters of NIRCam, NIRISS and MIRI (pivot wavelength, width,
-  edges; ``refdata/filters``) and the diffraction-limited resolution at a wavelength.
+  edges; ``refdata/filters``), their throughput curves and the band average of a spectrum through
+  them (synthetic photometry), and the diffraction-limited resolution at a wavelength.
 
 There are no image features in jwstflow yet: the stock figures of imaging products are QA steps
 (``jwstflow.qa.steps.images``), the science of particular sources lives in contributed packages.
 """
 
-from .filters import Band, all_bands, band_of, diffraction_fwhm_arcsec
+from .filters import Band, all_bands, band_average, band_of, diffraction_fwhm_arcsec, throughput
 from .io import Image, read_image
 
-__all__ = ["Band", "Image", "all_bands", "band_of", "diffraction_fwhm_arcsec", "read_image"]
+__all__ = ["Band", "Image", "all_bands", "band_average", "band_of", "diffraction_fwhm_arcsec", "read_image",
+           "throughput"]
