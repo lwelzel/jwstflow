@@ -45,20 +45,26 @@ log = logging.getLogger(__name__)
 
 def write_mask_product(path: Path, cube_path: Path, mask: np.ndarray, cont: np.ndarray, contimg: np.ndarray,
                        *, features: dict[str, list] | None = None, featimg: list[np.ndarray] | None = None,
-                       featmask: list[np.ndarray] | None = None, keys: dict[str, Any] | None = None) -> Path:
+                       featmask: list[np.ndarray] | None = None, keys: dict[str, Any] | None = None,
+                       headers: tuple[Any, Any] | None = None) -> Path:
     """Write a mask product on the cube's own pixel grid (layout in the module docstring).
 
     ``keys`` adds/overrides PRIMARY keywords (record the producing step's
     parameters there). ``features`` is a column dict for the FEATURES table;
     it, ``featimg`` and ``featmask`` are written only when features were
-    evaluated.
+    evaluated. ``headers`` -- (primary, SCI) -- replaces the headers of
+    ``cube_path`` when the mask is on another grid than the file's: a cutout
+    of an image (:meth:`jwstflow.images.Image.cutout`) carries its own WCS.
     """
     from astropy.io import fits
     from astropy.table import Table
 
-    with fits.open(cube_path) as hdul:
-        prim_hdr = hdul[0].header.copy()
-        sci_hdr = hdul["SCI"].header.copy() if "SCI" in hdul else fits.Header()
+    if headers is not None:
+        prim_hdr, sci_hdr = headers[0].copy(), headers[1].copy()
+    else:
+        with fits.open(cube_path) as hdul:
+            prim_hdr = hdul[0].header.copy()
+            sci_hdr = hdul["SCI"].header.copy() if "SCI" in hdul else fits.Header()
     prim = fits.PrimaryHDU(header=prim_hdr)
     for k, v in (keys or {}).items():
         prim.header[k] = v
