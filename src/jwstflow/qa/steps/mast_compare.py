@@ -66,7 +66,7 @@ class MastCompare(Step):
     """
 
     level = "qa"
-    version = "4"   # 3 -> 4: resampled images (_i2d); 2 -> 3: logarithmic wavelength axis on the spectrum figure
+    version = "5"   # 4 -> 5: mosaics drawn less their sky; 3 -> 4: resampled images (_i2d); 2 -> 3: logarithmic wavelength axis on the spectrum figure
     needs_reference_products = True   # the run waits for the background download of the MAST products
 
     def run(self, inputs: list[Path], ctx: RunContext, *, reference_dir: str | None = None,
@@ -252,7 +252,8 @@ def compare_images(ours: Path, theirs: Path, out_dir: Path, *, size: float = 12.
     outputs = [out]
     if plot:
         outputs.append(_plot_images(out.with_suffix(".png"), cut, mast, diff, ours.name, theirs.name, prov,
-                                    ratio=ratio, sum_ratio=sum_ratio, sky=sky, shift=(dx, dy), scale=scale))
+                                    ratio=ratio, sum_ratio=sum_ratio, sky=sky, shift=(dx, dy), scale=scale,
+                                    skies=(sky_a, sky_b)))
     return outputs
 
 
@@ -281,17 +282,19 @@ def _shift(a: np.ndarray, b: np.ndarray, both: np.ndarray) -> tuple[float, float
 
 def _plot_images(path: Path, cut: Any, mast: np.ndarray, diff: np.ndarray, name: str, theirs: str,
                  prov: dict[str, Any], *, ratio: float, sum_ratio: float, sky: float, shift: tuple[float, float],
-                 scale: float) -> Path:
+                 scale: float, skies: tuple[float, float] = (0.0, 0.0)) -> Path:
     from ... import qa
 
     sky_frame = qa.SkyFrame.from_header(cut.header, cut.shape, primary=cut.primary)
     fig, axes = qa.subplots(1, 3, figsize=(15.0, 4.6))
-    shown = [qa.to_mjy(v, cut.unit)[0] for v in (cut.data, mast)]        # the norm acts on what is drawn
+    # both images less their own sky (an image can carry a sky far above its sources), on one stretch
+    above = (cut.data - skies[0], mast - skies[1])
+    shown = [qa.to_mjy(v, cut.unit)[0] for v in above]                  # the norm acts on what is drawn
     norm = qa.stretch_norm(np.concatenate([v[np.isfinite(v)] for v in shown]), "asinh", (1.0, 99.5))
-    qa.Frame(axes[0]).image(cut.data, unit=cut.unit, sky=sky_frame, norm=norm, sides="lbt", cbar=False)
-    qa.tag(axes[0], "jwstflow")
-    qa.Frame(axes[1]).image(mast, unit=cut.unit, sky=sky_frame, norm=norm, sides="bt")
-    qa.tag(axes[1], "MAST, on jwstflow's grid")
+    qa.Frame(axes[0]).image(above[0], unit=cut.unit, sky=sky_frame, norm=norm, sides="lbt", cbar=False)
+    qa.tag(axes[0], "jwstflow $-$ its sky")
+    qa.Frame(axes[1]).image(above[1], unit=cut.unit, sky=sky_frame, norm=norm, sides="bt")
+    qa.tag(axes[1], "MAST, on jwstflow's grid, $-$ its sky")
     qa.Frame(axes[2]).image(diff, unit=cut.unit, sky=sky_frame, center=0.0, sides="btr")
     qa.tag(axes[2], "jwstflow $-$ MAST")
     qa.annotate(axes[0], name, f"MAST: {theirs} ({prov['MASTCAL'][0]}, {prov['MASTCTX'][0]}); jwstflow: "
