@@ -3,7 +3,7 @@
 <p align="center">
   <a href="https://github.com/spacetelescope/jwst"><img alt="jwst" src="https://img.shields.io/badge/jwst-3.x-blue"></a>
   <img alt="python" src="https://img.shields.io/badge/python-%E2%89%A53.12-blue">
-  <img alt="tests" src="https://img.shields.io/badge/tests-87%20passing-brightgreen">
+  <img alt="tests" src="https://img.shields.io/badge/tests-300%20passing-brightgreen">
   <img alt="status" src="https://img.shields.io/badge/status-alpha-orange">
 </p>
 
@@ -95,8 +95,8 @@ stages:
 Outputs land in `reductions/<target>/<run>/` split by calibration level
 (`stage1/ ... stage4/`, `qa/`), raw data is shared per target, and stage
 names come from the steps themselves so every run looks the same everywhere.
-Start from a preset (`extends: preset:nirspec_ifu`; also `nirspec_mos`,
-`miri_mrs`, `miri_imaging`, `nircam_imaging`) and override only what your data needs.
+Start from a preset (`extends: preset:nirspec_ifu`; also `nirspec_fs`,
+`nirspec_mos`, `miri_mrs`, `miri_lrs`, `miri_imaging`, `nircam_imaging`) and override only what your data needs.
 
 ### The rest of the interface
 
@@ -144,6 +144,43 @@ and the outputs after every run (custom steps can never masquerade as
 official products); `jwstflow new-step` scaffolds a step with a passing test
 and `jwstflow.testing` runs steps on synthetic data without CRDS or real
 observations.
+
+## Coverage
+
+jwstflow calibrates nothing itself: every calibration step is the `jwst` pipeline's, so in
+principle it reaches what `jwst` reaches. What it adds around the steps -- finding and
+downloading the exposures, building the associations, naming the products, the QA -- is where
+a mode is either supported by construction or has actually been run. The table keeps the two
+apart:
+
+- **technical**: what the orchestration supports by construction. Pipelines have aliases
+  (`detector1`, `image2`, `spec2`, `image3`, `spec3`, `tso3`, `coron3`, `dark`) and any other
+  `jwst` pipeline or step runs by its dotted path (e.g. `jwst.pipeline:Ami3Pipeline`);
+  downloads take NIRSpec, MIRI, NIRCam and NIRISS; associations are built per exposure or
+  grouped by header keywords, with member rules for `background`, `imprint`, `psf`,
+  `target_acquisition`, `selfcal` and `sourcecat` exposures; a preset where one exists;
+- **verified**: reduced end to end on real data, the products compared with MAST's
+  (`mast_compare`), in [jwstflow-reducer](https://github.com/lwelzel/jwstflow-reducer).
+
+| Instrument | Mode | Verified | Technical |
+|---|---|---|---|
+| NIRSpec | IFU | yes: 6 targets (programs 1309, 1621, 1751, 5299, 5857) | preset `nirspec_ifu` |
+| NIRSpec | fixed slit | -- | preset `nirspec_fs` |
+| NIRSpec | MOS | -- | preset `nirspec_mos` (with the MSA metadata) |
+| NIRSpec | BOTS (time series) | -- | `detector1` -> `spec2` -> `tso3`; no preset |
+| MIRI | MRS | yes: 5 targets (programs 1282, 1309, 1751) | preset `miri_mrs` |
+| MIRI | imaging | yes: 9 targets (programs 2562, 4290); every mosaic identical to MAST's or within 1 % | preset `miri_imaging` |
+| MIRI | LRS | -- | preset `miri_lrs` (slit); slitless time series via `tso3` |
+| MIRI | coronagraphy | -- | `coron3` with `psf` members |
+| NIRCam | imaging | yes: 9 targets (programs 2562, 4290), full frame and subarrays | preset `nircam_imaging` |
+| NIRCam | coronagraphy | -- | `coron3` with `psf` members |
+| NIRCam | grism and imaging time series | -- | `tso3` |
+| NIRCam | WFSS | -- | no: `spec2` needs direct-image and segmentation-map members that the associations do not build |
+| NIRISS | imaging | -- | `image2` -> `image3` |
+| NIRISS | SOSS | -- | `spec2` -> `tso3` |
+| NIRISS | AMI | -- | `jwst.pipeline:Ami3Pipeline` by its dotted path, with `psf` members |
+| NIRISS | WFSS | -- | no (as for NIRCam) |
+| FGS | -- | -- | no (not a download instrument) |
 
 ## Citing
 
