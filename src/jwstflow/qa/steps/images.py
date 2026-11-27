@@ -132,7 +132,8 @@ class QaImageSummary(Step):
     One figure per ``*_i2d.fits`` (any image with SCI and, ideally, ERR and CON): three frames on the
     image's own pixel grid, each with pixel and sky offsets from the target position --
 
-    * the image (``stretch``, default asinh: linear around the sky, logarithmic above it);
+    * the image less the sky level of the notes (``stretch``, default asinh: linear around the sky,
+      logarithmic above it);
     * the number of input exposures behind every pixel, counted from the context image (CON: one
       bit per exposure) -- dither gaps, the gaps between detectors and the edges of the mosaic show
       up here; where the product has no CON, its weight map (WHT) instead;
@@ -148,7 +149,7 @@ class QaImageSummary(Step):
     name = "qa_image_summary"
     level = "qa"
     inputs = ("*_i2d.fits",)
-    version = "3"   # 2 -> 3: zero at the workflow's target; 1 -> 2: S/N above the sky level
+    version = "4"   # 3 -> 4: the image less its sky; 2 -> 3: zero at the workflow's target; 1 -> 2: S/N above the sky
 
     def run(self, inputs: list[Path], ctx: RunContext, *, stretch: str = "asinh",
             percentiles: tuple[float, float] | list[float] = (1.0, 99.5), width: float = 13.0, dpi: int = 150,
@@ -165,7 +166,11 @@ class QaImageSummary(Step):
             fig = qa.figure(figsize=(width, map_height + 0.5))
             grid = fig.add_gridspec(1, 3)
             ax_img, ax_exp, ax_snr = (fig.add_subplot(grid[0, k]) for k in range(3))
-            qa.Frame(ax_img).image(data, unit=image.unit, sky=sky, stretch=stretch, percentiles=tuple(percentiles))
+            level, scatter, n_sky = sky_statistics(data)
+            # less the sky level of the notes: a background of ~6 MJy/sr (MIRI) under sources of a few
+            # hundredths would leave the colour bar two six-digit numbers apart
+            base = level if np.isfinite(level) else 0.0
+            qa.Frame(ax_img).image(data - base, unit=image.unit, sky=sky, stretch=stretch, percentiles=tuple(percentiles))
 
             n_exp = image.n_exposures
             if n_exp is not None:
@@ -180,7 +185,6 @@ class QaImageSummary(Step):
                 ax_exp.set_axis_off()
                 log.info("%s: neither CON nor WHT; no exposure map", path.name)
 
-            level, scatter, n_sky = sky_statistics(data)
             if image.error is not None:
                 # above the sky: an image that still carries its background (MIRI's thermal sky) is
                 # otherwise at high S/N everywhere and the sources do not show
@@ -202,7 +206,7 @@ class QaImageSummary(Step):
                         + (f", median {np.nanmedian(np.where(n_exp > 0, n_exp, np.nan)):.0f} exposures" if n_exp is not None
                            and (n_exp > 0).any() else "")
                         + f"; sky {level:.3g} {image.unit or ''}, scatter {scatter:.3g} ({n_sky} pixels after clipping)",
-                        sky.note() if sky is not None else "")
+                        "left: the image less the sky level", sky.note() if sky is not None else "")
             qa.figlegend(fig)
             out.append(qa.save(fig, ctx.output_dir / f"{path.stem}_summary.png", dpi=dpi))
         return out
