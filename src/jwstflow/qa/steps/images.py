@@ -277,7 +277,7 @@ class QaImageAstrometry(Step):
     name = "qa_image_astrometry"
     level = "qa"
     inputs = ("*_astrom.fits",)
-    version = "2"   # 1 -> 2: medians of fewer than 3 stars hollow; the observation where a band repeats
+    version = "3"   # 2 -> 3: those medians do not set the scale; 1 -> 2: medians of fewer than 3 stars hollow; the observation where a band repeats
 
     def run(self, inputs: list[Path], ctx: RunContext, *, ncols: int = 4, panel: float = 3.0, details: bool = False,
             dpi: int = 150, **_: Any) -> list[Path]:
@@ -357,7 +357,9 @@ class QaImageAstrometry(Step):
             used = np.asarray(m["used"], bool)
             if used.any():
                 extent += [float(np.max(np.abs(m["dra"][used]))), float(np.max(np.abs(m["ddec"][used])))]
-            if np.isfinite(row["dra"]) and np.isfinite(row["ddec"]):
+            # a median of one or two stars (a wrong match after a large first shift) does not set the scale:
+            # its value is in the panel's note
+            if np.isfinite(row["dra"]) and np.isfinite(row["ddec"]) and int(row["n_used"]) >= ASTROMETRY_MIN_STARS:
                 extent += [abs(float(row["dra"])) + _finite(row["dra_error"]), abs(float(row["ddec"])) + _finite(row["ddec_error"])]
         lim = 1.15 * max(extent)
         for m, row, color, symbol in drawn:
@@ -418,6 +420,16 @@ class QaImageAstrometry(Step):
                                     yerr=np.where(np.isfinite(err), err, 0.0)[sel], ls="none", marker=symbol, ms=6,
                                     mfc=face, mec=qa.MAIN_COLOR, mew=0.9, ecolor=qa.MAIN_COLOR,
                                     elinewidth=qa.LW["main"], capsize=2, zorder=4)
+        # the coordinate panels' range from the medians of 3 or more stars (others may fall outside: notes)
+        solid = summary[np.isfinite(summary["pivot"]) & np.isfinite(summary["dra"])
+                        & (np.asarray(summary["n_used"], int) >= ASTROMETRY_MIN_STARS)]
+        for ax, key in ((ax_ra, "dra"), (ax_dec, "ddec")):
+            if len(solid):
+                v = np.asarray(solid[key], float)
+                e = np.nan_to_num(np.asarray(solid[f"{key}_error"], float), nan=0.0)
+                lo, hi = min(float(np.min(v - e)), 0.0), max(float(np.max(v + e)), 0.0)
+                pad = 0.15 * max(hi - lo, 1.0)
+                ax.set_ylim(lo - pad, hi + pad)
         ref = images[np.asarray(images["reference"], bool)]
         pivots = np.asarray(images["pivot"], float)
         finite = np.isfinite(pivots)
