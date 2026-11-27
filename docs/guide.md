@@ -577,7 +577,9 @@ and the raw files are already on disk, the run continues with those.
 Positions are never read from ad-hoc files. `target:` is resolved by name
 (SIMBAD/Sesame, cached in `targets.json`) unless the workflow gives
 `target_coords: {ra, dec}`, and steps can also use the observation's own
-`TARG_RA/TARG_DEC`. Line and band lists ship as datasets in
+`TARG_RA/TARG_DEC` -- the pointing, which can lie far from the source (HH 30's
+NIRCam mosaics are pointed 51 arcsec from it): figures and analysis steps take
+`target_coords` first. Line and band lists ship as datasets in
 `jwstflow/refdata/spectral_features/` (`gas_lines`, `pah_bands`, `ice_bands`;
 ECSV with per-feature label, transition, source and notes, plus file-level
 references and version). Steps select them with a small grammar:
