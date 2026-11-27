@@ -277,7 +277,7 @@ class QaImageAstrometry(Step):
     name = "qa_image_astrometry"
     level = "qa"
     inputs = ("*_astrom.fits",)
-    version = "3"   # 2 -> 3: those medians do not set the scale; 1 -> 2: medians of fewer than 3 stars hollow; the observation where a band repeats
+    version = "4"   # 3 -> 4: nor do their matches; 2 -> 3: those medians do not set the scale; 1 -> 2: medians of fewer than 3 stars hollow; the observation where a band repeats
 
     def run(self, inputs: list[Path], ctx: RunContext, *, ncols: int = 4, panel: float = 3.0, details: bool = False,
             dpi: int = 150, **_: Any) -> list[Path]:
@@ -355,7 +355,7 @@ class QaImageAstrometry(Step):
             row = s[0]
             drawn.append((m, row, color, symbol))
             used = np.asarray(m["used"], bool)
-            if used.any():
+            if used.any() and int(row["n_used"]) >= ASTROMETRY_MIN_STARS:    # one or two stars: not the scale
                 extent += [float(np.max(np.abs(m["dra"][used]))), float(np.max(np.abs(m["ddec"][used])))]
             # a median of one or two stars (a wrong match after a large first shift) does not set the scale:
             # its value is in the panel's note
