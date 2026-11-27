@@ -21,7 +21,10 @@ stages:
     parameters:
       steps:
         jump: {expand_large_events: true}        # snowball flagging
-        clean_flicker_noise: {skip: true}         # set false for 1/f cleaning (masks the sources itself)
+        clean_flicker_noise: {skip: true}         # set false for 1/f cleaning (masks the sources itself): it lowers
+                                                  # the noise of full-frame mosaics 2-3x at the same flux, but in a
+                                                  # subarray filled by a bright star's PSF it takes 1-5 % of the light
+                                                  # (filter SUBARRAY: FULL and run subarrays in a variant without it)
 
   - step: image2
     inputs:
