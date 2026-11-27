@@ -116,6 +116,37 @@ def throughput(band: Band) -> tuple[Any, Any]:
     return _curves(str(data_dir()))[(band.instrument, band.name)]
 
 
+def _band_samples(wavelength_um: Any, flux_nu: Any, band: Band) -> tuple[Any, Any, Any, Any, Any] | None:
+    """(curve wavelengths, weights, the samples the spectrum covers, its wavelengths, its fluxes)."""
+    import numpy as np
+
+    w, t = throughput(band)
+    wave = np.asarray(wavelength_um, float)
+    flux = np.asarray(flux_nu, float)
+    ok = np.isfinite(wave) & np.isfinite(flux)
+    if ok.sum() < 2:
+        return None
+    order = np.argsort(wave[ok])
+    ws, fs = wave[ok][order], flux[ok][order]
+    weight = t / w * np.gradient(w)          # per sample: a sum over samples, never across a gap
+    inside = (w >= ws[0]) & (w <= ws[-1])
+    # a gap in the spectrum larger than the curve's sampling is not bridged
+    step = np.median(np.diff(ws)) if ws.size > 2 else np.inf
+    idx = np.clip(np.searchsorted(ws, w), 1, ws.size - 1)
+    gap = (ws[idx] - ws[idx - 1]) > max(10 * step, np.median(np.diff(w)))
+    return w, weight, inside & ~gap, ws, fs
+
+
+def band_coverage(wavelength_um: Any, flux_nu: Any, band: Band) -> float:
+    """The share (0-1) of ``band``'s weight (T(lambda) / lambda) that the spectrum covers: what
+    :func:`band_average` compares with its ``min_coverage``."""
+    samples = _band_samples(wavelength_um, flux_nu, band)
+    if samples is None:
+        return 0.0
+    _, weight, use, _, _ = samples
+    return float(weight[use].sum() / weight.sum())
+
+
 def band_average(wavelength_um: Any, flux_nu: Any, band: Band, *, min_coverage: float = 0.95) -> float:
     """The flux density a photon-counting detector behind ``band`` measures of a spectrum: the
     average of F_nu weighted by T(lambda) / lambda (the pivot-wavelength convention of the JWST
@@ -126,21 +157,10 @@ def band_average(wavelength_um: Any, flux_nu: Any, band: Band, *, min_coverage: 
     """
     import numpy as np
 
-    w, t = throughput(band)
-    wave = np.asarray(wavelength_um, float)
-    flux = np.asarray(flux_nu, float)
-    ok = np.isfinite(wave) & np.isfinite(flux)
-    if ok.sum() < 2:
+    samples = _band_samples(wavelength_um, flux_nu, band)
+    if samples is None:
         return float("nan")
-    order = np.argsort(wave[ok])
-    ws, fs = wave[ok][order], flux[ok][order]
-    weight = t / w * np.gradient(w)          # per sample: a sum over samples, never across a gap
-    inside = (w >= ws[0]) & (w <= ws[-1])
-    # a gap in the spectrum larger than the curve's sampling is not bridged
-    step = np.median(np.diff(ws)) if ws.size > 2 else np.inf
-    idx = np.clip(np.searchsorted(ws, w), 1, ws.size - 1)
-    gap = (ws[idx] - ws[idx - 1]) > max(10 * step, np.median(np.diff(w)))
-    use = inside & ~gap
+    w, weight, use, ws, fs = samples
     if weight[use].sum() < min_coverage * weight.sum():
         return float("nan")
     f = np.interp(w[use], ws, fs)

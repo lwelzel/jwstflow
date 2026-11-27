@@ -57,7 +57,7 @@ def test_read_image_and_a_cutout_keep_the_sky_where_it_is(tmp_path: Path):
 
 
 def test_band_average_is_the_photon_weighted_mean_of_f_nu():
-    from jwstflow.images import band_average, throughput
+    from jwstflow.images import band_average, band_coverage, throughput
 
     band = band_of("NIRCAM", "F444W", "CLEAR")
     w, t = throughput(band)
@@ -68,6 +68,8 @@ def test_band_average_is_the_photon_weighted_mean_of_f_nu():
     direct = np.trapezoid(np.interp(w, wave, power) * t / w, w) / np.trapezoid(t / w, w)
     assert band_average(wave, power, band) == pytest.approx(direct, rel=1e-4)      # sums over 200 samples
     assert np.isnan(band_average(wave[wave < 4.4], power[wave < 4.4], band))         # half the band missing
+    assert band_coverage(wave, power, band) == pytest.approx(1.0)
+    assert 0.2 < band_coverage(wave[wave < 4.4], power[wave < 4.4], band) < 0.8
     holed = np.where((wave > 4.2) & (wave < 4.6), np.nan, power)
     assert np.isnan(band_average(wave, holed, band))                                 # a gap inside the band
     assert np.isfinite(band_average(np.linspace(5, 30, 5000), np.ones(5000), band_of("MIRI", "F2100W")))

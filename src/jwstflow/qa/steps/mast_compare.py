@@ -66,7 +66,7 @@ class MastCompare(Step):
     """
 
     level = "qa"
-    version = "5"   # 4 -> 5: mosaics drawn less their sky; 3 -> 4: resampled images (_i2d); 2 -> 3: logarithmic wavelength axis on the spectrum figure
+    version = "6"   # 5 -> 6: difference less the sky difference, identical said, zero at the target; 4 -> 5: mosaics drawn less their sky; 3 -> 4: resampled images (_i2d); 2 -> 3: logarithmic wavelength axis on the spectrum figure
     needs_reference_products = True   # the run waits for the background download of the MAST products
 
     def run(self, inputs: list[Path], ctx: RunContext, *, reference_dir: str | None = None,
@@ -253,7 +253,7 @@ def compare_images(ours: Path, theirs: Path, out_dir: Path, *, size: float = 12.
     if plot:
         outputs.append(_plot_images(out.with_suffix(".png"), cut, mast, diff, ours.name, theirs.name, prov,
                                     ratio=ratio, sum_ratio=sum_ratio, sky=sky, shift=(dx, dy), scale=scale,
-                                    skies=(sky_a, sky_b)))
+                                    skies=(sky_a, sky_b), target=(float(ra), float(dec))))
     return outputs
 
 
@@ -280,12 +280,20 @@ def _shift(a: np.ndarray, b: np.ndarray, both: np.ndarray) -> tuple[float, float
     return float(py - ny // 2 + sub_y), float(px - nx // 2 + sub_x)
 
 
+#: A difference no larger than this fraction of the image (its 99th percentile) is round-off: the two
+#: images are the same (the same pipeline, version and reference files).
+IDENTICAL = 1e-6
+
 def _plot_images(path: Path, cut: Any, mast: np.ndarray, diff: np.ndarray, name: str, theirs: str,
                  prov: dict[str, Any], *, ratio: float, sum_ratio: float, sky: float, shift: tuple[float, float],
-                 scale: float, skies: tuple[float, float] = (0.0, 0.0)) -> Path:
+                 scale: float, skies: tuple[float, float] = (0.0, 0.0),
+                 target: tuple[float, float] | None = None) -> Path:
+    from matplotlib.colors import Normalize
+
     from ... import qa
 
-    sky_frame = qa.SkyFrame.from_header(cut.header, cut.shape, primary=cut.primary)
+    sky_frame = qa.SkyFrame.from_header(cut.header, cut.shape, primary=cut.primary,
+                                        **({"ref_world": target, "reference": "target"} if target else {}))
     fig, axes = qa.subplots(1, 3, figsize=(15.0, 4.6))
     # both images less their own sky (an image can carry a sky far above its sources), on one stretch
     above = (cut.data - skies[0], mast - skies[1])
@@ -295,15 +303,27 @@ def _plot_images(path: Path, cut: Any, mast: np.ndarray, diff: np.ndarray, name:
     qa.tag(axes[0], "jwstflow $-$ its sky")
     qa.Frame(axes[1]).image(above[1], unit=cut.unit, sky=sky_frame, norm=norm, sides="bt")
     qa.tag(axes[1], "MAST, on jwstflow's grid, $-$ its sky")
-    qa.Frame(axes[2]).image(diff, unit=cut.unit, sky=sky_frame, center=0.0, sides="btr")
-    qa.tag(axes[2], "jwstflow $-$ MAST")
+    # the difference less the difference of the skies (that is in the notes): what the sources differ by
+    rest = diff - (skies[0] - skies[1])
+    level = float(np.nanpercentile(np.abs(shown[0]), 99.0)) if np.isfinite(shown[0]).any() else 0.0
+    largest = float(np.nanmax(np.abs(qa.to_mjy(rest, cut.unit)[0]))) if np.isfinite(rest).any() else 0.0
+    identical = level > 0 and largest <= IDENTICAL * level
+    if identical:   # round-off only: a scale of a thousandth of the image's, so that it shows as nothing
+        qa.Frame(axes[2]).image(rest, unit=cut.unit, sky=sky_frame, norm=Normalize(-1e-3 * level, 1e-3 * level),
+                                sides="btr")
+    else:
+        qa.Frame(axes[2]).image(rest, unit=cut.unit, sky=sky_frame, center=0.0, sides="btr")
+    qa.tag(axes[2], "jwstflow $-$ MAST, less the sky difference")
     qa.annotate(axes[0], name, f"MAST: {theirs} ({prov['MASTCAL'][0]}, {prov['MASTCTX'][0]}); jwstflow: "
                 f"{prov['JWFCAL'][0]}, {prov['JWFCTX'][0]}",
                 f"jwstflow / MAST above each sky: median {ratio:.4f} over S/N > 10, {sum_ratio:.4f} summed over "
                 f"S/N > 3; sky difference {sky:.3g} {cut.unit or ''}",
                 f"shift of jwstflow against MAST ({shift[1]:+.2f}, {shift[0]:+.2f}) pix = "
                 f"({shift[1] * scale * 1e3:+.0f}, {shift[0] * scale * 1e3:+.0f}) mas in x, y; MAST interpolated "
-                "(bilinear) onto jwstflow's grid", sky_frame.note() if sky_frame is not None else "")
+                "(bilinear) onto jwstflow's grid",
+                *([f"identical to MAST's: the largest difference is {largest / level:.1g} of the image's 99th "
+                   "percentile (round-off)"] if identical else []),
+                sky_frame.note() if sky_frame is not None else "")
     qa.figlegend(fig)
     return qa.save(fig, path)
 

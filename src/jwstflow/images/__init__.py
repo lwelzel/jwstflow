@@ -15,8 +15,8 @@ steps (``jwstflow.qa.steps.images``), the science of particular sources lives in
 packages.
 """
 
-from .filters import Band, all_bands, band_average, band_of, diffraction_fwhm_arcsec, throughput
+from .filters import Band, all_bands, band_average, band_coverage, band_of, diffraction_fwhm_arcsec, throughput
 from .io import Image, read_image
 
-__all__ = ["Band", "Image", "all_bands", "band_average", "band_of", "diffraction_fwhm_arcsec", "read_image",
+__all__ = ["Band", "Image", "all_bands", "band_average", "band_coverage", "band_of", "diffraction_fwhm_arcsec", "read_image",
            "throughput"]

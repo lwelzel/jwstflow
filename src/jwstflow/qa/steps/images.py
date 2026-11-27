@@ -15,6 +15,7 @@ All read only the product; every map is a :class:`jwstflow.qa.Frame`.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,19 @@ from ...images import read_image
 from ...steps import RunContext, Step
 
 log = logging.getLogger(__name__)
+
+
+def target_reference(ctx: RunContext) -> dict[str, Any]:
+    """The zero of a figure's axes: the workflow's ``target_coords`` when given (the position every
+    analysis step uses), as keywords of :meth:`qa.SkyFrame.from_header`; else nothing, and the frame
+    takes the header's TARG_RA / TARG_DEC (the pointing, which can lie far from the source: HH 30's
+    NIRCam mosaics are pointed 51 arcsec from it)."""
+    from ...data.targets import parse_coords
+
+    coords = getattr(ctx, "target_coords", None) or {}
+    if coords.get("ra") is None or coords.get("dec") is None:
+        return {}
+    return {"ref_world": parse_coords(coords["ra"], coords["dec"]), "reference": "target"}
 
 
 class QuicklookImage(Step):
@@ -51,7 +65,7 @@ class QuicklookImage(Step):
     """
 
     level = "qa"
-    version = "5"   # 4 -> 5: pixel and sky offsets from one zero
+    version = "6"   # 5 -> 6: zero at the workflow's target; 4 -> 5: pixel and sky offsets from one zero
 
     def run(
         self,
@@ -76,7 +90,8 @@ class QuicklookImage(Step):
                     continue
                 data = np.asarray(hdul["SCI"].data, dtype=float)
                 unit = hdul["SCI"].header.get("BUNIT")
-                sky = qa.SkyFrame.from_header(hdul["SCI"].header, data.shape, primary=hdul[0].header)
+                sky = qa.SkyFrame.from_header(hdul["SCI"].header, data.shape, primary=hdul[0].header,
+                                              **target_reference(ctx))
             frame = qa.Frame()
             frame.image(qa.collapse(data, collapse, min_coverage=min_coverage), unit=unit, sky=sky, stretch=stretch,
                         percentiles=tuple(percentiles), cmap=cmap)
@@ -133,7 +148,7 @@ class QaImageSummary(Step):
     name = "qa_image_summary"
     level = "qa"
     inputs = ("*_i2d.fits",)
-    version = "2"   # 1 -> 2: S/N above the sky level
+    version = "3"   # 2 -> 3: zero at the workflow's target; 1 -> 2: S/N above the sky level
 
     def run(self, inputs: list[Path], ctx: RunContext, *, stretch: str = "asinh",
             percentiles: tuple[float, float] | list[float] = (1.0, 99.5), width: float = 13.0, dpi: int = 150,
@@ -144,7 +159,7 @@ class QaImageSummary(Step):
             if image is None:
                 continue
             data = image.data
-            sky = qa.SkyFrame.from_header(image.header, data.shape, primary=image.primary)
+            sky = qa.SkyFrame.from_header(image.header, data.shape, primary=image.primary, **target_reference(ctx))
             finite = np.isfinite(data)
             map_height = (width / 3.0 - MAP_MARGIN[0]) * data.shape[0] / data.shape[1] + MAP_MARGIN[1]
             fig = qa.figure(figsize=(width, map_height + 0.5))
@@ -207,6 +222,8 @@ ASTROMETRY_WAVE_PANEL = 1.7
 #: Factor between the wavelengths at which the two comparisons of one image are drawn, so that
 #: their error bars stand side by side.
 ASTROMETRY_DODGE = 1.012
+#: A median of fewer stars than this is drawn hollow: one or two stars are no measure of an offset.
+ASTROMETRY_MIN_STARS = 3
 
 
 def _astrometry_tables(path: Path) -> dict[str, Any] | None:
@@ -256,7 +273,7 @@ class QaImageAstrometry(Step):
     name = "qa_image_astrometry"
     level = "qa"
     inputs = ("*_astrom.fits",)
-    version = "1"
+    version = "2"   # 1 -> 2: medians of fewer than 3 stars hollow; the observation where a band repeats
 
     def run(self, inputs: list[Path], ctx: RunContext, *, ncols: int = 4, panel: float = 3.0, details: bool = False,
             dpi: int = 150, **_: Any) -> list[Path]:
@@ -287,10 +304,12 @@ class QaImageAstrometry(Step):
         grid = fig.add_gridspec(rows + 2, cols, height_ratios=[row] * rows + [ASTROMETRY_WAVE_PANEL] * 2)
         ref_band = str(hdr.get("JWFASRBD", "")).strip()
         names = {"reference": ref_band, "gaia": "Gaia DR3"}
+        bands = [str(b) for b in images["band"]]
         for k, image in enumerate(images):
             ax = fig.add_subplot(grid[k // cols, k % cols])
             self._offsets_panel(ax, image, summary, matches, names, strip / box, first_column=k % cols == 0,
-                                last_row=k // cols == rows - 1 or k + cols >= n)
+                                last_row=k // cols == rows - 1 or k + cols >= n,
+                                epoch=bands.count(str(image["band"])) > 1)
         ax_ra = fig.add_subplot(grid[rows, :])
         ax_dec = fig.add_subplot(grid[rows + 1, :], sharex=ax_ra)
         self._wave_panels(ax_ra, ax_dec, images, summary)
@@ -299,13 +318,16 @@ class QaImageAstrometry(Step):
                    label="matched, not in the median")
         ax_ra.errorbar([], [], xerr=[], yerr=[], ls="none", marker="o", ms=7, mfc=qa.CONTEXT_COLOR, mec=qa.MAIN_COLOR,
                        mew=0.9, ecolor=qa.MAIN_COLOR, elinewidth=qa.LW["main"], capsize=2, label=r"median $\pm$ its error")
+        ax_ra.errorbar([], [], xerr=[], yerr=[], ls="none", marker="o", ms=7, mfc="white", mec=qa.MAIN_COLOR,
+                       mew=0.9, ecolor=qa.MAIN_COLOR, elinewidth=qa.LW["main"], capsize=2,
+                       label=f"median of fewer than {ASTROMETRY_MIN_STARS} stars")
         qa.annotate(ax_ra, *self._notes(path, hdr, images, details))
         qa.figlegend(fig)
         return qa.save(fig, ctx.output_dir / f"{path.stem}.png", dpi=dpi)
 
     @staticmethod
     def _offsets_panel(ax: Any, image: Any, summary: Any, matches: Any, names: dict[str, str], strip: float, *,
-                       first_column: bool, last_row: bool) -> None:
+                       first_column: bool, last_row: bool, epoch: bool = False) -> None:
         """The offsets of one image on equal axes within +-lim, and above them a strip (``strip`` of the
         data height) that holds the panel's note and no data."""
         from matplotlib.patches import Circle
@@ -315,6 +337,9 @@ class QaImageAstrometry(Step):
         scale = float(image["pixscale"]) * 1e3 if np.isfinite(image["pixscale"]) else np.nan
         extent = [0.15 * scale] if np.isfinite(scale) else [1.0]
         note = [f"{image['band']}  {qa.um(float(image['pivot']))}" if np.isfinite(image["pivot"]) else str(image["band"])]
+        obs = re.search(r"-(o\d{3})_", file)
+        if epoch and obs:                       # the band more than once: which observation this is
+            note[0] += f", {obs.group(1)}"
         if bool(image["reference"]):
             note.append("reference image")
         drawn: list[tuple[Any, Any, str, str]] = []
@@ -343,8 +368,10 @@ class QaImageAstrometry(Step):
             n_used, n_matched = int(row["n_used"]), int(row["n_matched"])
             count = f"N = {n_used}" + (f"/{n_matched}" if n_matched > n_used else "")
             if np.isfinite(row["dra"]) and np.isfinite(row["ddec"]):
+                few = n_used < ASTROMETRY_MIN_STARS
                 ax.errorbar([row["dra"]], [row["ddec"]], xerr=[_finite(row["dra_error"])], yerr=[_finite(row["ddec_error"])],
-                            ls="none", marker=symbol, ms=7, mfc=color, mec=qa.MAIN_COLOR, mew=0.9, ecolor=qa.MAIN_COLOR,
+                            ls="none", marker=symbol, ms=7, mfc="white" if few else color, mec=qa.MAIN_COLOR, mew=0.9,
+                            ecolor=qa.MAIN_COLOR,
                             elinewidth=qa.LW["main"], capsize=2, zorder=5)
                 note.append(f"{names[against]}: {_offset_text(row)}; {count}")
             else:
@@ -378,11 +405,15 @@ class QaImageAstrometry(Step):
                 continue
             dodge = ASTROMETRY_DODGE ** (k - 0.5 * (len(present) - 1))
             wave = np.asarray(rows["pivot"], float) * dodge
+            few = np.asarray(rows["n_used"], int) < ASTROMETRY_MIN_STARS
             for ax, key in ((ax_ra, "dra"), (ax_dec, "ddec")):
                 err = np.asarray(rows[f"{key}_error"], float)
-                ax.errorbar(wave, rows[key], yerr=np.where(np.isfinite(err), err, 0.0), ls="none", marker=symbol, ms=6,
-                            mfc=color, mec=qa.MAIN_COLOR, mew=0.9, ecolor=qa.MAIN_COLOR, elinewidth=qa.LW["main"],
-                            capsize=2, zorder=4)
+                for sel, face in ((~few, color), (few, "white")):     # hollow: a median of one or two stars
+                    if sel.any():
+                        ax.errorbar(wave[sel], np.asarray(rows[key], float)[sel],
+                                    yerr=np.where(np.isfinite(err), err, 0.0)[sel], ls="none", marker=symbol, ms=6,
+                                    mfc=face, mec=qa.MAIN_COLOR, mew=0.9, ecolor=qa.MAIN_COLOR,
+                                    elinewidth=qa.LW["main"], capsize=2, zorder=4)
         ref = images[np.asarray(images["reference"], bool)]
         pivots = np.asarray(images["pivot"], float)
         finite = np.isfinite(pivots)
