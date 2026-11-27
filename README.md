@@ -147,10 +147,10 @@ observations.
 
 ## Coverage
 
-jwstflow calibrates nothing itself: every calibration step is the `jwst` pipeline's, so in
-principle it reaches what `jwst` reaches. What it adds around the steps -- finding and
-downloading the exposures, building the associations, naming the products, the QA -- is where
-a mode is either supported by construction or has actually been run. The table keeps the two
+By default, jwstflow calibrates nothing itself: every calibration step is the `jwst` pipeline's, so in
+principle it can do anything that `jwst` contains. What it adds around the steps (finding and
+downloading the exposures, building the associations, naming the products, the QA) is where
+a mode is either supported by construction or has been tested by the developers. The table keeps the two
 apart:
 
 - **technical**: what the orchestration supports by construction. Pipelines have aliases
@@ -164,15 +164,15 @@ apart:
 
 | Instrument | Mode | Verified | Technical |
 |---|---|---|---|
-| NIRSpec | IFU | yes: 6 targets (programs 1309, 1621, 1751, 5299, 5857) | preset `nirspec_ifu` |
+| NIRSpec | IFU | yes | preset `nirspec_ifu` |
 | NIRSpec | fixed slit | -- | preset `nirspec_fs` |
 | NIRSpec | MOS | -- | preset `nirspec_mos` (with the MSA metadata) |
 | NIRSpec | BOTS (time series) | -- | `detector1` -> `spec2` -> `tso3`; no preset |
-| MIRI | MRS | yes: 5 targets (programs 1282, 1309, 1751) | preset `miri_mrs` |
-| MIRI | imaging | yes: 9 targets (programs 2562, 4290); every mosaic identical to MAST's or within 1 % | preset `miri_imaging` |
+| MIRI | MRS | yes | preset `miri_mrs` |
+| MIRI | imaging | yes | preset `miri_imaging` |
 | MIRI | LRS | -- | preset `miri_lrs` (slit); slitless time series via `tso3` |
 | MIRI | coronagraphy | -- | `coron3` with `psf` members |
-| NIRCam | imaging | yes: 9 targets (programs 2562, 4290), full frame and subarrays | preset `nircam_imaging` |
+| NIRCam | imaging | yes (full frame and subarrays) | preset `nircam_imaging` |
 | NIRCam | coronagraphy | -- | `coron3` with `psf` members |
 | NIRCam | grism and imaging time series | -- | `tso3` |
 | NIRCam | WFSS | -- | no: `spec2` needs direct-image and segmentation-map members that the associations do not build |
